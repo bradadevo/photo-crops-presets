@@ -95,7 +95,7 @@ uv run photo-presets-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/P
 |---|---|
 | Grit & Glory | High-contrast B&W channel mix, high-pass detail, smoke at the player's feet, generated grit, distressed edges, vignette |
 | Friday Night Lights | Your Friday Night Lights LUT, spotlight on the player, glow, grain, vignette |
-| Neon Rush | Neon split-tone, high-pass detail, electricity around the ball, glow |
+| Neon Rush | Neon split-tone, high-pass detail, specular bloom, glow |
 | Hall of Famer | Your Hall of Famer LUT, paper texture, grain, vignette |
 | Stadium Night | Cool shadows and warm highlights, darker blurred background with haze behind the player, the player brighter and crisper, specular bloom |
 | Rain Game | Cool split toning, a muted darker background with rain falling behind the player, a crisper player |
@@ -112,7 +112,7 @@ Found automatically (change them on the Assets tab):
 |---|---|
 | LUTs (`.cube`) | Final Cut's Custom LUTs folder, and `~/Movies/Ultimate+Sports+Editing+Bundle.zip` |
 | Textures | `~/Movies/Textures.zip` (marker and paper), plus generated grit, grain, scratches, smoke, paper and dust |
-| Overlays | `~/Movies/Sports_Impact_Essentials.zip` (smoke, dust, debris, sparks, fire, lightning, electricity, glitch, confetti, fireworks, water, cartoon) |
+| Overlays | `~/Movies/Sports_Impact_Essentials.zip` (smoke, dust, debris, sparks, fire, lightning, glitch, fireworks, water, cartoon; confetti and electricity are left out) |
 
 Zip packs are never unpacked whole: only the files a look uses are taken out
 and cached in `~/.cache/photo-crops-presets/assets`. Overlay packs made of

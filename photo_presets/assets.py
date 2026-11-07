@@ -67,6 +67,10 @@ class Source:
     member: str = ""  # the file inside the zip
 
 
+# Overlays left out of the library (and so of random looks and the form)
+SKIPPED_OVERLAYS = {"Confetti", "Electricity"}
+
+
 def _paths(items: list[str]) -> list[Path]:
     return [Path(p).expanduser() for p in items]
 
@@ -105,7 +109,7 @@ class Library:
         for folder in _paths(s.overlay_folders):
             if folder.is_dir():
                 for p in sorted(folder.rglob("*.png")):
-                    if _usable(str(p)):
+                    if _usable(str(p)) and p.stem not in SKIPPED_OVERLAYS:
                         self.overlays.setdefault(p.stem, Source(str(p)))
         clips: dict[str, list[tuple[int, Source]]] = {}
         for z, member in self._zip_members(s.overlay_zips):
@@ -115,6 +119,8 @@ class Library:
                 rank = next(i for i, key in enumerate(OVERLAY_PREFERENCE) if key in stem)
                 clips.setdefault(parent, []).append((rank, Source(str(z), member)))
         for name, options in sorted(clips.items()):
+            if name in SKIPPED_OVERLAYS:
+                continue
             self.overlays.setdefault(name, min(options, key=lambda t: t[0])[1])
 
     @staticmethod

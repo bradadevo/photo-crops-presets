@@ -28,8 +28,7 @@ STARTERS: dict[str, dict] = {
     "Neon Rush": {"protect_faces": True, "steps": [
         {"op": "neon", "shadows": "#5b1aff", "highlights": "#00f0ff", "amount": 0.7},
         {"op": "high_pass", "radius": 0.005, "amount": 0.5},
-        {"op": "overlay", "asset": "overlay:Electricity", "place": "ball", "blend": "linear_dodge", "opacity": 1.0, "size": 0.9,
-         "layer": "background"},
+        {"op": "specular_bloom", "amount": 0.5, "threshold": 0.8},
         {"op": "glow", "amount": 0.4, "threshold": 0.65},
         {"op": "vignette", "amount": 0.3},
     ]},

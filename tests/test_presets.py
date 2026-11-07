@@ -117,6 +117,15 @@ def test_overlay_lands_on_the_ball(tmp_path):
     assert a[50, 150, 0] == 255 and a[50, 40, 0] == 0
 
 
+def test_confetti_and_electricity_overlays_are_left_out(tmp_path):
+    folder = tmp_path / "overlays"
+    folder.mkdir()
+    for name in ("Confetti", "Electricity", "Smoke"):
+        Image.new("RGBA", (10, 10), (255, 255, 255, 255)).save(folder / f"{name}.png")
+    lib = Library(Sources([], [], [], [], [str(folder)], []))
+    assert lib.ids()["overlay"] == ["overlay:Smoke"]
+
+
 def test_random_looks_repeat_with_the_same_seed_and_differ_between_seeds(empty_library):
     assert explore.recipe(7, empty_library) == explore.recipe(7, empty_library)
     looks = {json.dumps(explore.recipe(s, empty_library)["steps"]) for s in range(12)}
