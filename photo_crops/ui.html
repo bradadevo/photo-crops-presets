@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photo Crops</title>
+<style>
+  :root {
+    --bg: #f5f5f2; --card: #ffffff; --ink: #1b1d22; --muted: #646a73; --line: #dfe1e4;
+    --accent: #1f2a44; --accent-ink: #ffffff; --soft: #eef0f4; --good: #1d7a46; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15171b; --card: #1e2127; --ink: #eceef1; --muted: #9aa1ab; --line: #2f333b;
+            --accent: #8fa8ff; --accent-ink: #10131a; --soft: #262a32; --good: #5fd08f; --bad: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 28px 16px 120px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  label.q { display: block; font-weight: 600; margin: 14px 0 6px; }
+  label.q:first-of-type { margin-top: 0; }
+  .hint { color: var(--muted); font-size: 13px; font-weight: 400; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text] { flex: 1; min-width: 220px; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line);
+                     background: var(--soft); color: var(--ink); font: inherit; }
+  input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--soft); }
+  button { font: inherit; border-radius: 9px; border: 1px solid var(--line); background: var(--soft); color: var(--ink);
+           padding: 8px 14px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .choices { display: grid; gap: 6px; }
+  .choices label { display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px; border-radius: 9px; border: 1px solid transparent; cursor: pointer; }
+  .choices label:hover { background: var(--soft); }
+  .choices input { margin-top: 3px; }
+  .colors { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .colors label { display: flex; gap: 10px; align-items: center; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); }
+  .bar .inner { max-width: 860px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .bar .msg { flex: 1; min-width: 200px; color: var(--muted); font-size: 13px; white-space: pre-line; }
+  pre { background: var(--soft); border-radius: 10px; padding: 12px; white-space: pre-wrap; font-size: 13px; margin: 0; max-height: 280px; overflow: auto; }
+  progress { width: 100%; height: 10px; accent-color: var(--accent); }
+  .problems { color: var(--bad); white-space: pre-line; }
+  .ok { color: var(--good); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Photo Crops</h1>
+  <p class="sub">Pro crops and face close-ups of every photo, with screenshots rebuilt from the original camera files. Your originals are never changed.</p>
+
+  <section>
+    <h2>Folders</h2>
+    <label class="q" for="folder">1. Which photos? <span class="hint">the folder with your camera photos and screenshots</span></label>
+    <div class="row"><input type="text" id="folder" placeholder="/Users/you/Movies/Game day"><button data-choose="folder" data-prompt="Choose the photo folder">Choose…</button></div>
+    <div class="chips" id="recent"></div>
+
+    <label class="q" for="sources">2. Where else can screenshot sources be? <span class="hint">optional, such as the camera's SD card; only photos from the same days are searched</span></label>
+    <div class="row"><input type="text" id="sources" placeholder="(none)"><button data-choose="sources" data-prompt="Choose where the original photos are">Choose…</button><button id="clearSources">Clear</button></div>
+    <div class="chips" id="cards"></div>
+
+    <label class="q" for="out_name">3. Name of the new folder <span class="hint">created inside the photo folder</span></label>
+    <div class="row"><input type="text" id="out_name"></div>
+  </section>
+
+  <section>
+    <h2>Who matters</h2>
+    <label class="q" for="team_name">4. Your team</label>
+    <div class="row"><input type="text" id="team_name"></div>
+    <label class="q">5. Jersey colors <span class="hint">used to tell your players, the goalie and opponents apart</span></label>
+    <div class="colors">
+      <label><input type="color" id="team_color"> Your team</label>
+      <label><input type="color" id="goalie_color"> Your goalie</label>
+      <label><input type="color" id="opponent_color"> Opponents</label>
+    </div>
+    <label class="q">6. Priority</label>
+    <div class="choices">
+      <label><input type="radio" name="priority" value="goalie"> <span>Goalie first, then your team's player, then whoever is in focus</span></label>
+      <label><input type="radio" name="priority" value="team"> <span>Your team's player first, then whoever is in focus</span></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>What to make</h2>
+    <label class="q">7. Versions of each photo <span class="hint">every photo is kept; nothing is ranked or dropped</span></label>
+    <div class="choices" id="versions"></div>
+    <label class="q">8. Crop shape</label>
+    <div class="choices" id="shape"></div>
+    <label class="q">9. Face close-ups</label>
+    <div class="choices" id="faces"></div>
+    <label class="q">10. Edit</label>
+    <div class="choices" id="edit"></div>
+  </section>
+
+  <section>
+    <h2>Screenshots</h2>
+    <label class="q">11. Screenshots in the folder</label>
+    <div class="choices" id="screenshots"></div>
+    <div id="noMatchBlock">
+      <label class="q">12. If a screenshot has no matching photo</label>
+      <div class="choices" id="no_match"></div>
+    </div>
+  </section>
+
+  <section id="resultCard" class="hidden">
+    <h2 id="resultTitle">Check</h2>
+    <div id="problems" class="problems"></div>
+    <pre id="summary" class="hidden"></pre>
+    <div id="runBox" class="hidden">
+      <progress id="prog" value="0" max="1"></progress>
+      <p id="progText" class="hint"></p>
+      <pre id="log"></pre>
+    </div>
+  </section>
+</main>
+
+<div class="bar"><div class="inner">
+  <span class="msg" id="msg">Answer the questions, then Check or Run.</span>
+  <button id="copy">Copy instructions for Claude</button>
+  <button id="check">Check</button>
+  <button id="stop" class="hidden">Stop</button>
+  <button id="openOut" class="hidden">Open folder</button>
+  <button id="run" class="primary">Run</button>
+</div></div>
+
+<script>
+const TOKEN = "__TOKEN__";
+const $ = id => document.getElementById(id);
+const api = (path, body) => fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-Token": TOKEN},
+                                         body: JSON.stringify(body || {})}).then(r => r.json());
+
+function choices(id, options, type, name) {
+  $(id).innerHTML = Object.entries(options).map(([value, text]) =>
+    `<label><input type="${type}" name="${name || id}" value="${value}"> <span>${text}</span></label>`).join("");
+}
+function setRadio(name, value) { document.querySelectorAll(`input[name="${name}"]`).forEach(i => i.checked = i.value === value); }
+function getRadio(name) { const i = document.querySelector(`input[name="${name}"]:checked`); return i ? i.value : ""; }
+
+const esc = s => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+function chips(id, paths, target) {
+  $(id).innerHTML = paths.map(p => `<button class="chip" data-path="${encodeURIComponent(p)}" data-target="${target}">${esc(p.split("/").pop() || p)}</button>`).join("");
+}
+
+function read() {
+  return {
+    folder: $("folder").value.trim(), sources: $("sources").value.trim(), out_name: $("out_name").value.trim(),
+    team_name: $("team_name").value.trim(), team_color: $("team_color").value, goalie_color: $("goalie_color").value,
+    opponent_color: $("opponent_color").value, goalie_first: getRadio("priority") !== "team",
+    versions: [...document.querySelectorAll('input[name="versions"]:checked')].map(i => i.value),
+    shape: getRadio("shape"), faces: getRadio("faces"), edit: getRadio("edit"),
+    screenshots: getRadio("screenshots"), no_match: getRadio("no_match"),
+  };
+}
+
+function fill(s) {
+  for (const k of ["folder", "sources", "out_name", "team_name", "team_color", "goalie_color", "opponent_color"]) $(k).value = s[k] || "";
+  setRadio("priority", s.goalie_first ? "goalie" : "team");
+  document.querySelectorAll('input[name="versions"]').forEach(i => i.checked = s.versions.includes(i.value));
+  for (const k of ["shape", "faces", "edit", "screenshots", "no_match"]) setRadio(k, s[k]);
+  toggleNoMatch();
+}
+function toggleNoMatch() { $("noMatchBlock").classList.toggle("hidden", getRadio("screenshots") !== "rebuild"); }
+
+async function setup() {
+  const d = await api("/api/setup");
+  choices("versions", d.options.versions, "checkbox");
+  for (const k of ["shape", "faces", "edit", "screenshots", "no_match"]) choices(k, d.options[k], "radio");
+  fill(d.settings);
+  chips("recent", d.recent, "folder");
+  chips("cards", d.cards, "sources");
+  document.querySelectorAll('input[name="screenshots"]').forEach(i => i.addEventListener("change", toggleNoMatch));
+  poll();
+}
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.choose) {
+    $("msg").textContent = "A folder window is open (it may be behind the browser)…";
+    const r = await api("/api/choose", {prompt: b.dataset.prompt, start: $(b.dataset.choose).value || $("folder").value});
+    if (r.path) $(b.dataset.choose).value = r.path;
+    $("msg").textContent = r.path ? "Folder chosen." : "No folder chosen.";
+  } else if (b.dataset.path) {
+    $(b.dataset.target).value = decodeURIComponent(b.dataset.path);
+  }
+});
+$("clearSources").onclick = () => { $("sources").value = ""; };
+
+async function check() {
+  const r = await api("/api/check", read());
+  $("resultCard").classList.remove("hidden");
+  $("resultTitle").textContent = "Check";
+  $("problems").textContent = r.problems.join("\n");
+  $("summary").classList.toggle("hidden", !r.summary);
+  $("summary").textContent = r.summary;
+  $("msg").textContent = r.problems.length ? "Fix the items in red first." : "Ready to run.";
+  return r;
+}
+$("check").onclick = check;
+
+$("copy").onclick = async () => {
+  const r = await api("/api/check", read());
+  try { await navigator.clipboard.writeText(r.instructions); $("msg").textContent = "Copied. Paste it to Claude."; }
+  catch { $("resultCard").classList.remove("hidden"); $("summary").classList.remove("hidden");
+          $("summary").textContent = r.instructions; $("msg").textContent = "Select and copy the text above."; }
+};
+
+$("run").onclick = async () => {
+  const c = await check();
+  if (c.problems.length) return;
+  const r = await api("/api/run", read());
+  if (r.error) { $("problems").textContent = r.error; return; }
+  poll();
+};
+$("stop").onclick = () => api("/api/stop");
+$("openOut").onclick = () => api("/api/open");
+
+let timer = null;
+async function poll() {
+  clearTimeout(timer);
+  const s = await (await fetch("/api/status")).json();
+  const running = s.state === "running";
+  if (s.state !== "idle") {
+    $("resultCard").classList.remove("hidden");
+    $("runBox").classList.remove("hidden");
+    $("resultTitle").textContent = {running: "Running", done: "Done", stopped: "Stopped", error: "Error"}[s.state];
+    $("prog").max = Math.max(1, s.total); $("prog").value = s.done;
+    $("progText").textContent = s.total ? `${s.done} of ${s.total}` : "Starting (the first run downloads the free models, about 250 MB)…";
+    $("log").textContent = s.log.join("\n");
+    $("log").scrollTop = $("log").scrollHeight;
+    $("msg").textContent = running ? "Working… you can leave this page open." : (s.state === "done" ? `Saved in ${s.out}` : s.log.slice(-1)[0] || "");
+  }
+  $("run").disabled = running; $("check").disabled = running;
+  $("stop").classList.toggle("hidden", !running);
+  $("openOut").classList.toggle("hidden", !(s.state === "done" || s.state === "stopped"));
+  if (running) timer = setTimeout(poll, 1000);
+}
+
+setup();
+</script>
+</body>
+</html>

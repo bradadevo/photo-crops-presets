@@ -1,0 +1,34 @@
+[project]
+name = "photo-crops-presets"
+version = "0.1.0"
+description = "photo-crops plus a creative looks engine: saved presets and random exploration with LUTs, textures, overlays and effects, in a Gradio app"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gradio>=6.31.0",
+    "numpy",
+    "opencv-python-headless",
+    "pillow",
+    "pillow-heif>=1.8.1",
+    "rawpy",
+    "ultralytics",
+]
+
+[project.scripts]
+photo-crops = "photo_crops.cli:main"
+photo-crops-ui = "photo_crops.ui:main"
+photo-presets = "photo_presets.app:main"
+photo-presets-batch = "photo_presets.cli:main"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["photo_crops", "photo_presets"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
