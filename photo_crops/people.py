@@ -10,7 +10,7 @@ import os
 
 os.environ.setdefault("YOLO_AUTOINSTALL", "false")  # never pip-install extras mid-run
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -56,6 +56,8 @@ class Person:
     sharp: float = 0.0  # fine detail in the upper body (higher = sharper)
     head: tuple[float, float, float] | None = None  # x, y, keypoint spread
     focus_hit: bool = False
+    # The person's outline at detection size (the long edge DETECT_EDGE), for cut-outs
+    mask: np.ndarray | None = field(default=None, repr=False)
 
     @property
     def height(self) -> int:
@@ -154,6 +156,7 @@ class Detector:
             upper = gray[int(y0):int(y0 + h / 2), int(x0):int(x1)]
             person.sharp = float(cv2.Laplacian(upper, cv2.CV_32F).var()) if upper.size else 0.0
             person.head = _head(box, pose_boxes, keypoints, s)
+            person.mask = mask
             people.append(person)
             person_masks.append(mask)
         if focus and people:

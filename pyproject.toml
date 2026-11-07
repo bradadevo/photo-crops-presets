@@ -11,6 +11,7 @@ dependencies = [
     "pillow",
     "pillow-heif>=1.8.1",
     "rawpy",
+    "rembg[cpu]>=2.0.87",
     "ultralytics",
 ]
 

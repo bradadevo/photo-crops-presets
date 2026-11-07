@@ -2,8 +2,9 @@
 
 Each random look is an ordinary recipe built from a seed: one color look
 (one of your LUTs, a neon split-tone, a B&W channel mix or a duotone), then
-a random mix of detail, textures with random blend modes, an impact overlay
-on the ball or the player's feet, lighting and edge effects. The recipe is
+a random mix of split toning, athletic clarity, player/background separation
+(darker or blurred background), fog or rain behind the player, textures with
+random blend modes, an impact overlay, lighting, bloom and edge effects. The recipe is
 shown with every result, so any look you like can be saved as a preset.
 """
 
@@ -16,6 +17,7 @@ NEON_PAIRS = [("#5b1aff", "#00f0ff"), ("#ff007a", "#00ffd5"), ("#1a2bff", "#ff8a
 DUOTONES = [("#0b1d3a", "#ffb347"), ("#1f0033", "#ff4fd8"), ("#0a2a1a", "#c8ff5a"), ("#1b1b1b", "#e8d5b0"),
             ("#00264d", "#7fdbff")]
 TEXTURE_BLENDS = ["overlay", "soft_light", "multiply", "screen", "hard_light"]
+SPLIT_PAIRS = [("#ffb347", "#1f4e79"), ("#ff8c5a", "#183a5a"), ("#ffd27f", "#2a2f6b"), ("#f4c27a", "#12404a")]
 LEAK_COLORS = ["#ff7a1a", "#ff2e63", "#ffd166", "#7b2ff7", "#00c2ff"]
 
 
@@ -42,8 +44,24 @@ def recipe(seed: int, library: Library) -> dict:
         d, l = DUOTONES[rng.integers(len(DUOTONES))]
         steps.append({"op": "duotone", "dark": d, "light": l, "amount": _r(rng, 0.6, 1.0)})
 
+    if rng.random() < 0.3:
+        warm, cool = SPLIT_PAIRS[rng.integers(len(SPLIT_PAIRS))]
+        steps.append({"op": "split_tone", "shadows": cool, "highlights": warm, "amount": _r(rng, 0.3, 0.7),
+                      "compress_blacks": _r(rng, 0.1, 0.5)})
     if rng.random() < 0.5:
         steps.append({"op": "contrast", "amount": _r(rng, 0.15, 0.45)})
+    if rng.random() < 0.3:
+        steps.append({"op": "athletic_clarity", "amount": _r(rng, 0.4, 0.9)})
+    if rng.random() < 0.35:  # player and background edited apart
+        steps.append({"op": "exposure", "stops": _r(rng, -1.0, -0.3), "layer": "background"})
+        if rng.random() < 0.5:
+            steps.append({"op": "lens_blur", "radius": _r(rng, 0.002, 0.008, 4), "layer": "background"})
+        if rng.random() < 0.5:
+            steps.append({"op": "athletic_clarity", "amount": _r(rng, 0.4, 0.8), "layer": "subject"})
+    if rng.random() < 0.15:
+        steps.append({"op": "fog", "density": _r(rng, 0.3, 0.6), "height": _r(rng, 0.4, 0.8), "layer": "background"})
+    elif rng.random() < 0.1:
+        steps.append({"op": "rain", "amount": _r(rng, 0.4, 0.8), "angle": _r(rng, -20, 20, 0), "layer": "background"})
     if rng.random() < 0.4:
         steps.append({"op": "high_pass", "radius": _r(rng, 0.003, 0.01, 4), "amount": _r(rng, 0.4, 0.9)})
     textures = ids["texture"]
@@ -54,13 +72,16 @@ def recipe(seed: int, library: Library) -> dict:
         steps.append({"op": "overlay", "asset": str(rng.choice(ids["overlay"])),
                       "place": str(rng.choice(["ball", "feet", "random"], p=[0.5, 0.35, 0.15])),
                       "blend": str(rng.choice(["normal", "linear_dodge", "screen"])),
-                      "opacity": _r(rng, 0.75, 1.0), "size": _r(rng, 0.7, 1.4)})
+                      "opacity": _r(rng, 0.75, 1.0), "size": _r(rng, 0.7, 1.4),
+                      "layer": str(rng.choice(["background", "all"], p=[0.7, 0.3]))})
     if rng.random() < 0.25:
         steps.append({"op": "light_leak", "color": str(rng.choice(LEAK_COLORS)),
                       "corner": str(rng.choice(["top_left", "top_right", "bottom_left", "bottom_right"])),
                       "amount": _r(rng, 0.3, 0.7)})
     if rng.random() < 0.3:
         steps.append({"op": "glow", "amount": _r(rng, 0.2, 0.5)})
+    elif rng.random() < 0.3:
+        steps.append({"op": "specular_bloom", "amount": _r(rng, 0.3, 0.7), "threshold": _r(rng, 0.72, 0.85)})
     if rng.random() < 0.3:
         steps.append({"op": "spotlight", "amount": _r(rng, 0.2, 0.45)})
     if rng.random() < 0.5:

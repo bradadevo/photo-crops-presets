@@ -12,6 +12,10 @@ with a Gradio app.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
   run photos straight through them.
 
+Premium tools: the player cut out from the background (each edited on its
+own), athletic clarity, specular bloom, skin-tone protection, split toning,
+and fog, rain and smoke layered behind the player for real depth.
+
 Faces are kept clean of textures and effects, originals are never changed,
 and everything runs free on your Mac: no AI service, no cost.
 
@@ -25,7 +29,10 @@ uv sync
 ```
 
 The first run downloads two free models (about 250 MB, once) to
-`~/.cache/photo-crops`. Video overlays need ffmpeg (`brew install ffmpeg`).
+`~/.cache/photo-crops`, and the player cut-out model BiRefNet (about 970 MB,
+once) to `~/.rembg` the first time a look separates player and background
+(already there if you use ai-versions). Video overlays need ffmpeg
+(`brew install ffmpeg`).
 
 ## Photo Presets app
 
@@ -54,12 +61,23 @@ Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
 
 **Preset manager**: load, edit, preview, save and delete presets. The form
-covers the color look (LUT and strength, neon colors, B&W channel mix,
-duotone), extra contrast, high-pass detail, two textures (each with its own
-blend mode and opacity), an impact overlay (what, where, blend, opacity,
-size), light leak, glow, spotlight, edge distressing, film grain, vignette,
-the clean pro edit, and keeping faces clean. The recipe underneath can be
-edited directly for anything the form does not show; it is what gets saved.
+has toggles and sliders for:
+
+- **Color**: LUT and strength, neon, B&W channel mix, duotone, the clean pro
+  edit, skin tone protection, and **split toning** (shadow and highlight
+  tones, amount, balance, compressed blacks), extra contrast
+- **Player and background**: edit them separately: player brightness and
+  clarity; background brightness, blur (depth of field) and color
+- **Athletic clarity and bloom**: micro-contrast amount and size, high-pass
+  detail, specular bloom amount, starting brightness and size
+- **Depth**: fog or stadium haze, rain, and an impact overlay, each behind the
+  player (or in front of everything)
+- **Textures**: two, each with its own blend mode and opacity
+- **Lighting and edges**: light leak, glow, spotlight, edge distressing, film
+  grain, vignette
+
+The recipe underneath can be edited directly for anything the form does not
+show; it is what gets saved.
 
 **Assets**: what was found, and where to look (folders and zip packs).
 
@@ -79,6 +97,8 @@ uv run photo-presets-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/P
 | Friday Night Lights | Your Friday Night Lights LUT, spotlight on the player, glow, grain, vignette |
 | Neon Rush | Neon split-tone, high-pass detail, electricity around the ball, glow |
 | Hall of Famer | Your Hall of Famer LUT, paper texture, grain, vignette |
+| Stadium Night | Cool shadows and warm highlights, darker blurred background with haze behind the player, the player brighter and crisper, specular bloom |
+| Rain Game | Cool split toning, a muted darker background with rain falling behind the player, a crisper player |
 | Clean Pro | photo-crops' light clean edit |
 
 Saving a preset with a starter's name replaces it for you; deleting yours
@@ -127,9 +147,53 @@ A look is a recipe: a list of steps, run in order.
 | `glow` | `amount`, `threshold` |
 | `spotlight`, `vignette`, `grain` | `amount` |
 | `edge_distress` | `amount`, `color` |
+| `athletic_clarity` | `amount`, `radius` (share of the long edge), `fine` (fine vs medium detail) |
+| `specular_bloom` | `amount`, `threshold`, `size` |
+| `split_tone` | `shadows`, `highlights` (colors), `amount`, `balance`, `compress_blacks` |
+| `exposure` | `stops` |
+| `lens_blur` | `radius` (background by default) |
+| `fog` | `color`, `density`, `height` (background by default) |
+| `rain` | `amount`, `angle` (background by default) |
+
+Any step can also take `"layer"`: `"all"` (the whole photo), `"subject"`
+(the players only) or `"background"` (everything behind them). Overlays, fog,
+rain and lens blur default to the background. A recipe can also set
+`"skin_protect"` (0-1, default 0.7).
 
 Blend modes: normal, multiply, screen, overlay, soft light, hard light, color
 dodge, color burn, linear dodge, difference, lighten, darken.
+
+**Player and background (subject isolation)**: the players in the play are
+cut out with BiRefNet, an open-source subject segmentation model, run on your
+Mac through rembg (it traces hair and limbs precisely). photo-crops' YOLO
+outlines decide which traced pieces are the players in the play, so
+background people, poles and signs stay in the background; the ball joins
+the players. Steps on the `subject` layer change only the players, steps on
+the `background` layer only what is behind them. The cut-out is made only
+when a look needs it.
+
+**Depth (Z-sandwiching)**: fog, stadium smoke, rain and impact overlays go on
+the background layer by default, so they sit behind the players but in front
+of the field: a 3D look in a 2D photo. The background blur leaves the
+players' own colors out, so bright kits do not smear into a halo.
+
+**Athletic clarity** is frequency separation on brightness: fine detail
+(jersey weave, sweat, turf) and medium detail are boosted, limited on strong
+edges so there are no halos, and weighted to the midtones so blacks and
+whites do not move.
+
+**Specular bloom** glows only small, near-white highlights (sun on skin,
+sweat, shiny kit) with a soft three-layer halo, added with screen and rolled
+off at the top so nothing blows out. Pale colored kits and big bright areas
+(a sunlit white-striped shirt) are left out, so the player gets no halo.
+
+**Skin tone protection**: skin is found by the human skin-tone vector (in
+YCrCb color space, covering all skin colors) inside people's outlines. Color
+looks (LUTs, neon, duotone, split toning) leave skin its own color while it
+still takes the look's brightness.
+
+**Split toning** pushes rich cool tones into slightly lifted, compressed blacks
+and warm tones into the highlights, in Lab color so brightness is kept.
 
 **Keeping faces clean**: heads are found with photo-crops' pose model;
 textures, overlays, high-pass, grain, glow, light leaks and edge wear fade away
@@ -140,9 +204,11 @@ models and subject rules (goalie first, then your team, then whoever is in
 focus), so smoke lands at the player's feet and sparks around the ball.
 
 **Random looks** come from a seed: one color look, then a random mix of
-contrast, high-pass, up to two textures with random blend modes, maybe an
-impact overlay, light leak, glow, spotlight, grain, distressed edges and a
-vignette.
+split toning, contrast, athletic clarity, player/background separation
+(darker or blurred background, crisper player), fog or rain behind the
+player, high-pass, up to two textures with random blend modes, maybe an
+impact overlay, light leak, glow or bloom, spotlight, grain, distressed edges
+and a vignette.
 
 ### Adding your own steps
 
@@ -189,7 +255,8 @@ photo_presets/
   luts.py             .cube LUTs (from match-cull)
   procedural.py       Generated textures
   assets.py           Finding, fetching and caching LUTs, textures and overlays
-  scene.py            Faces, ball and feet (photo-crops' models), crop first
+  scene.py            Faces, ball, feet, outlines and the player cut-out; crop first
+  presetform.py       The preset manager's form, to and from recipes
   explore.py          Random looks
   presets.py          Saved and starter presets
 tests/

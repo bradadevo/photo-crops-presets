@@ -59,6 +59,8 @@ class Engine:
 
     def _one(self, path: Path, crop: str, recipe: dict, seed: int) -> Result:
         p = self.prepared(path, crop)
+        if pipeline.needs_cutout(recipe):
+            p.ensure_matte()
         small = p.image.copy()
         small.thumbnail((PREVIEW_EDGE, PREVIEW_EDGE))
         after, notes = pipeline.render(small, recipe, self.library, p.scene, seed)
@@ -93,6 +95,8 @@ class Engine:
         saved = []
         for i, r in enumerate(results):
             p = self.prepared(r.source, r.crop)
+            if pipeline.needs_cutout(r.recipe):
+                p.ensure_matte()
             full, notes = pipeline.render(p.image, r.recipe, self.library, p.scene, r.seed)
             stem = f"{r.source.stem}_{slug(r.recipe.get('name', 'look'))}" + (f"_{r.crop}" if r.crop != "none" else "")
             dest = _unique(folder / f"{stem}.jpg")
