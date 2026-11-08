@@ -132,7 +132,7 @@ Found automatically (change them on the Assets tab):
 |---|---|
 | LUTs (`.cube`) | Final Cut's Custom LUTs folder, and `~/Movies/Ultimate+Sports+Editing+Bundle.zip` |
 | Textures | `~/Movies/Textures.zip` (marker and paper), plus generated grit, grain, scratches, smoke, paper and dust |
-| Overlays | `~/Movies/Sports_Impact_Essentials.zip` (smoke, dust, debris, sparks, fire, lightning, glitch, fireworks, water, cartoon; confetti and electricity are left out) |
+| Overlays | `~/Movies/Sports_Impact_Essentials.zip` (smoke, dust, debris, sparks, fire, lightning, water; confetti, electricity, cartoon, glitch and fireworks are left out) |
 
 Zip packs are never unpacked whole: only the files a look uses are taken out
 and cached in `~/.cache/photo-crops-presets/assets`. Overlay packs made of

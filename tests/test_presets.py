@@ -117,10 +117,10 @@ def test_overlay_lands_on_the_ball(tmp_path):
     assert a[50, 150, 0] == 255 and a[50, 40, 0] == 0
 
 
-def test_confetti_and_electricity_overlays_are_left_out(tmp_path):
+def test_gimmicky_overlays_are_left_out(tmp_path):
     folder = tmp_path / "overlays"
     folder.mkdir()
-    for name in ("Confetti", "Electricity", "Smoke"):
+    for name in ("Confetti", "Electricity", "Cartoon FX", "Glitch", "Fireworks", "Smoke"):
         Image.new("RGBA", (10, 10), (255, 255, 255, 255)).save(folder / f"{name}.png")
     lib = Library(Sources([], [], [], [], [str(folder)], []))
     assert lib.ids()["overlay"] == ["overlay:Smoke"]

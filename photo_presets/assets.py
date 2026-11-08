@@ -68,7 +68,7 @@ class Source:
 
 
 # Overlays left out of the library (and so of random looks and the form)
-SKIPPED_OVERLAYS = {"Confetti", "Electricity"}
+SKIPPED_OVERLAYS = {"Confetti", "Electricity", "Cartoon FX", "Glitch", "Fireworks"}
 
 
 def _paths(items: list[str]) -> list[Path]:
