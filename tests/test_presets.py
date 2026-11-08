@@ -387,3 +387,17 @@ def test_vignette_around_the_player_follows_the_outline(empty_library):
     assert out[100, 40].mean() > 190            # the player keeps their light
     assert out[100, 190].mean() < 80            # far from them is dark
     assert out[100, 70].mean() > out[100, 130].mean()   # it falls off with distance from the player
+
+
+def test_stadium_lights_shine_at_the_sides_behind_the_player(empty_library):
+    img = Image.new("RGB", (400, 300), (10, 10, 10))
+    matte = np.zeros((300, 400), np.float32)
+    matte[60:290, 180:220] = 1
+    scene = Scene(feet=(0.5, 0.95), subject_height=0.75, matte=matte)
+    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [
+        {"op": "stadium_lights", "height": 0.7, "amount": 1.0, "layer": "background"}]},
+        empty_library, scene)[0], np.int16)
+    y = int(0.95 * 300 - 0.7 * 0.75 * 300)
+    assert out[y - 10:y + 10, 20:70].max() > 200 and out[y - 10:y + 10, 330:380].max() > 200  # both banks
+    assert (out[60:290, 180:220] == 10).all()           # the player is untouched
+    assert out[5, 200].mean() < 60                      # the sky between stays dark

@@ -149,6 +149,15 @@ STARTERS: dict[str, dict] = {
         {"op": "contrast", "amount": 0.2},
         {"op": "subject_vignette", "amount": 0.4, "spread": 0.35},
     ]},
+    "Stadium Smoke": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "exposure", "stops": -2.0, "layer": "background"},
+        {"op": "saturation", "amount": 0.35, "layer": "background"},
+        {"op": "lens_blur", "amount": 0.006, "layer": "background"},
+        {"op": "smoke_cloud", "color": "#d9d9d9", "place": "sides_floor", "amount": 0.85, "size": 1.25, "front": 0.7},
+        {"op": "stadium_lights", "height": 0.7, "amount": 0.9, "color": "#fff3dc"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "contrast", "amount": 0.15},
+        {"op": "subject_vignette", "amount": 0.3, "spread": 0.4}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},

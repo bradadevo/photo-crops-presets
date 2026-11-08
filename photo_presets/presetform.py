@@ -37,6 +37,7 @@ DEFAULTS = {
     "sm_on": False, "sm_color": "#f4f1ee", "sm_two": False, "sm_color2": "#d9a520", "sm_place": "sides",
     "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0,
     "lights_on": False, "lights_count": 2, "lights_amount": 0.8,
+    "st_on": False, "st_height": 0.7, "st_amount": 0.9, "st_color": "#fff3dc",
     "rain_on": False, "rain_amount": 0.5, "rain_angle": 12.0,
     "ov": NONE, "ov_place": "ball", "ov_blend": "screen", "ov_opacity": 0.9, "ov_size": 1.0, "ov_depth": BEHIND,
     "leak_on": False, "leak_color": "#ff7a1a", "leak_corner": "top_right", "leak_amount": 0.5,
@@ -109,6 +110,9 @@ def to_recipe(v: dict) -> dict:
     if v["lights_on"]:
         s.append({"op": "stage_lights", "count": int(v["lights_count"]), "amount": v["lights_amount"],
                   "layer": "background"})
+    if v["st_on"]:
+        s.append({"op": "stadium_lights", "height": v["st_height"], "amount": v["st_amount"],
+                  "color": v["st_color"], "layer": "background"})
     if v["rain_on"]:
         s.append({"op": "rain", "amount": v["rain_amount"], "angle": v["rain_angle"]})
     if v["ov"] and v["ov"] != NONE:
@@ -206,6 +210,9 @@ def from_recipe(recipe: dict) -> dict:
                      sm_amount=g("amount", 0.85), sm_size=g("size", 1.0), sm_front=g("front", 0.0))
         elif op == "stage_lights":
             v.update(lights_on=True, lights_count=g("count", 2), lights_amount=g("amount", 0.8))
+        elif op == "stadium_lights":
+            v.update(st_on=True, st_height=g("height", 0.7), st_amount=g("amount", 0.9),
+                     st_color=g("color", v["st_color"]))
         elif op == "subject_vignette":
             v.update(sv_on=True, sv_amount=g("amount", 0.6), sv_spread=g("spread", 0.3))
         elif op == "rain":
@@ -334,6 +341,11 @@ def components(ids: dict) -> dict:
             with gr.Row():
                 slider("lights_count", 1, 4, "Lights", step=1)
                 slider("lights_amount", 0, 1, "Brightness")
+            check("st_on", "Stadium light banks at the sides")
+            with gr.Row():
+                slider("st_height", 0.3, 1.2, "Height (share of the player's height)")
+                slider("st_amount", 0, 1, "Brightness")
+                color("st_color", "Light color")
             check("rain_on", "Rain (behind the player)")
             with gr.Row():
                 slider("rain_amount", 0, 1, "Amount")

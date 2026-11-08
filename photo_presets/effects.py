@@ -471,6 +471,34 @@ def stage_lights(a, p, ctx):
     return blend(a, layer, "screen", float(p["amount"]))
 
 
+@op("stadium_lights", label="Stadium light banks", layer="background", height=0.7, amount=0.9,
+    color="#fff3dc")
+def stadium_lights(a, p, ctx):
+    """Two banks of stadium floodlights (grids of bright lamps with a big glow)
+    near the left and right edges, at the player's shoulder height (height:
+    share of the player's height above their feet)."""
+    h, w = a.shape[:2]
+    fx, fy, ph = _player(ctx.scene, h, w)
+    y = float(np.clip(fy - float(p["height"]) * ph, 0.12 * h, 0.6 * h))
+    bw, bh = 0.16 * w, 0.05 * w
+    lamps = np.zeros((h, w), np.float32)
+    glow = np.zeros((h, w), np.float32)
+    rows, cols = 4, 11
+    dot = max(2, int(0.36 * bw / cols))
+    for cx in (0.11 * w, 0.89 * w):
+        for r in range(rows):
+            for c in range(cols):
+                x = cx - bw / 2 + bw * (c + 0.5) / cols
+                cv2.circle(lamps, (int(x), int(y - bh / 2 + bh * (r + 0.5) / rows)), dot, 1.0, -1, cv2.LINE_AA)
+        glow += 0.3 * _blob(h, w, cx, y, 0.8 * bw, 1.4 * bh)    # the hot core
+        glow += 0.3 * _blob(h, w, cx, y, 2.0 * bw, 4.0 * bh)    # haze lit around it
+    # each bulb shines with a small halo of its own
+    lamps = np.maximum(lamps, cv2.GaussianBlur(lamps, (0, 0), dot * 1.2) * 0.9)
+    light = np.clip(lamps + glow, 0, 1)
+    layer = light[..., None] * _hex(p["color"])
+    return blend(a, layer, "screen", float(p["amount"]))
+
+
 @op("subject_vignette", label="Vignette around the player", amount=0.6, spread=0.3)
 def subject_vignette(a, p, ctx):
     """Darkens away from the player's own outline (not the frame's center), so
