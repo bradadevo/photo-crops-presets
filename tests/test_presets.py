@@ -359,3 +359,31 @@ def test_several_presets_run_on_every_photo(monkeypatch):
     e.presets([Path("a.jpg"), Path("b.jpg")], ["Color Pop", "Dark Mono"], progress=lambda d, t, _: ticks.append((d, t)))
     assert calls == [("a.jpg", "Color Pop"), ("a.jpg", "Dark Mono"), ("b.jpg", "Color Pop"), ("b.jpg", "Dark Mono")]
     assert ticks[-1] == (4, 4)
+
+
+def test_smoke_sits_behind_the_player_except_floor_smoke_in_front(empty_library):
+    img = Image.new("RGB", (200, 200), (20, 20, 20))
+    matte = np.zeros((200, 200), np.float32)
+    matte[40:190, 80:120] = 1
+    scene = Scene(feet=(0.5, 0.95), subject_height=0.75, matte=matte)
+
+    def run(place, front):
+        out, _ = pipeline.render(img, {"protect_faces": False, "steps": [
+            {"op": "smoke_cloud", "color": "#ffffff", "place": place, "amount": 1.0, "front": front}]},
+            empty_library, scene)
+        return np.asarray(out, np.int16)
+    sides = run("sides", 0.0)
+    assert sides[:, :80].max() > 120                      # clouds beside the player
+    assert (sides[40:190, 80:120] == 20).all()            # the player is untouched
+    assert run("floor", 1.0)[180:190, 80:120].max() > 40  # floor smoke rolls over the feet
+
+
+def test_vignette_around_the_player_follows_the_outline(empty_library):
+    img = Image.new("RGB", (200, 200), (200, 200, 200))
+    matte = np.zeros((200, 200), np.float32)
+    matte[50:150, 20:60] = 1   # a player at the left
+    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [
+        {"op": "subject_vignette", "amount": 0.8, "spread": 0.3}]}, empty_library, Scene(matte=matte))[0], np.int16)
+    assert out[100, 40].mean() > 190            # the player keeps their light
+    assert out[100, 190].mean() < 80            # far from them is dark
+    assert out[100, 70].mean() > out[100, 130].mean()   # it falls off with distance from the player

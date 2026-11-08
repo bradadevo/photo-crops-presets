@@ -121,6 +121,14 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Muted Portrait | Soft, muted color with matte lifted blacks, a darker blurred background |
 | Night Portrait | Rich color, the player lit against a dark blurred background |
 
+**Studio and smoke looks** (team colors are set in the preset manager):
+
+| Preset | What it does |
+|---|---|
+| Smoke Studio | A red studio backdrop, white smoke billowing at the player's sides and rolling across the floor in front of their feet, stage lights above |
+| Color Smoke | A dark night background with team-colored smoke bombs (blue left, gold right) behind the player |
+| Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
+
 The black-and-white looks lean on blue in their mix (like a red filter on
 film) so sunlit grass stays gray instead of going white.
 
@@ -178,6 +186,9 @@ A look is a recipe: a list of steps, run in order.
 | `fog` | `color`, `density`, `height` (background by default) |
 | `rain` | `amount`, `angle` (background by default) |
 | `high_key` | `amount`: bright and airy; adapts to the photo (a sunny photo is lifted less) and only pale, colorless areas like an overcast sky go white |
+| `smoke_cloud` | `color`, `color2` (right cloud, for two team colors), `place` (`sides`, `behind`, `floor`, `sides_floor`), `amount`, `size`, `front` (floor smoke over the feet): generated billowing smoke behind the players |
+| `stage_lights` | `count`, `amount`: studio lights along the top |
+| `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 
 Any step can also take `"layer"`: `"all"` (the whole photo), `"subject"`

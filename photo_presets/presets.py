@@ -133,6 +133,26 @@ STARTERS: dict[str, dict] = {
         {"op": "contrast", "amount": 0.2},
         {"op": "vignette", "amount": 0.4},
     ]},
+    # Studio smoke portraits (team colors: change them in the preset manager)
+    "Smoke Studio": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "backdrop", "top": "#4a1712", "bottom": "#c0161f", "glow": 0.35, "layer": "background"},
+        {"op": "smoke_cloud", "color": "#f4f1ee", "place": "sides_floor", "amount": 0.85, "size": 1.0, "front": 0.6},
+        {"op": "stage_lights", "count": 2, "amount": 0.8, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "contrast", "amount": 0.15},
+    ]},
+    "Color Smoke": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "exposure", "stops": -2.2, "layer": "background"},
+        {"op": "saturation", "amount": 0.5, "layer": "background"},
+        {"op": "smoke_cloud", "color": "#2340ff", "color2": "#d9a520", "place": "sides", "amount": 0.9, "size": 1.1},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "contrast", "amount": 0.2},
+        {"op": "subject_vignette", "amount": 0.4, "spread": 0.35},
+    ]},
+    "Player Vignette": {"protect_faces": True, "steps": [
+        {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
+        {"op": "contrast", "amount": 0.1},
+    ]},
 }
 
 

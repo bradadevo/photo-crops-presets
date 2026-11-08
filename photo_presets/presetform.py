@@ -7,6 +7,7 @@ source of truth for anything else (plugins, extra steps).
 import gradio as gr
 
 from photo_presets import blend
+from photo_presets.effects import SMOKE_PLACES
 
 NONE = "None"
 PLACES = ["ball", "feet", "center", "random"]
@@ -33,6 +34,9 @@ DEFAULTS = {
     "t1": NONE, "t1_blend": "overlay", "t1_opacity": 0.4,
     "t2": NONE, "t2_blend": "soft_light", "t2_opacity": 0.3,
     "fog_on": False, "fog_density": 0.5, "fog_height": 0.65, "fog_color": "#d9dee6",
+    "sm_on": False, "sm_color": "#f4f1ee", "sm_two": False, "sm_color2": "#d9a520", "sm_place": "sides",
+    "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0,
+    "lights_on": False, "lights_count": 2, "lights_amount": 0.8,
     "rain_on": False, "rain_amount": 0.5, "rain_angle": 12.0,
     "ov": NONE, "ov_place": "ball", "ov_blend": "screen", "ov_opacity": 0.9, "ov_size": 1.0, "ov_depth": BEHIND,
     "leak_on": False, "leak_color": "#ff7a1a", "leak_corner": "top_right", "leak_amount": 0.5,
@@ -42,6 +46,7 @@ DEFAULTS = {
     "edge_on": False, "edge_amount": 0.5,
     "grain_on": False, "grain_amount": 0.2,
     "vig_on": True, "vig_amount": 0.35,
+    "sv_on": False, "sv_amount": 0.6, "sv_spread": 0.3,
 }
 FIELDS = list(DEFAULTS)
 
@@ -98,6 +103,12 @@ def to_recipe(v: dict) -> dict:
             s.append({"op": "texture", "asset": v[n], "blend": v[f"{n}_blend"], "opacity": v[f"{n}_opacity"]})
     if v["fog_on"]:
         s.append({"op": "fog", "density": v["fog_density"], "height": v["fog_height"], "color": v["fog_color"]})
+    if v["sm_on"]:
+        s.append({"op": "smoke_cloud", "color": v["sm_color"], "color2": v["sm_color2"] if v["sm_two"] else "",
+                  "place": v["sm_place"], "amount": v["sm_amount"], "size": v["sm_size"], "front": v["sm_front"]})
+    if v["lights_on"]:
+        s.append({"op": "stage_lights", "count": int(v["lights_count"]), "amount": v["lights_amount"],
+                  "layer": "background"})
     if v["rain_on"]:
         s.append({"op": "rain", "amount": v["rain_amount"], "angle": v["rain_angle"]})
     if v["ov"] and v["ov"] != NONE:
@@ -119,6 +130,8 @@ def to_recipe(v: dict) -> dict:
         s.append({"op": "grain", "amount": v["grain_amount"]})
     if v["vig_on"]:
         s.append({"op": "vignette", "amount": v["vig_amount"]})
+    if v["sv_on"]:
+        s.append({"op": "subject_vignette", "amount": v["sv_amount"], "spread": v["sv_spread"]})
     return {"protect_faces": bool(v["protect"]), "skin_protect": v["skin_protect"], "steps": s}
 
 
@@ -187,6 +200,14 @@ def from_recipe(recipe: dict) -> dict:
         elif op == "fog":
             v.update(fog_on=True, fog_density=g("density", 0.5), fog_height=g("height", 0.65),
                      fog_color=g("color", v["fog_color"]))
+        elif op == "smoke_cloud":
+            v.update(sm_on=True, sm_color=g("color", v["sm_color"]), sm_two=bool(g("color2")),
+                     sm_color2=g("color2") or v["sm_color2"], sm_place=g("place", "sides"),
+                     sm_amount=g("amount", 0.85), sm_size=g("size", 1.0), sm_front=g("front", 0.0))
+        elif op == "stage_lights":
+            v.update(lights_on=True, lights_count=g("count", 2), lights_amount=g("amount", 0.8))
+        elif op == "subject_vignette":
+            v.update(sv_on=True, sv_amount=g("amount", 0.6), sv_spread=g("spread", 0.3))
         elif op == "rain":
             v.update(rain_on=True, rain_amount=g("amount", 0.5), rain_angle=g("angle", 12.0))
         elif op == "overlay":
@@ -299,6 +320,20 @@ def components(ids: dict) -> dict:
                 slider("fog_density", 0, 1, "Density")
                 slider("fog_height", 0.1, 1, "Reaches up")
             color("fog_color", "Fog color")
+            check("sm_on", "Smoke clouds (behind the player)")
+            with gr.Row():
+                color("sm_color", "Smoke color")
+                color("sm_color2", "Right cloud color")
+            check("sm_two", "Two colors (left and right, like team colors)")
+            drop("sm_place", SMOKE_PLACES, "Where")
+            with gr.Row():
+                slider("sm_amount", 0, 1, "Thickness")
+                slider("sm_size", 0.4, 2, "Size")
+            slider("sm_front", 0, 1, "Floor smoke in front of the feet")
+            check("lights_on", "Stage lights along the top")
+            with gr.Row():
+                slider("lights_count", 1, 4, "Lights", step=1)
+                slider("lights_amount", 0, 1, "Brightness")
             check("rain_on", "Rain (behind the player)")
             with gr.Row():
                 slider("rain_amount", 0, 1, "Amount")
@@ -337,4 +372,7 @@ def components(ids: dict) -> dict:
             slider("grain_amount", 0, 1, "Amount")
             check("vig_on", "Vignette")
             slider("vig_amount", 0, 1, "Amount")
+            check("sv_on", "Vignette around the player (follows their outline)")
+            slider("sv_amount", 0, 1, "Amount")
+            slider("sv_spread", 0.05, 0.6, "How far out it builds")
     return c

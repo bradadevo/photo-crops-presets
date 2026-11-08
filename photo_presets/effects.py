@@ -380,3 +380,111 @@ def backdrop(a, p, ctx):
     grad += (1 - grad) * light[..., None] * 0.8
     grad += np.random.default_rng(ctx.seed).normal(0, 0.004, (h, w, 1)).astype(np.float32)  # no banding
     return a + (np.clip(grad, 0, 1) - a) * float(p["amount"])
+
+
+# Studio smoke and light ---------------------------------------------------------
+
+SMOKE_PLACES = ["sides", "behind", "floor", "sides_floor"]
+
+
+def _player(scene, h: int, w: int) -> tuple[float, float, float]:
+    """The main player's feet (x, y) and height, in pixels."""
+    if scene.feet:
+        return scene.feet[0] * w, scene.feet[1] * h, scene.subject_height * h
+    return w / 2, h * 0.95, h * 0.7
+
+
+def _billows(rng, h: int, w: int, scale: float) -> np.ndarray:
+    """Billowing smoke detail: fractal noise, swirled (domain-warped)."""
+    from photo_presets import procedural
+    n = procedural.fractal(rng, h, w, scale, octaves=6)
+    shift = scale * 0.5
+    wx = (procedural.fractal(rng, h, w, scale * 0.8, octaves=3) - 0.5) * shift
+    wy = (procedural.fractal(rng, h, w, scale * 0.8, octaves=3) - 0.5) * shift
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    return cv2.remap(n, gx + wx, gy + wy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+
+def _blob(h, w, cx, cy, rx, ry):
+    y, x = np.ogrid[:h, :w]
+    return np.exp(-(((x - cx) / max(rx, 1)) ** 2) - (((y - cy) / max(ry, 1)) ** 2)).astype(np.float32)
+
+
+@op("smoke_cloud", label="Smoke clouds", color="#ffffff", color2="", place="sides", amount=0.85, size=1.0,
+    front=0.0)
+def smoke_cloud(a, p, ctx):
+    """Billowing studio smoke shaped around the player: at both sides, behind,
+    along the floor, or sides and floor. With a second color, the left cloud
+    takes the first color and the right cloud the second (team colors).
+    The clouds sit behind the players (when they are cut out); front (0-1) lets
+    the floor smoke roll in front of their feet too."""
+    h, w = a.shape[:2]
+    scale = min(1.0, 1400 / max(h, w))
+    sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
+    fx, fy, ph = (v * scale for v in _player(ctx.scene, h, w))
+    size = float(p["size"])
+    rng = np.random.default_rng(ctx.seed + 17)
+    # big swirling shapes plus fine wisps
+    billow = 0.6 * _billows(rng, sh, sw, max(sh, sw) / 4) + 0.4 * _billows(rng, sh, sw, max(sh, sw) / 12)
+    billow = (billow - billow.min()) / max(float(np.ptp(billow)), 1e-6)
+    mid = fy - 0.6 * ph
+    left = _blob(sh, sw, fx - 0.45 * ph * size, mid, 0.3 * ph * size, 0.5 * ph * size)
+    right = _blob(sh, sw, fx + 0.45 * ph * size, mid, 0.3 * ph * size, 0.5 * ph * size)
+    floor = np.minimum(1.0, 1.3 * _blob(sh, sw, fx, fy, 1.6 * ph * size, 0.2 * ph * size))
+    place = p["place"]
+    clouds = []  # (envelope, color, may cover the players)
+    second = p.get("color2") or p["color"]
+    if place in ("sides", "sides_floor"):
+        clouds += [(left, p["color"], False), (right, second, False)]
+    if place == "behind":
+        clouds.append((_blob(sh, sw, fx, mid, 0.55 * ph * size, 0.6 * ph * size), p["color"], False))
+    if place in ("floor", "sides_floor"):
+        clouds.append((floor, p["color"], True))
+    behind = 1 - ctx.alpha if ctx.alpha is not None and p.get("layer", "all") == "all" else 1.0
+    out = a
+    for envelope, color, in_front in clouds:
+        density = np.clip((envelope * (0.2 + 1.3 * billow ** 1.5) - 0.25) * 2.0, 0, 1)
+        density = cv2.resize(density, (w, h), interpolation=cv2.INTER_LINEAR)
+        # lit tops and shadowed folds give the cloud volume
+        relief = np.clip(0.5 + (billow - cv2.GaussianBlur(billow, (0, 0), max(sh, sw) / 80)) * 4, 0, 1)
+        shade = cv2.resize(0.5 + 0.35 * billow + 0.35 * relief, (w, h), interpolation=cv2.INTER_LINEAR)
+        smoke = np.clip(_hex(color) * shade[..., None], 0, 1)
+        cover = behind + (1 - behind) * float(p["front"]) if in_front else behind
+        out = out + (smoke - out) * (density * cover * float(p["amount"]))[..., None]
+    return out
+
+
+@op("stage_lights", label="Stage lights", layer="background", count=2, amount=0.8)
+def stage_lights(a, p, ctx):
+    """Bright studio lights along the top of the frame, above the player."""
+    h, w = a.shape[:2]
+    fx, _, _ = _player(ctx.scene, h, w)
+    count = max(1, int(p["count"]))
+    spread = 0.36 * w
+    xs = [fx] if count == 1 else [fx - spread / 2 + spread * i / (count - 1) for i in range(count)]
+    light = np.zeros((h, w), np.float32)
+    r = 0.03 * w
+    for x in xs:
+        light = np.maximum(light, _blob(h, w, x, 0.035 * h, r, r) ** 0.25 * 0.95)  # the lamp
+        light += 0.35 * _blob(h, w, x, 0.035 * h, 4 * r, 4 * r)              # its glow
+    layer = np.repeat(np.clip(light, 0, 1)[..., None], 3, axis=2) * np.array([1.0, 0.97, 0.9], np.float32)
+    return blend(a, layer, "screen", float(p["amount"]))
+
+
+@op("subject_vignette", label="Vignette around the player", amount=0.6, spread=0.3)
+def subject_vignette(a, p, ctx):
+    """Darkens away from the player's own outline (not the frame's center), so
+    the light falls off around them wherever they are. Spread: how far out
+    (share of the frame) the darkening takes to build."""
+    from photo_presets.scene import resized
+    h, w = a.shape[:2]
+    scale = min(1.0, 800 / max(h, w))
+    sh, sw = max(8, int(h * scale)), max(8, int(w * scale))
+    mask = ctx.alpha if ctx.alpha is not None else ctx.scene.subject_mask
+    mask = resized(mask, sh, sw)
+    if mask is None or mask.max() < 0.5:
+        return spotlight(a, {"amount": p["amount"]}, ctx)
+    dist = cv2.distanceTransform((mask < 0.5).astype(np.uint8), cv2.DIST_L2, 5) / max(sh, sw)
+    fall = _smoothstep(0.0, max(float(p["spread"]), 0.01), dist)
+    fall = cv2.resize(cv2.GaussianBlur(fall, (0, 0), max(sh, sw) / 60), (w, h), interpolation=cv2.INTER_LINEAR)
+    return a * (1 - float(p["amount"]) * fall)[..., None]
