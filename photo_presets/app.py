@@ -5,7 +5,10 @@ save looks as presets, manage presets and assets, and export full-size files.
 """
 
 import json
+import re
+import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -221,13 +224,16 @@ def make_reel(results, source, folder, song, start, title, closing, photo_sec, m
     shots = (eng().reel_shots(results[:keep], tick("Preparing photo")) if source == LOOKS
              else _folder_shots(paths[:keep], tick("Preparing photo")))
     plan = reel.Plan(shots, sec, [])
-    dest = engine._unique(Path(export_dir or DEFAULT_EXPORT).expanduser() / "Reels"
-                          / f"{engine.slug(title or 'reel')}.mp4")
+    name = re.sub(r"[/:\\]+", "-", " ".join((title or "").split())) or "Reel"
+    dest = engine._unique(Path(export_dir or DEFAULT_EXPORT).expanduser() / "Reels" / f"{name}.mp4")
     reel.render(plan, dest, song, reel.song_start(beats, float(start or 0)) if song else 0.0,
                 title, closing, tick("Making frames"))
     left = f" The last {count - keep} photo(s) did not fit and were left out." if keep < count else ""
     beat_note = f", cuts on the beat ({60 / beat:.0f} BPM)" if beat else ""
-    return str(dest), (f"Saved a {plan.length:.0f} s reel ({keep} photos at {sec:.2f} s{beat_note}) to "
+    # the app can only play files in its own temporary folder
+    preview = Path(tempfile.mkdtemp(prefix="reel-")) / dest.name
+    shutil.copy2(dest, preview)
+    return str(preview), (f"Saved a {plan.length:.0f} s reel ({keep} photos at {sec:.2f} s{beat_note}) to "
                        f"`{dest}`.{left}")
 
 
