@@ -4,6 +4,8 @@ The form covers every built-in step; the recipe text in the app stays the
 source of truth for anything else (plugins, extra steps).
 """
 
+from contextlib import contextmanager
+
 import gradio as gr
 
 from photo_presets import blend
@@ -15,6 +17,9 @@ CORNERS = ["top_left", "top_right", "bottom_left", "bottom_right"]
 BLENDS = list(blend.MODES)
 BEHIND, FRONT = "Behind the player (depth)", "In front of everything"
 COLOR_KINDS = [NONE, "LUT", "Neon", "B&W", "Duotone"]
+SMOKE_LABELS = {"sides": "At the sides", "behind": "Behind the player", "floor": "Along the floor",
+                "sides_floor": "Sides and floor"}
+PLACE_LABELS = {"ball": "The ball", "feet": "The feet", "center": "The center", "random": "Anywhere"}
 
 # name: default
 DEFAULTS = {
@@ -245,146 +250,214 @@ def from_recipe(recipe: dict) -> dict:
 
 
 def components(ids: dict) -> dict:
-    """Builds the form inside the current Gradio layout; returns name -> component."""
+    """Builds the form inside the current Gradio layout; returns name -> component.
+
+    The settings are in tabs, each with a short explanation, and an effect's
+    settings only show once it is turned on, so the form stays calm."""
     d = DEFAULTS
     c = {}
 
-    def slider(name, lo, hi, label, step=0.05):
-        c[name] = gr.Slider(lo, hi, d[name], step=step, label=label)
+    def slider(name, lo, hi, label, step=0.05, info=None):
+        c[name] = gr.Slider(lo, hi, d[name], step=step, label=label, info=info)
 
-    def check(name, label):
-        c[name] = gr.Checkbox(d[name], label=label)
+    def check(name, label, info=None):
+        c[name] = gr.Checkbox(d[name], label=label, info=info)
 
-    def color(name, label):
-        c[name] = gr.ColorPicker(d[name], label=label)
+    def color(name, label, info=None):
+        c[name] = gr.ColorPicker(d[name], label=label, info=info)
 
-    def drop(name, choices, label):
-        c[name] = gr.Dropdown(choices, value=d[name], label=label)
+    def drop(name, choices, label, info=None):
+        c[name] = gr.Dropdown(choices, value=d[name], label=label, info=info)
 
-    with gr.Row():
-        with gr.Column(min_width=300):
-            gr.Markdown("### Color")
-            check("protect", "Keep faces clean of textures and effects")
-            slider("skin_protect", 0, 1, "Skin tone protection (keeps skin its own color under LUTs and toning)")
-            check("clean_on", "Start with the clean pro edit (photo-crops)")
-            c["color_kind"] = gr.Radio(COLOR_KINDS, value=d["color_kind"], label="Color look")
-            drop("lut", [NONE] + ids["lut"], "LUT")
-            slider("lut_strength", 0, 1, "LUT strength")
+    def hint(text):
+        gr.Markdown(text, elem_classes="hint")
+
+    @contextmanager
+    def when(trigger, show=bool):
+        """Settings that show only while their switch is on."""
+        with gr.Group(visible=show(d[trigger]), elem_classes="reveal") as group:
+            yield
+        c[trigger].change(lambda v: gr.update(visible=show(v)), c[trigger], group,
+                          show_progress="hidden", queue=False)
+
+    with gr.Tabs():
+        with gr.Tab("Color"):
+            hint("The overall color of the photo. Start here: pick one color look, then fine-tune contrast "
+                 "and saturation.")
             with gr.Row():
-                color("neon_dark", "Neon shadows")
-                color("neon_light", "Neon highlights")
-            slider("neon_amount", 0, 1, "Neon amount")
+                check("protect", "Keep faces clean", "Textures and effects never cover the players' faces.")
+                check("clean_on", "Start from the clean pro edit",
+                      "Balances brightness and color first (the photo-crops edit).")
+            slider("skin_protect", 0, 1, "Skin tone protection",
+                   info="Keeps skin its natural color under color looks. 0 = off, 1 = full.")
+            c["color_kind"] = gr.Radio(COLOR_KINDS, value=d["color_kind"], label="Color look",
+                                       info="One main color treatment. Its settings appear below.")
+            with when("color_kind", lambda v: v == "LUT"):
+                drop("lut", [NONE] + ids["lut"], "LUT", "A ready-made color grade from your asset library.")
+                slider("lut_strength", 0, 1, "Strength")
+            with when("color_kind", lambda v: v == "Neon"):
+                with gr.Row():
+                    color("neon_dark", "Shadow color")
+                    color("neon_light", "Highlight color")
+                slider("neon_amount", 0, 1, "Amount")
+            with when("color_kind", lambda v: v == "B&W"):
+                hint("How bright each color turns in black and white. More blue keeps sunny grass from "
+                     "going white.")
+                with gr.Row():
+                    slider("bw_r", 0, 1, "Reds")
+                    slider("bw_g", 0, 1, "Greens")
+                    slider("bw_b", 0, 1, "Blues")
+                slider("bw_contrast", 0.5, 2.5, "Contrast", info="1 = as shot; higher is punchier.")
+            with when("color_kind", lambda v: v == "Duotone"):
+                with gr.Row():
+                    color("duo_dark", "Dark color")
+                    color("duo_light", "Light color")
             with gr.Row():
-                slider("bw_r", 0, 1, "B&W red")
-                slider("bw_g", 0, 1, "B&W green")
-                slider("bw_b", 0, 1, "B&W blue")
-            slider("bw_contrast", 0.5, 2.5, "B&W contrast")
-            with gr.Row():
-                color("duo_dark", "Duotone dark")
-                color("duo_light", "Duotone light")
-            gr.Markdown("### Split toning")
-            check("split_on", "Cool shadows, warm highlights")
-            with gr.Row():
-                color("split_shadows", "Shadow tone")
-                color("split_highlights", "Highlight tone")
-            slider("split_amount", 0, 1, "Amount")
-            slider("split_balance", -1, 1, "Balance (shadows ← → highlights)")
-            slider("split_blacks", 0, 1, "Compress blacks")
-            slider("contrast", 0, 1, "Extra contrast")
-            slider("saturation", 0, 2, "Color saturation")
-            check("hk_on", "High key (bright and airy, white skies, deep blacks)")
-            slider("hk_amount", 0, 1, "High key amount")
-        with gr.Column(min_width=300):
-            gr.Markdown("### Player and background (subject isolation)")
+                slider("contrast", 0, 1, "Extra contrast", info="Deeper shadows and brighter highlights.")
+                slider("saturation", 0, 2, "Saturation", info="1 = as shot, 0 = gray, 2 = very vivid.")
+            check("split_on", "Split toning", "Tints the shadows one color and the highlights another "
+                  "(for example cool shadows, warm highlights).")
+            with when("split_on"):
+                with gr.Row():
+                    color("split_shadows", "Shadow tone")
+                    color("split_highlights", "Highlight tone")
+                slider("split_amount", 0, 1, "Amount")
+                slider("split_balance", -1, 1, "Balance", info="Left favors the shadow tone, right the highlights.")
+                slider("split_blacks", 0, 1, "Soften blacks", info="Lifts the darkest tones for a matte, film look.")
+            check("hk_on", "High key", "Bright and airy: pale areas go clean white, blacks stay deep. "
+                  "Adjusts itself to how bright the photo already is.")
+            with when("hk_on"):
+                slider("hk_amount", 0, 1, "Amount")
+
+        with gr.Tab("Player & background"):
+            hint("Edit the player and the background separately, like a pro retoucher. The player is cut "
+                 "out automatically (hair, limbs and the ball included).")
             check("sep_on", "Edit the player and the background separately")
-            slider("subj_exposure", -1, 1, "Player brightness (stops)")
-            slider("subj_clarity", 0, 1, "Player clarity")
-            slider("subj_saturation", 0, 2, "Player color")
-            slider("bg_exposure", -2, 1, "Background brightness (stops)")
-            slider("bg_blur", 0, 0.03, "Background blur (depth of field)", step=0.001)
-            slider("bg_saturation", 0, 1.5, "Background color")
-            check("bg_bw", "Black-and-white background (color pop)")
-            slider("bg_high_key", 0, 1, "Background high key")
-            check("bd_on", "Studio backdrop instead of the background")
-            with gr.Row():
-                color("bd_top", "Backdrop top")
-                color("bd_bottom", "Backdrop bottom")
-            slider("bd_glow", 0, 1, "Backdrop light")
-            gr.Markdown("### Athletic clarity and bloom")
-            check("clarity_on", "Athletic clarity (micro-contrast: jersey, sweat, turf)")
-            slider("clarity_amount", 0, 1, "Clarity amount")
-            slider("clarity_radius", 0.001, 0.015, "Clarity size", step=0.001)
-            check("hp_on", "High-pass detail")
-            slider("hp_amount", 0, 1, "High-pass amount")
-            check("bloom_on", "Specular bloom (soft glow on the brightest highlights)")
-            slider("bloom_amount", 0, 1, "Bloom amount")
-            slider("bloom_threshold", 0.5, 0.98, "Bloom starts at brightness", step=0.01)
-            slider("bloom_size", 0.005, 0.06, "Bloom size", step=0.005)
-        with gr.Column(min_width=300):
-            gr.Markdown("### Depth: fog, rain and overlays")
-            check("fog_on", "Fog / stadium haze (behind the player)")
-            with gr.Row():
-                slider("fog_density", 0, 1, "Density")
-                slider("fog_height", 0.1, 1, "Reaches up")
-            color("fog_color", "Fog color")
-            check("sm_on", "Smoke clouds (behind the player)")
-            with gr.Row():
-                color("sm_color", "Smoke color")
-                color("sm_color2", "Right cloud color")
-            check("sm_two", "Two colors (left and right, like team colors)")
-            drop("sm_place", SMOKE_PLACES, "Where")
-            with gr.Row():
-                slider("sm_amount", 0, 1, "Thickness")
-                slider("sm_size", 0.4, 2, "Size")
-            slider("sm_front", 0, 1, "Floor smoke in front of the feet")
-            check("lights_on", "Stage lights along the top")
-            with gr.Row():
-                slider("lights_count", 1, 4, "Lights", step=1)
-                slider("lights_amount", 0, 1, "Brightness")
-            check("st_on", "Stadium light banks at the sides")
-            with gr.Row():
-                slider("st_height", 0.3, 1.2, "Height (share of the player's height)")
-                slider("st_amount", 0, 1, "Brightness")
-                color("st_color", "Light color")
-            check("rain_on", "Rain (behind the player)")
-            with gr.Row():
-                slider("rain_amount", 0, 1, "Amount")
-                slider("rain_angle", -40, 40, "Angle", step=1)
-            drop("ov", [NONE] + ids["overlay"], "Impact overlay")
-            c["ov_depth"] = gr.Radio([BEHIND, FRONT], value=d["ov_depth"], label="Overlay layer")
-            with gr.Row():
-                drop("ov_place", PLACES, "Place on")
-                drop("ov_blend", BLENDS, "Blend")
-            with gr.Row():
-                slider("ov_opacity", 0, 1, "Opacity")
-                slider("ov_size", 0.2, 2.5, "Size (x player height)")
-            gr.Markdown("### Textures")
-            drop("t1", [NONE] + ids["texture"], "Texture 1")
-            with gr.Row():
-                drop("t1_blend", BLENDS, "Blend")
-                slider("t1_opacity", 0, 1, "Opacity")
+            with when("sep_on"):
+                gr.Markdown("**Player**")
+                with gr.Row():
+                    slider("subj_exposure", -1, 1, "Brightness (stops)", info="+1 doubles the light.")
+                    slider("subj_clarity", 0, 1, "Clarity", info="Crisper jersey, hair and skin texture.")
+                    slider("subj_saturation", 0, 2, "Color", info="1 = as shot.")
+                gr.Markdown("**Background**")
+                with gr.Row():
+                    slider("bg_exposure", -2, 1, "Brightness (stops)", info="Negative darkens, e.g. -2 for night.")
+                    slider("bg_blur", 0, 0.03, "Blur", step=0.001, info="Depth of field, like a fast lens.")
+                    slider("bg_saturation", 0, 1.5, "Color", info="1 = as shot, 0 = gray.")
+                with gr.Row():
+                    check("bg_bw", "Black-and-white background", "Color pop: only the player keeps color.")
+                    slider("bg_high_key", 0, 1, "Brighten to white", info="High key on the background only.")
+                check("bd_on", "Studio backdrop", "Replaces the background with a smooth studio gradient.")
+                with when("bd_on"):
+                    with gr.Row():
+                        color("bd_top", "Top color")
+                        color("bd_bottom", "Bottom color")
+                    slider("bd_glow", 0, 1, "Light behind the player")
+
+        with gr.Tab("Detail"):
+            hint("Sharpness and shine. A little goes a long way.")
+            check("clarity_on", "Athletic clarity", "Micro-contrast that brings out jersey fabric, sweat and turf.")
+            with when("clarity_on"):
+                with gr.Row():
+                    slider("clarity_amount", 0, 1, "Amount")
+                    slider("clarity_radius", 0.001, 0.015, "Detail size", step=0.001,
+                           info="Small = fine texture, large = bolder shapes.")
+            check("hp_on", "High-pass detail", "A harder, gritty sharpening for dramatic looks.")
+            with when("hp_on"):
+                slider("hp_amount", 0, 1, "Amount")
+            check("bloom_on", "Specular bloom", "A soft glow around the brightest highlights.")
+            with when("bloom_on"):
+                with gr.Row():
+                    slider("bloom_amount", 0, 1, "Amount")
+                    slider("bloom_threshold", 0.5, 0.98, "Starts at brightness", step=0.01,
+                           info="Higher = only the very brightest spots glow.")
+                    slider("bloom_size", 0.005, 0.06, "Size", step=0.005)
+
+        with gr.Tab("Atmosphere"):
+            hint("Smoke, haze, lights and rain. They all sit behind the player, so the player stays clear.")
+            check("sm_on", "Smoke clouds", "Billowing smoke shaped around the player.")
+            with when("sm_on"):
+                with gr.Row():
+                    drop("sm_place", [(SMOKE_LABELS[k], k) for k in SMOKE_PLACES], "Where")
+                    color("sm_color", "Smoke color")
+                check("sm_two", "Two colors", "Left and right clouds in different colors, like team colors.")
+                with when("sm_two"):
+                    color("sm_color2", "Right cloud color")
+                with gr.Row():
+                    slider("sm_amount", 0, 1, "Thickness")
+                    slider("sm_size", 0.4, 2, "Size", info="Relative to the player's height.")
+                    slider("sm_front", 0, 1, "Over the feet", info="How much floor smoke rolls in front of the feet.")
+            check("st_on", "Stadium floodlights", "Two banks of stadium lights near the left and right edges.")
+            with when("st_on"):
+                with gr.Row():
+                    slider("st_height", 0.3, 1.2, "Height", info="Share of the player's height above their feet.")
+                    slider("st_amount", 0, 1, "Brightness")
+                    color("st_color", "Light color")
+            check("lights_on", "Studio lights along the top", "Bright lamps above the player.")
+            with when("lights_on"):
+                with gr.Row():
+                    slider("lights_count", 1, 4, "Number of lights", step=1)
+                    slider("lights_amount", 0, 1, "Brightness")
+            check("fog_on", "Fog / stadium haze", "A soft haze rising from the ground behind the player.")
+            with when("fog_on"):
+                with gr.Row():
+                    slider("fog_density", 0, 1, "Density")
+                    slider("fog_height", 0.1, 1, "Reaches up", info="Share of the photo's height.")
+                    color("fog_color", "Color")
+            check("rain_on", "Rain", "Falling rain behind the player.")
+            with when("rain_on"):
+                with gr.Row():
+                    slider("rain_amount", 0, 1, "Amount")
+                    slider("rain_angle", -40, 40, "Angle", step=1, info="Degrees from straight down.")
+
+        with gr.Tab("Overlays"):
+            hint("Effects and textures from your asset library (see the Assets tab).")
+            drop("ov", [NONE] + ids["overlay"], "Impact overlay", "An effect such as sparks, dust or fire.")
+            with when("ov", lambda v: bool(v) and v != NONE):
+                c["ov_depth"] = gr.Radio([BEHIND, FRONT], value=d["ov_depth"], label="Layer")
+                with gr.Row():
+                    drop("ov_place", [(PLACE_LABELS[k], k) for k in PLACES], "Place on")
+                    drop("ov_blend", BLENDS, "Blend", "How it mixes with the photo; screen suits bright effects.")
+                with gr.Row():
+                    slider("ov_opacity", 0, 1, "Opacity")
+                    slider("ov_size", 0.2, 2.5, "Size", info="Times the player's height.")
+            drop("t1", [NONE] + ids["texture"], "Texture 1", "A surface such as paper, grit or film dust.")
+            with when("t1", lambda v: bool(v) and v != NONE):
+                with gr.Row():
+                    drop("t1_blend", BLENDS, "Blend")
+                    slider("t1_opacity", 0, 1, "Opacity")
             drop("t2", [NONE] + ids["texture"], "Texture 2")
-            with gr.Row():
-                drop("t2_blend", BLENDS, "Blend")
-                slider("t2_opacity", 0, 1, "Opacity")
-        with gr.Column(min_width=300):
-            gr.Markdown("### Lighting and edges")
-            check("leak_on", "Light leak")
-            with gr.Row():
-                color("leak_color", "Color")
-                drop("leak_corner", CORNERS, "From")
-            slider("leak_amount", 0, 1, "Amount")
-            check("glow_on", "Glow")
-            slider("glow_amount", 0, 1, "Amount")
-            check("spot_on", "Spotlight on the player")
-            slider("spot_amount", 0, 1, "Amount")
-            check("edge_on", "Edge distressing")
-            slider("edge_amount", 0, 1, "Amount")
-            check("grain_on", "Film grain")
-            slider("grain_amount", 0, 1, "Amount")
-            check("vig_on", "Vignette")
-            slider("vig_amount", 0, 1, "Amount")
-            check("sv_on", "Vignette around the player (follows their outline)")
-            slider("sv_amount", 0, 1, "Amount")
-            slider("sv_spread", 0.05, 0.6, "How far out it builds")
+            with when("t2", lambda v: bool(v) and v != NONE):
+                with gr.Row():
+                    drop("t2_blend", BLENDS, "Blend")
+                    slider("t2_opacity", 0, 1, "Opacity")
+
+        with gr.Tab("Finishing"):
+            hint("Final touches that guide the eye to the player.")
+            check("sv_on", "Vignette around the player", "Darkens outward from the player's own outline.")
+            with when("sv_on"):
+                with gr.Row():
+                    slider("sv_amount", 0, 1, "Amount")
+                    slider("sv_spread", 0.05, 0.6, "How far out it builds")
+            check("vig_on", "Vignette", "Darkens the corners of the frame.")
+            with when("vig_on"):
+                slider("vig_amount", 0, 1, "Amount")
+            check("spot_on", "Spotlight on the player", "A soft pool of light on the player.")
+            with when("spot_on"):
+                slider("spot_amount", 0, 1, "Amount")
+            check("grain_on", "Film grain", "Fine film-like grain.")
+            with when("grain_on"):
+                slider("grain_amount", 0, 1, "Amount")
+            check("glow_on", "Glow", "A dreamy glow over the bright areas.")
+            with when("glow_on"):
+                slider("glow_amount", 0, 1, "Amount")
+            check("leak_on", "Light leak", "A warm burst of light from a corner, like old film.")
+            with when("leak_on"):
+                with gr.Row():
+                    color("leak_color", "Color")
+                    drop("leak_corner", [(k.replace("_", " ").capitalize(), k) for k in CORNERS], "From")
+                slider("leak_amount", 0, 1, "Amount")
+            check("edge_on", "Edge distressing", "Rough, worn edges for gritty looks.")
+            with when("edge_on"):
+                slider("edge_amount", 0, 1, "Amount")
     return c

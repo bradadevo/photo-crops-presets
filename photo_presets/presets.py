@@ -202,3 +202,47 @@ def delete(name: str) -> bool:
     del saved[name]
     PRESETS_FILE.write_text(json.dumps(saved, indent=1))
     return True
+
+
+# How the app lists the starters: in groups, each with a one-line description
+BOLD, EDITORIAL, STUDIO, MINE = "Bold and dramatic", "Clean editorial", "Studio, smoke and lights", "My presets"
+GROUPS = [BOLD, EDITORIAL, STUDIO, MINE]
+ABOUT: dict[str, tuple[str, str]] = {
+    "Grit & Glory": (BOLD, "Gritty black and white with smoke at the feet and rough edges"),
+    "Friday Night Lights": (BOLD, "A night-game color grade, a soft spotlight on the player and film grain"),
+    "Neon Rush": (BOLD, "Purple and cyan neon colors with a glow on the highlights"),
+    "Hall of Famer": (BOLD, "Vintage color, a paper texture and grain, like a classic trading card"),
+    "Stadium Night": (BOLD, "Blue-and-amber night tones, a darker hazy background and a crisp player"),
+    "Rain Game": (BOLD, "Cool, moody color with rain falling behind the player"),
+    "Clean Pro": (EDITORIAL, "The clean pro edit only: balanced brightness and color, nothing added"),
+    "Color Pop": (EDITORIAL, "The player stays in color; the background turns soft black and white"),
+    "Studio Backdrop": (EDITORIAL, "Replaces the background with a blue-to-black studio backdrop"),
+    "Shallow Focus": (EDITORIAL, "Blurs the background like a fast portrait lens"),
+    "Bright & Airy": (EDITORIAL, "Light, bright and clean, with a softly blurred background"),
+    "Mono Editorial": (EDITORIAL, "Bright, clean black and white"),
+    "Vivid Pro": (EDITORIAL, "Rich, saturated color with crisp detail and natural skin"),
+    "Silver Mono": (EDITORIAL, "Soft, silvery black and white"),
+    "Punch Mono": (EDITORIAL, "High-contrast black and white with strong detail"),
+    "Dark Mono": (EDITORIAL, "Black and white with a near-black background"),
+    "Muted Portrait": (EDITORIAL, "Soft, muted film tones with a darker, blurred background"),
+    "Night Portrait": (EDITORIAL, "A dark, blurred background so the player glows"),
+    "Smoke Studio": (STUDIO, "Red studio backdrop, white smoke at the sides and feet, lights above"),
+    "Color Smoke": (STUDIO, "Night background with two-color smoke bombs (blue and gold)"),
+    "Stadium Smoke": (STUDIO, "Night stadium with smoke at the sides and feet and floodlights"),
+    "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
+}
+
+
+def describe(name: str, recipe: dict | None = None) -> str:
+    """A preset's one-line description: the one you saved, else the starter's."""
+    if recipe and recipe.get("description"):
+        return str(recipe["description"])
+    return ABOUT.get(name, (MINE, ""))[1]
+
+
+def grouped(all_presets: dict[str, dict] | None = None) -> dict[str, list[str]]:
+    """Preset names by group (your own presets last, under My presets)."""
+    out: dict[str, list[str]] = {g: [] for g in GROUPS}
+    for name in all_presets if all_presets is not None else load_all():
+        out[ABOUT.get(name, (MINE, ""))[0]].append(name)
+    return out

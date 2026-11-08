@@ -42,27 +42,35 @@ uv run photo-presets
 
 It opens in your browser on this Mac.
 
-**Make looks**
+**Make looks** walks you through five numbered steps (left: set up, right:
+results):
 
-1. Add photos (any mix, including RAW and HEIC), or type a folder or press
-   **Choose…**.
-2. Pick **Random exploration** (how many looks per photo, and an optional seed
-   so the same seed gives the same looks again) or **Preset pipeline** (tick
-   the presets to run, or **Select all**; every photo goes through each one,
-   and it shows how many looks that makes and about how long it takes).
-3. **Crop first**: the whole photo, a photo-crops pro crop, or a face close-up.
-4. **Make looks**. Click any result to compare it with the original on the
-   before/after slider. Its recipe is shown; give it a name and **Save preset**
-   to keep any look you like.
-5. **Export full size** saves every result (or just the selected one) at full
+1. **Add photos** (any mix, including RAW and HEIC), or type a folder or press
+   **Browse…**.
+2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
+   dramatic, Clean editorial, Studio smoke and lights, My presets), each with a
+   one-line description. Tick any, or **Select all**; every photo goes through
+   each one, and it shows how many looks that makes and about how long it
+   takes. **Explore random looks** invents new looks instead (how many per
+   photo, and an optional seed to repeat a run).
+3. **Crop first** (the whole photo, a photo-crops pro crop, or a face
+   close-up), then **Make looks**.
+4. **Compare**: click any result to see it against the original on the
+   before/after slider, with its description.
+5. **Save or export**: name a look and **Save preset** to keep it, or
+   **Export full size** to save every result (or just the selected one) at full
    resolution to your export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
 
 Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
 
-**Preset manager**: load, edit, preview, save and delete presets. The form
-has toggles and sliders for:
+**Preset manager**: load a preset to start from, adjust it, preview it on a
+photo (the preview stays beside the settings), then save it with a name and a
+one-line description (shown next to it on Make looks). The settings are in
+tabs (Color, Player & background, Detail, Atmosphere, Overlays, Finishing),
+each setting has a short explanation, and an effect's settings only appear
+once you turn it on. The form covers:
 
 - **Color**: LUT and strength, neon, B&W channel mix, duotone, the clean pro
   edit, skin tone protection, saturation, high key, and **split toning** (shadow and highlight
