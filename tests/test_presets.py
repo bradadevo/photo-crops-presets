@@ -318,3 +318,31 @@ def test_face_protection_stops_at_the_player_outline(empty_library):
     out = np.asarray(pipeline.render(img, recipe, empty_library, scene)[0], np.int16)
     beside_head = out[95:105, 60:70]         # inside the face circle but off the player
     assert beside_head.std() > 5             # gets the texture like the rest of the background
+
+
+def test_high_key_lifts_dull_photos_more_and_keeps_grass_from_going_white(empty_library):
+    def lift(level, color=None):
+        a = np.full((60, 60, 3), level, np.uint8)
+        if color:
+            a[:] = color
+        out, _ = pipeline.render(Image.fromarray(a), {"protect_faces": False, "steps": [
+            {"op": "high_key", "amount": 0.6}]}, empty_library, Scene())
+        return np.asarray(out, np.int16).mean() - a.mean()
+    assert lift(80) > lift(150) > 0          # a dull photo is lifted more than a bright one
+    assert lift(0) < 2                       # blacks stay deep
+    grass = np.full((60, 60, 3), (193, 193, 130), np.uint8)
+    out, _ = pipeline.render(Image.fromarray(grass), {"protect_faces": False, "steps": [
+        {"op": "high_key", "amount": 0.6}]}, empty_library, Scene())
+    assert np.asarray(out).min(axis=(0, 1))[2] < 200   # sunlit grass keeps its color
+
+
+def test_studio_backdrop_replaces_only_the_background(empty_library):
+    img = Image.new("RGB", (80, 80), (120, 200, 90))
+    matte = np.zeros((80, 80), np.float32)
+    matte[20:60, 30:50] = 1
+    recipe = {"protect_faces": False, "steps": [{"op": "backdrop", "top": "#3d86c6", "bottom": "#000000", "glow": 0}]}
+    out = np.asarray(pipeline.render(img, recipe, empty_library, Scene(matte=matte))[0], np.int16)
+    assert (out[40, 40] == (120, 200, 90)).all()        # the player is untouched
+    assert out[2, 5, 2] > out[2, 5, 1] and out[78, 5].max() < 20   # blue at the top, black at the bottom
+    same, notes = pipeline.render(img, recipe, empty_library, Scene())
+    assert np.asarray(same).tolist() == np.asarray(img).tolist() and notes   # no cut-out: skipped, with a note

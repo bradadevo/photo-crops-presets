@@ -59,6 +59,80 @@ STARTERS: dict[str, dict] = {
     "Clean Pro": {"protect_faces": True, "steps": [
         {"op": "clean", "strength": "light"},
     ]},
+    # Editorial looks (clean, no textures), after pro academy/MLS NEXT photography
+    "Color Pop": {"protect_faces": True, "steps": [
+        {"op": "bw", "red": 0.3, "green": 0.35, "blue": 0.35, "contrast": 1.2, "layer": "background"},
+        {"op": "high_key", "amount": 0.35, "layer": "background"},
+        {"op": "fog", "color": "#f4f4f4", "density": 0.3, "height": 0.9, "layer": "background"},
+        {"op": "saturation", "amount": 1.2, "layer": "subject"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "contrast", "amount": 0.15},
+    ]},
+    "Studio Backdrop": {"protect_faces": True, "steps": [
+        {"op": "backdrop", "top": "#3d86c6", "bottom": "#000000", "glow": 0.5, "layer": "background"},
+        {"op": "exposure", "stops": -0.15, "layer": "subject"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "contrast", "amount": 0.2},
+        {"op": "grain", "amount": 0.1},
+    ]},
+    "Shallow Focus": {"protect_faces": True, "steps": [
+        {"op": "lens_blur", "radius": 0.012, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "saturation", "amount": 1.15},
+        {"op": "contrast", "amount": 0.2},
+        {"op": "vignette", "amount": 0.35},
+    ]},
+    "Bright & Airy": {"protect_faces": True, "steps": [
+        {"op": "high_key", "amount": 0.55},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
+        {"op": "saturation", "amount": 0.8, "layer": "background"},
+        {"op": "saturation", "amount": 1.2, "layer": "subject"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+    ]},
+    "Mono Editorial": {"protect_faces": True, "steps": [
+        {"op": "bw", "red": 0.3, "green": 0.35, "blue": 0.35, "contrast": 1.35},
+        {"op": "high_key", "amount": 0.45},
+        {"op": "athletic_clarity", "amount": 0.6},
+    ]},
+    "Vivid Pro": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "high_key", "amount": 0.25},
+        {"op": "saturation", "amount": 1.3},
+        {"op": "contrast", "amount": 0.2},
+        {"op": "lens_blur", "radius": 0.004, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+    ]},
+    "Silver Mono": {"protect_faces": True, "steps": [
+        {"op": "bw", "red": 0.3, "green": 0.35, "blue": 0.35, "contrast": 1.1},
+        {"op": "high_key", "amount": 0.2},
+        {"op": "lens_blur", "radius": 0.005, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+    ]},
+    "Punch Mono": {"protect_faces": True, "steps": [
+        {"op": "bw", "red": 0.3, "green": 0.35, "blue": 0.35, "contrast": 1.6},
+        {"op": "athletic_clarity", "amount": 0.8},
+    ]},
+    "Dark Mono": {"protect_faces": True, "steps": [
+        {"op": "bw", "red": 0.4, "green": 0.45, "blue": 0.15, "contrast": 1.4},
+        {"op": "exposure", "stops": -1.6, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "vignette", "amount": 0.5},
+    ]},
+    "Muted Portrait": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "saturation", "amount": 0.75},
+        {"op": "split_tone", "shadows": "#2a3d3d", "highlights": "#e8c9a8", "amount": 0.35, "compress_blacks": 0.4},
+        {"op": "exposure", "stops": -0.5, "layer": "background"},
+        {"op": "lens_blur", "radius": 0.008, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+    ]},
+    "Night Portrait": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "exposure", "stops": -1.3, "layer": "background"},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
+        {"op": "saturation", "amount": 0.7, "layer": "background"},
+        {"op": "saturation", "amount": 1.15, "layer": "subject"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "contrast", "amount": 0.2},
+        {"op": "vignette", "amount": 0.4},
+    ]},
 }
 
 

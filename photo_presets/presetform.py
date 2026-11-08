@@ -24,11 +24,12 @@ DEFAULTS = {
     "duo_dark": "#0b1d3a", "duo_light": "#ffb347",
     "split_on": False, "split_shadows": "#1f4e79", "split_highlights": "#ffb347", "split_amount": 0.5,
     "split_balance": 0.0, "split_blacks": 0.3,
-    "contrast": 0.0,
+    "contrast": 0.0, "saturation": 1.0, "hk_on": False, "hk_amount": 0.5,
     "clarity_on": False, "clarity_amount": 0.6, "clarity_radius": 0.004,
     "hp_on": False, "hp_amount": 0.7,
     "sep_on": False, "subj_exposure": 0.2, "subj_clarity": 0.5, "bg_exposure": -0.5, "bg_blur": 0.0,
-    "bg_saturation": 1.0,
+    "bg_saturation": 1.0, "subj_saturation": 1.0, "bg_bw": False, "bg_high_key": 0.0,
+    "bd_on": False, "bd_top": "#3d86c6", "bd_bottom": "#000000", "bd_glow": 0.5,
     "t1": NONE, "t1_blend": "overlay", "t1_opacity": 0.4,
     "t2": NONE, "t2_blend": "soft_light", "t2_opacity": 0.3,
     "fog_on": False, "fog_density": 0.5, "fog_height": 0.65, "fog_color": "#d9dee6",
@@ -62,13 +63,26 @@ def to_recipe(v: dict) -> dict:
     if v["split_on"]:
         s.append({"op": "split_tone", "shadows": v["split_shadows"], "highlights": v["split_highlights"],
                   "amount": v["split_amount"], "balance": v["split_balance"], "compress_blacks": v["split_blacks"]})
+    if v["hk_on"]:
+        s.append({"op": "high_key", "amount": v["hk_amount"]})
     if v["contrast"]:
         s.append({"op": "contrast", "amount": v["contrast"]})
+    if v["saturation"] != 1.0:
+        s.append({"op": "saturation", "amount": v["saturation"]})
     if v["clarity_on"]:
         s.append({"op": "athletic_clarity", "amount": v["clarity_amount"], "radius": v["clarity_radius"]})
     if v["hp_on"]:
         s.append({"op": "high_pass", "radius": 0.006, "amount": v["hp_amount"]})
     if v["sep_on"]:
+        if v["bd_on"]:
+            s.append({"op": "backdrop", "top": v["bd_top"], "bottom": v["bd_bottom"], "glow": v["bd_glow"],
+                      "layer": "background"})
+        if v["bg_bw"]:
+            s.append({"op": "bw", "red": 0.3, "green": 0.35, "blue": 0.35, "contrast": 1.2, "layer": "background"})
+        if v["bg_high_key"]:
+            s.append({"op": "high_key", "amount": v["bg_high_key"], "layer": "background"})
+        if v["subj_saturation"] != 1.0:
+            s.append({"op": "saturation", "amount": v["subj_saturation"], "layer": "subject"})
         if v["subj_exposure"]:
             s.append({"op": "exposure", "stops": v["subj_exposure"], "layer": "subject"})
         if v["subj_clarity"]:
@@ -114,7 +128,8 @@ def from_recipe(recipe: dict) -> dict:
     v.update(protect=recipe.get("protect_faces", True), skin_protect=recipe.get("skin_protect", 0.7),
              color_kind=NONE, vig_on=False)
     textures = []
-    sep = {"subj_exposure": 0.0, "subj_clarity": 0.0, "bg_exposure": 0.0, "bg_blur": 0.0, "bg_saturation": 1.0}
+    sep = {"subj_exposure": 0.0, "subj_clarity": 0.0, "bg_exposure": 0.0, "bg_blur": 0.0, "bg_saturation": 1.0,
+           "subj_saturation": 1.0, "bg_high_key": 0.0}
     for st in recipe.get("steps", []):
         op, layer = st.get("op"), st.get("layer", "all")
         g = st.get
@@ -125,6 +140,8 @@ def from_recipe(recipe: dict) -> dict:
         elif op == "neon":
             v.update(color_kind="Neon", neon_dark=g("shadows", v["neon_dark"]), neon_light=g("highlights", v["neon_light"]),
                      neon_amount=g("amount", 0.7))
+        elif op == "bw" and layer == "background":
+            v.update(sep_on=True, bg_bw=True)
         elif op == "bw":
             v.update(color_kind="B&W", bw_r=g("red", 0.45), bw_g=g("green", 0.4), bw_b=g("blue", 0.15),
                      bw_contrast=g("contrast", 1.3))
@@ -136,6 +153,19 @@ def from_recipe(recipe: dict) -> dict:
                      split_balance=g("balance", 0.0), split_blacks=g("compress_blacks", 0.3))
         elif op == "contrast":
             v["contrast"] = g("amount", 0.3)
+        elif op == "high_key" and layer == "background":
+            v["sep_on"] = True
+            sep["bg_high_key"] = g("amount", 0.5)
+        elif op == "high_key":
+            v.update(hk_on=True, hk_amount=g("amount", 0.5))
+        elif op == "backdrop":
+            v.update(sep_on=True, bd_on=True, bd_top=g("top", v["bd_top"]), bd_bottom=g("bottom", v["bd_bottom"]),
+                     bd_glow=g("glow", 0.5))
+        elif op == "saturation" and layer == "subject":
+            v["sep_on"] = True
+            sep["subj_saturation"] = g("amount", 1.0)
+        elif op == "saturation" and layer == "all":
+            v["saturation"] = g("amount", 1.0)
         elif op == "athletic_clarity" and layer == "subject":
             v["sep_on"] = True
             sep["subj_clarity"] = g("amount", 0.5)
@@ -233,14 +263,25 @@ def components(ids: dict) -> dict:
             slider("split_balance", -1, 1, "Balance (shadows ← → highlights)")
             slider("split_blacks", 0, 1, "Compress blacks")
             slider("contrast", 0, 1, "Extra contrast")
+            slider("saturation", 0, 2, "Color saturation")
+            check("hk_on", "High key (bright and airy, white skies, deep blacks)")
+            slider("hk_amount", 0, 1, "High key amount")
         with gr.Column(min_width=300):
             gr.Markdown("### Player and background (subject isolation)")
             check("sep_on", "Edit the player and the background separately")
             slider("subj_exposure", -1, 1, "Player brightness (stops)")
             slider("subj_clarity", 0, 1, "Player clarity")
+            slider("subj_saturation", 0, 2, "Player color")
             slider("bg_exposure", -2, 1, "Background brightness (stops)")
             slider("bg_blur", 0, 0.03, "Background blur (depth of field)", step=0.001)
             slider("bg_saturation", 0, 1.5, "Background color")
+            check("bg_bw", "Black-and-white background (color pop)")
+            slider("bg_high_key", 0, 1, "Background high key")
+            check("bd_on", "Studio backdrop instead of the background")
+            with gr.Row():
+                color("bd_top", "Backdrop top")
+                color("bd_bottom", "Backdrop bottom")
+            slider("bd_glow", 0, 1, "Backdrop light")
             gr.Markdown("### Athletic clarity and bloom")
             check("clarity_on", "Athletic clarity (micro-contrast: jersey, sweat, turf)")
             slider("clarity_amount", 0, 1, "Clarity amount")

@@ -64,10 +64,11 @@ full-size photo.
 has toggles and sliders for:
 
 - **Color**: LUT and strength, neon, B&W channel mix, duotone, the clean pro
-  edit, skin tone protection, and **split toning** (shadow and highlight
+  edit, skin tone protection, saturation, high key, and **split toning** (shadow and highlight
   tones, amount, balance, compressed blacks), extra contrast
-- **Player and background**: edit them separately: player brightness and
-  clarity; background brightness, blur (depth of field) and color
+- **Player and background**: edit them separately: player brightness,
+  clarity and color; background brightness, blur (depth of field), color,
+  black and white (color pop), high key, or a studio backdrop instead
 - **Athletic clarity and bloom**: micro-contrast amount and size, high-pass
   detail, specular bloom amount, starting brightness and size
 - **Depth**: fog or stadium haze, rain, and an impact overlay, each behind the
@@ -100,6 +101,25 @@ uv run photo-presets-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/P
 | Stadium Night | Cool shadows and warm highlights, darker blurred background with haze behind the player, the player brighter and crisper, specular bloom |
 | Rain Game | Cool split toning, a muted darker background with rain falling behind the player, a crisper player |
 | Clean Pro | photo-crops' light clean edit |
+
+**Editorial looks** (clean, no textures, after pro academy and MLS NEXT photography):
+
+| Preset | What it does |
+|---|---|
+| Color Pop | The player in color against a bright, hazy black-and-white background |
+| Studio Backdrop | The background replaced by a blue-to-black studio gradient lit from above the player |
+| Shallow Focus | Strong background blur (depth of field), crisp player, rich color, vignette |
+| Bright & Airy | High key: lifted, airy tones, a softer background, a vivid player |
+| Mono Editorial | Clean high-key black and white |
+| Vivid Pro | Punchy, saturated color, slightly bright, crisp player |
+| Silver Mono | Soft silver black and white with a blurred background |
+| Punch Mono | Hard, gritty, high-contrast black and white |
+| Dark Mono | Black and white with the background dropped to near black |
+| Muted Portrait | Soft, muted color with matte lifted blacks, a darker blurred background |
+| Night Portrait | Rich color, the player lit against a dark blurred background |
+
+The black-and-white looks lean on blue in their mix (like a red filter on
+film) so sunlit grass stays gray instead of going white.
 
 Saving a preset with a starter's name replaces it for you; deleting yours
 brings the starter back. Presets live in `~/.config/photo-crops-presets/presets.json`.
@@ -154,6 +174,8 @@ A look is a recipe: a list of steps, run in order.
 | `lens_blur` | `radius` (background by default) |
 | `fog` | `color`, `density`, `height` (background by default) |
 | `rain` | `amount`, `angle` (background by default) |
+| `high_key` | `amount`: bright and airy; adapts to the photo (a sunny photo is lifted less) and only pale, colorless areas like an overcast sky go white |
+| `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 
 Any step can also take `"layer"`: `"all"` (the whole photo), `"subject"`
 (the players only) or `"background"` (everything behind them). Overlays, fog,

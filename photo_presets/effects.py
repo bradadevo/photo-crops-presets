@@ -337,3 +337,46 @@ def rain(a, p, ctx):
     streaks = cv2.resize(np.clip(streaks, 0, 1), (w, h), interpolation=cv2.INTER_LINEAR)
     layer = np.repeat(streaks[..., None], 3, axis=2) * np.array([0.85, 0.9, 1.0], np.float32)
     return blend(a * (1 - 0.12 * float(p["amount"])), layer, "screen", float(p["amount"]))
+
+
+# Editorial ---------------------------------------------------------------------
+
+# High key lifts a photo whose middle brightness is below this the most
+HIGH_KEY_TARGET = 0.6
+
+@op("high_key", label="High key (bright and airy)", amount=0.5)
+def high_key(a, p, ctx):
+    """Bright, airy editorial tone: midtones lifted, pale colorless areas (an
+    overcast sky) rolled into clean white, blacks kept deep. It adapts to the
+    photo: a sunny, already bright photo is lifted far less than a dull one,
+    and colored areas (grass, kits) never go white."""
+    lum = _luma(a)
+    median = float(np.median(lum))
+    amount = float(p["amount"]) * float(np.clip((HIGH_KEY_TARGET - median) / 0.2, 0.15, 1.0))
+    lifted = 1 - (1 - lum) ** (1 + 1.5 * amount)
+    new = lum + (lifted - lum) * _smoothstep(0.05, 0.45, lum)
+    out = a * ((new + 1e-3) / (lum + 1e-3))[..., None]
+    chroma = out.max(axis=2) - out.min(axis=2)
+    pale = 1 - _smoothstep(0.08, 0.2, chroma)
+    white = _smoothstep(0.8, 0.98, new) * pale * amount * 0.7
+    return np.clip(out + (1 - out) * white[..., None], 0, 1)
+
+
+@op("backdrop", label="Studio backdrop", layer="background", top="#3d86c6", bottom="#000000", glow=0.5, amount=1.0)
+def backdrop(a, p, ctx):
+    """Replaces the background with a smooth studio gradient (top color into
+    bottom color) lit from above the player, like a portrait backdrop."""
+    if ctx.alpha is None and p.get("layer", "background") == "background":
+        ctx.notes.append("Studio backdrop skipped: no player cut-out here")
+        return a
+    h, w = a.shape[:2]
+    y = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
+    grad = _hex(p["top"]) * (1 - y ** 0.8) + _hex(p["bottom"]) * y ** 0.8
+    grad = np.broadcast_to(grad, (h, w, 3)).copy()
+    cx = ctx.scene.feet[0] if ctx.scene.feet else 0.5
+    yy, xx = np.ogrid[:h, :w]
+    d2 = ((xx / w - cx) / 0.45) ** 2 + ((yy / h) / 0.35) ** 2
+    light = float(p["glow"]) * np.exp(-d2).astype(np.float32)
+    grad += (1 - grad) * light[..., None] * 0.8
+    grad += np.random.default_rng(ctx.seed).normal(0, 0.004, (h, w, 1)).astype(np.float32)  # no banding
+    return a + (np.clip(grad, 0, 1) - a) * float(p["amount"])
