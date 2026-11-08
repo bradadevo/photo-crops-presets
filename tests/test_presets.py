@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -346,3 +347,15 @@ def test_studio_backdrop_replaces_only_the_background(empty_library):
     assert out[2, 5, 2] > out[2, 5, 1] and out[78, 5].max() < 20   # blue at the top, black at the bottom
     same, notes = pipeline.render(img, recipe, empty_library, Scene())
     assert np.asarray(same).tolist() == np.asarray(img).tolist() and notes   # no cut-out: skipped, with a note
+
+
+def test_several_presets_run_on_every_photo(monkeypatch):
+    e = engine.Engine.__new__(engine.Engine)
+    calls = []
+    monkeypatch.setattr(e, "_one", 
+                        lambda path, crop, recipe, seed: calls.append((path.name, recipe["name"])) or engine.Result(
+                            path, crop, recipe, seed, None, None))
+    ticks = []
+    e.presets([Path("a.jpg"), Path("b.jpg")], ["Color Pop", "Dark Mono"], progress=lambda d, t, _: ticks.append((d, t)))
+    assert calls == [("a.jpg", "Color Pop"), ("a.jpg", "Dark Mono"), ("b.jpg", "Color Pop"), ("b.jpg", "Dark Mono")]
+    assert ticks[-1] == (4, 4)

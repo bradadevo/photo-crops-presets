@@ -1,7 +1,7 @@
 """The two ways to use looks, and export.
 
 - Random exploration: every photo gets `count` different random looks.
-- Preset pipeline: every photo goes through one saved preset.
+- Preset pipeline: every photo goes through each chosen preset.
 
 Results are made at preview size for speed; export renders each one again
 from the full-size photo, so the saved files are full resolution.
@@ -87,6 +87,19 @@ class Engine:
             out.append(self._one(path, crop, recipe, i))
             if progress:
                 progress(len(out), len(paths), out[-1].title)
+        return out
+
+    def presets(self, paths: list[Path], names: list[str], crop: str = "none", progress=None) -> list[Result]:
+        """Every photo through each of the named presets (photo by photo, so each
+        photo is prepared once)."""
+        saved = presets.load_all()
+        out = []
+        total = len(paths) * len(names)
+        for path in paths:
+            for name in names:
+                out.append(self._one(path, crop, dict(saved[name], name=name), 0))
+                if progress:
+                    progress(len(out), total, out[-1].title)
         return out
 
     def export(self, results: list[Result], folder: Path, progress=None) -> list[Path]:

@@ -47,8 +47,9 @@ It opens in your browser on this Mac.
 1. Add photos (any mix, including RAW and HEIC), or type a folder or press
    **Choose…**.
 2. Pick **Random exploration** (how many looks per photo, and an optional seed
-   so the same seed gives the same looks again) or **Preset pipeline** (pick a
-   preset).
+   so the same seed gives the same looks again) or **Preset pipeline** (tick
+   the presets to run, or **Select all**; every photo goes through each one,
+   and it shows how many looks that makes and about how long it takes).
 3. **Crop first**: the whole photo, a photo-crops pro crop, or a face close-up.
 4. **Make looks**. Click any result to compare it with the original on the
    before/after slider. Its recipe is shown; give it a name and **Save preset**
@@ -88,6 +89,8 @@ show; it is what gets saved.
 uv run photo-presets-batch --list
 uv run photo-presets-batch ~/Movies/"Game day" --random 6 --crop crop
 uv run photo-presets-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
+uv run photo-presets-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
+uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 ```
 
 ## Starter presets

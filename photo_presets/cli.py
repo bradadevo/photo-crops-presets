@@ -2,6 +2,8 @@
 
     uv run photo-presets-batch ~/Movies/"Game day" --random 6
     uv run photo-presets-batch ~/Movies/"Game day" --preset "Grit & Glory" --crop crop
+    uv run photo-presets-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
+    uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 """
 
 import argparse
@@ -18,7 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("photos", nargs="*", help="photos and/or folders")
     how = p.add_mutually_exclusive_group(required=True)
     how.add_argument("--random", type=int, metavar="N", help="N random looks per photo")
-    how.add_argument("--preset", help="run this saved preset (see --list)")
+    how.add_argument("--preset", action="append", help="run this saved preset (see --list); repeat for more")
+    how.add_argument("--all-presets", action="store_true", help="run every preset")
     how.add_argument("--list", action="store_true", help="list the presets and stop")
     p.add_argument("--crop", choices=list(CROPS), default="none", help="crop first the photo-crops way")
     p.add_argument("--seed", type=int, help="seed for random looks (same seed, same looks)")
@@ -33,8 +36,10 @@ def main(argv: list[str] | None = None) -> int:
     if not paths:
         print("No photos found", file=sys.stderr)
         return 2
-    if a.preset and a.preset not in presets.load_all():
-        print(f"No preset named {a.preset!r}; --list shows them", file=sys.stderr)
+    names = list(presets.load_all()) if a.all_presets else (a.preset or [])
+    unknown = [n for n in names if n not in presets.load_all()]
+    if unknown:
+        print(f"No preset named {unknown[0]!r}; --list shows them", file=sys.stderr)
         return 2
 
     def progress(done: int, total: int, title: str) -> None:
@@ -42,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
     e = Engine()
     results = (e.explore(paths, a.random, a.crop, a.seed, progress) if a.random
-               else e.preset(paths, a.preset, a.crop, progress=progress))
+               else e.presets(paths, names, a.crop, progress=progress))
     saved = e.export(results, Path(a.out).expanduser(), progress)
     print(f"Saved {len(saved)} photo(s) to {Path(a.out).expanduser()}")
     return 0

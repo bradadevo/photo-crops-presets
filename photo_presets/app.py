@@ -40,7 +40,7 @@ def _inputs(files, folder) -> list[Path]:
     return engine.collect(items)
 
 
-def make_looks(files, folder, mode, count, seed, preset_name, crop_label, progress=gr.Progress()):
+def make_looks(files, folder, mode, count, seed, preset_names, crop_label, progress=gr.Progress()):
     paths = _inputs(files, folder)
     if not paths:
         raise gr.Error("Add photos, or choose a folder with photos.")
@@ -53,9 +53,11 @@ def make_looks(files, folder, mode, count, seed, preset_name, crop_label, progre
         seed_value = None if seed in (None, "") else int(seed)
         results = eng().explore(paths, int(count), crop, seed_value, tick)
     else:
-        if preset_name not in presets.load_all():
-            raise gr.Error("Choose a preset.")
-        results = eng().preset(paths, preset_name, crop, progress=tick)
+        available = presets.load_all()
+        chosen = [n for n in (preset_names or []) if n in available]
+        if not chosen:
+            raise gr.Error("Tick at least one preset (or press Select all).")
+        results = eng().presets(paths, chosen, crop, progress=tick)
     gallery = [(r.after, r.title) for r in results]
     first = _show(results, 0)
     return (results, 0, gallery) + first
@@ -82,7 +84,7 @@ def save_look(results, index, name, recipe_text):
         raise gr.Error(f"Could not save: {e}")
     gr.Info(f"Saved preset \"{name.strip()}\"")
     names = list(presets.load_all())
-    return gr.update(choices=names, value=name.strip()), gr.update(choices=names, value=name.strip())
+    return gr.update(choices=names), gr.update(choices=names, value=name.strip())
 
 
 def export(results, index, folder, scope, progress=gr.Progress()):
@@ -108,6 +110,18 @@ def open_folder(folder):
 
 def toggle_mode(mode):
     return gr.update(visible=mode == RANDOM), gr.update(visible=mode == RANDOM), gr.update(visible=mode == PRESET)
+
+
+def preset_estimate(names, files, folder):
+    """How many looks the ticked presets make, and about how long they take."""
+    n = len(names or [])
+    photos = len(_inputs(files, folder)) or 1
+    looks = n * photos
+    if not looks:
+        return "No presets ticked."
+    seconds = looks * 2 + photos * 10
+    when = f"about {seconds} seconds" if seconds < 90 else f"about {round(seconds / 60)} minutes"
+    return f"{n} preset(s) x {photos} photo(s) = {looks} looks, {when}."
 
 
 # Preset manager -------------------------------------------------------------------
@@ -139,7 +153,7 @@ def save_preset(name, recipe_text):
         raise gr.Error(f"Could not save: {e}")
     gr.Info(f"Saved preset \"{name.strip()}\"")
     names = list(presets.load_all())
-    return gr.update(choices=names, value=name.strip()), gr.update(choices=names, value=name.strip())
+    return gr.update(choices=names, value=name.strip()), gr.update(choices=names)
 
 
 def delete_preset(name):
@@ -148,7 +162,7 @@ def delete_preset(name):
     else:
         gr.Warning("Only presets you saved can be deleted; built-in starters stay.")
     names = list(presets.load_all())
-    return gr.update(choices=names, value=None), gr.update(choices=names)
+    return gr.update(choices=names, value=None), gr.update(choices=names, value=[])
 
 
 def preview_preset(sample, files, folder, recipe_text, crop_label):
@@ -217,8 +231,12 @@ def build() -> gr.Blocks:
                     mode = gr.Radio([RANDOM, PRESET], value=RANDOM, label="Mode")
                     count = gr.Slider(1, 24, value=6, step=1, label="Random looks per photo")
                     seed = gr.Number(label="Seed (leave empty for new looks each time)", precision=0)
-                    preset_pick = gr.Dropdown(names, value=names[0] if names else None, label="Preset",
-                                              visible=False)
+                    with gr.Group(visible=False) as preset_box:
+                        preset_pick = gr.CheckboxGroup(names, value=[], label="Presets to run (tick any)")
+                        with gr.Row():
+                            select_all = gr.Button("Select all", size="sm")
+                            clear_all = gr.Button("Clear", size="sm")
+                        estimate = gr.Markdown("No presets ticked.")
                     crop = gr.Radio(list(CROPS.values()), value=CROPS["none"], label="Crop first")
                     go = gr.Button("Make looks", variant="primary")
                 with gr.Column(scale=2):
@@ -276,7 +294,10 @@ def build() -> gr.Blocks:
             rescan = gr.Button("Save and rescan", variant="primary")
 
         # Wiring
-        mode.change(toggle_mode, mode, [count, seed, preset_pick])
+        mode.change(toggle_mode, mode, [count, seed, preset_box])
+        select_all.click(lambda: list(presets.load_all()), None, preset_pick)
+        clear_all.click(lambda: [], None, preset_pick)
+        preset_pick.change(preset_estimate, [preset_pick, files, folder], estimate)
         choose.click(lambda f: choose_folder("Choose a folder of photos", f) or f, folder, folder)
         export_choose.click(lambda f: choose_folder("Choose where to export", f) or f, export_dir, export_dir)
         go.click(make_looks, [files, folder, mode, count, seed, preset_pick, crop],
