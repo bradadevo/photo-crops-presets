@@ -10,7 +10,10 @@ with a Gradio app.
   B&W channel mix or duotone) with textures, blend modes, impact overlays,
   lighting and edge effects.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
-  run photos straight through them.
+  run photos straight through them. 22 starter presets come built in, in
+  groups, each with a one-line description; tick any or all of them.
+- **Instagram reels**: turn the looks into a vertical video under a minute
+  (2 seconds per photo, cuts on your song's beat), ready to post.
 
 Premium tools: the player cut out from the background (each edited on its
 own), athletic clarity, specular bloom, skin-tone protection, split toning,
@@ -31,7 +34,7 @@ uv sync
 The first run downloads two free models (about 250 MB, once) to
 `~/.cache/photo-crops`, and the player cut-out model BiRefNet (about 970 MB,
 once) to `~/.rembg` the first time a look separates player and background
-(already there if you use ai-versions). Video overlays need ffmpeg
+(already there if you use ai-versions). Reels and video overlays need ffmpeg
 (`brew install ffmpeg`).
 
 ## Photo Presets app
@@ -313,8 +316,9 @@ photo_presets/
   procedural.py       Generated textures
   assets.py           Finding, fetching and caching LUTs, textures and overlays
   scene.py            Faces, ball, feet, outlines and the player cut-out; crop first
-  presetform.py       The preset manager's form, to and from recipes
+  presetform.py       The preset manager's form (tabs, explanations), to and from recipes
   explore.py          Random looks
-  presets.py          Saved and starter presets
+  presets.py          Saved and starter presets, their groups and descriptions
+  reel.py             Instagram reels: timing, beat sync, framing, titles, MP4
 tests/
 ```
