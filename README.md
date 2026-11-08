@@ -62,6 +62,17 @@ results):
    resolution to your export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
 
+6. **Make an Instagram reel**: a vertical MP4 (1080 x 1920, 30 fps) under a
+   minute, ready to post, made from the looks above or from a folder of photos
+   (such as your exports). Every photo is on screen for 2 seconds (shortened so
+   the reel fits; never under 1.5 s), slowly pushes in and dissolves into the
+   next. With a song, the cuts land on its beat (the song can start later to
+   skip a slow intro) and it fades out at the end. Add an optional opening
+   title (lower third) and closing text (such as your handle). Landscape
+   photos show about half their width, centered on the players, on a blurred
+   copy of themselves; portrait photos fill the screen. Reels are saved in
+   `Reels` inside your export folder.
+
 Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
 

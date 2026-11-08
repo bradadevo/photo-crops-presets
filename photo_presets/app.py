@@ -12,7 +12,7 @@ from pathlib import Path
 import gradio as gr
 
 from photo_crops.ui import choose_folder
-from photo_presets import engine, presets, presetform
+from photo_presets import engine, presets, presetform, reel
 from photo_presets.assets import Library, Sources
 from photo_presets.engine import CROPS, Engine
 
@@ -146,6 +146,93 @@ def preset_estimate(files, folder, *groups):
     seconds = looks * 2 + photos * 10
     when = f"about {seconds} seconds" if seconds < 90 else f"about {round(seconds / 60)} minutes"
     return f"**{n}** preset(s) × **{photos}** photo(s) = **{looks}** looks, {when}."
+
+
+# Reel ---------------------------------------------------------------------------------
+
+LOOKS, FOLDER = "looks", "folder"
+REEL_SOURCES = [("The looks made above", LOOKS), ("Photos in a folder (e.g. your exports)", FOLDER)]
+
+
+def _folder_photos(folder) -> list[Path]:
+    d = Path(folder or DEFAULT_EXPORT).expanduser()
+    return sorted(engine.collect([str(d)])) if d.is_dir() else []
+
+
+def _reel_count(results, source, folder) -> int:
+    return len(results or []) if source == LOOKS else len(_folder_photos(folder))
+
+
+def reel_estimate(results, source, folder, photo_sec, max_sec):
+    n = _reel_count(results, source, folder)
+    if not n:
+        return ("Make some looks first (steps 1 to 3)." if source == LOOKS
+                else "No photos in that folder yet.")
+    sec, keep = reel.fit(n, float(photo_sec), float(max_sec))
+    text = f"**{keep}** photos × {sec:.1f} s = **{keep * sec:.0f} s** reel"
+    if keep < n:
+        text += f". Only {keep} of {n} fit; the last {n - keep} are left out (fewer looks, or a longer reel, fit more)"
+    minutes = (keep * 1.5 + keep * sec * 0.4 + 15) / 60
+    return text + f". Takes about {max(1, round(minutes))} minute(s)."
+
+
+def _folder_shots(paths: list[Path], progress) -> list[reel.Shot]:
+    """Photos from a folder; exported looks (with their recipe .json beside
+    them) are framed on their player."""
+    from photo_crops import images
+    shots = []
+    for i, path in enumerate(paths):
+        focus = (0.5, 0.5)
+        info = path.with_suffix(".json")
+        if info.exists():
+            try:
+                meta = json.loads(info.read_text())
+                focus = engine.focus(eng().prepared(Path(meta["source"]), meta.get("crop", "none")).scene)
+            except (OSError, ValueError, KeyError):
+                pass
+        img = images.load(path).image
+        img.thumbnail((engine.REEL_EDGE, engine.REEL_EDGE))
+        shots.append(reel.Shot(img, focus, path.stem))
+        progress(i + 1, len(paths), path.name)
+    return shots
+
+
+def make_reel(results, source, folder, song, start, title, closing, photo_sec, max_sec, export_dir,
+              progress=gr.Progress()):
+    def tick(what):
+        def f(done, total, name=""):
+            progress(done / max(total, 1), desc=f"{what} {done}/{total} {name}".strip())
+        return f
+
+    if source == LOOKS:
+        if not results:
+            raise gr.Error("Make some looks first (steps 1 to 3), or pick Photos in a folder.")
+        count = len(results)
+    else:
+        paths = _folder_photos(folder)
+        if not paths:
+            raise gr.Error("No photos in that folder.")
+        count = len(paths)
+    beat, beats = None, []
+    if song:
+        progress(0, desc="Finding the song's beat")
+        beat, beats = reel.song_beat(song)
+    sec, keep = reel.fit(count, float(photo_sec), float(max_sec), beat)
+    shots = (eng().reel_shots(results[:keep], tick("Preparing photo")) if source == LOOKS
+             else _folder_shots(paths[:keep], tick("Preparing photo")))
+    plan = reel.Plan(shots, sec, [])
+    dest = engine._unique(Path(export_dir or DEFAULT_EXPORT).expanduser() / "Reels"
+                          / f"{engine.slug(title or 'reel')}.mp4")
+    reel.render(plan, dest, song, reel.song_start(beats, float(start or 0)) if song else 0.0,
+                title, closing, tick("Making frames"))
+    left = f" The last {count - keep} photo(s) did not fit and were left out." if keep < count else ""
+    beat_note = f", cuts on the beat ({60 / beat:.0f} BPM)" if beat else ""
+    return str(dest), (f"Saved a {plan.length:.0f} s reel ({keep} photos at {sec:.2f} s{beat_note}) to "
+                       f"`{dest}`.{left}")
+
+
+def open_reels(folder):
+    open_folder(str(Path(folder or DEFAULT_EXPORT).expanduser() / "Reels"))
 
 
 # Preset manager -------------------------------------------------------------------
@@ -297,7 +384,8 @@ def build() -> gr.Blocks:
             "Pro looks for your sports photos. Faces stay clean of effects, and your originals are never "
             "changed.\n\n"
             "<div class='steps-strip'><span>1 · Add photos</span><span>2 · Choose looks</span>"
-            "<span>3 · Make looks</span><span>4 · Compare</span><span>5 · Save or export</span></div>",
+            "<span>3 · Make looks</span><span>4 · Compare</span><span>5 · Save or export</span>"
+            "<span>6 · Instagram reel</span></div>",
             elem_classes="app-header")
 
         with gr.Tab("Make looks"):
@@ -362,6 +450,37 @@ def build() -> gr.Blocks:
                         export_msg = gr.Markdown(elem_classes="hint")
                         with gr.Accordion("Advanced: this look's recipe", open=False):
                             recipe_box = gr.Code(language="json", label="Recipe (edit before saving if you like)")
+                    with gr.Column(elem_classes="panel"):
+                        step(6, "Make an Instagram reel",
+                             "A vertical video under a minute, ready to post: each photo slowly pushes in, "
+                             "dissolves into the next, and cuts on the beat of your song.")
+                        reel_source = gr.Radio(REEL_SOURCES, value=LOOKS, label="Photos for the reel",
+                                               info="A folder uses the export folder above unless you type another.")
+                        reel_folder = gr.Textbox(value=DEFAULT_EXPORT, label="Folder", visible=False)
+                        with gr.Row(equal_height=False, elem_classes="row-end"):
+                            reel_song = gr.File(label="Song (optional)", type="filepath", file_types=["audio"],
+                                                height=110, scale=3)
+                            reel_start = gr.Number(0, label="Start the song at (seconds)", precision=1, scale=2,
+                                                   info="Skip a slow intro.")
+                        with gr.Row():
+                            reel_title = gr.Textbox(label="Opening title (optional)",
+                                                    placeholder="e.g. PSG 11U vs West Park",
+                                                    info="Shown in the lower third for the first 3 seconds.")
+                            reel_closing = gr.Textbox(label="Closing text (optional)",
+                                                      placeholder="e.g. @yourhandle",
+                                                      info="Shown over the last photo.")
+                        with gr.Row():
+                            reel_sec = gr.Slider(1.5, 4, value=2.0, step=0.1, label="Seconds per photo",
+                                                 info="Shortened automatically so the reel fits.")
+                            reel_max = gr.Slider(15, 59, value=59, step=1, label="Longest reel (seconds)",
+                                                 info="Instagram reels under a minute.")
+                        reel_estimate_box = gr.Markdown("Make some looks first (steps 1 to 3).",
+                                                        elem_classes="hint")
+                        with gr.Row(equal_height=False, elem_classes="row-end"):
+                            reel_btn = gr.Button("Make reel", variant="primary", scale=2)
+                            reel_open = gr.Button("Open reels folder", scale=1, min_width=170)
+                        reel_video = gr.Video(label="Your reel", height=520, interactive=False)
+                        reel_msg = gr.Markdown(elem_classes="hint")
 
         with gr.Tab("Preset manager"):
             gr.Markdown("Build or change a preset: load one to start from, adjust the settings, preview it on a "
@@ -413,6 +532,14 @@ def build() -> gr.Blocks:
                     summary = gr.Markdown(assets_summary())
 
         # Wiring
+        reel_inputs = [results, reel_source, reel_folder, reel_sec, reel_max]
+        for trigger in (reel_source.change, reel_folder.change, reel_sec.change, reel_max.change, results.change):
+            trigger(reel_estimate, reel_inputs, reel_estimate_box, show_progress="hidden")
+        reel_source.change(lambda v: gr.update(visible=v == FOLDER), reel_source, reel_folder)
+        export_dir.change(lambda f: f, export_dir, reel_folder)
+        reel_btn.click(make_reel, [results, reel_source, reel_folder, reel_song, reel_start, reel_title,
+                                   reel_closing, reel_sec, reel_max, export_dir], [reel_video, reel_msg])
+        reel_open.click(open_reels, export_dir, None)
         mode.change(toggle_mode, mode, [random_box, preset_box])
         select_all.click(lambda: picker_updates(ticked=set(presets.load_all())), None, pickers)
         clear_all.click(lambda: picker_updates(ticked=[]), None, pickers)

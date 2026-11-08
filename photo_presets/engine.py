@@ -14,14 +14,16 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 from photo_crops import images
-from photo_presets import explore, pipeline, presets
+from photo_presets import explore, pipeline, presets, reel
 from photo_presets.assets import Library
 from photo_presets.scene import Prepared, prepare
 
 PREVIEW_EDGE = 1600
+REEL_EDGE = 2400  # a landscape photo shows half its width across the reel's 1080 px
 PREPARED_CACHE = 4
 CROPS = {"none": "Whole photo", "crop": "Pro crop (photo-crops)", "face": "Face close-up (photo-crops)"}
 
@@ -102,6 +104,22 @@ class Engine:
                     progress(len(out), total, out[-1].title)
         return out
 
+    def reel_shots(self, results: list[Result], progress=None) -> list[reel.Shot]:
+        """The looks again at REEL_EDGE px (sharper than the previews on a
+        phone screen), each with where its player is."""
+        shots = []
+        for i, r in enumerate(results):
+            p = self.prepared(r.source, r.crop)
+            if pipeline.needs_cutout(r.recipe):
+                p.ensure_matte()
+            img = p.image.copy()
+            img.thumbnail((REEL_EDGE, REEL_EDGE))
+            look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed)
+            shots.append(reel.Shot(look, focus(p.scene), r.title))
+            if progress:
+                progress(i + 1, len(results), r.title)
+        return shots
+
     def export(self, results: list[Result], folder: Path, progress=None) -> list[Path]:
         """Full-resolution JPEGs, each with its recipe beside it as JSON."""
         folder.mkdir(parents=True, exist_ok=True)
@@ -121,6 +139,21 @@ class Engine:
             if progress:
                 progress(i + 1, len(results), dest.name)
         return saved
+
+
+def focus(scene) -> tuple[float, float]:
+    """Where to center a reel on (shares of the image): the middle of the
+    players in the play (so a pair stays together), else of the main player,
+    else the center."""
+    m = scene.subject_mask
+    if m is not None and m.any():
+        ys, xs = np.nonzero(m)
+        h, w = m.shape[:2]
+        return (xs.min() + xs.max()) / 2 / w, (ys.min() + ys.max()) / 2 / h
+    if scene.feet:
+        x, y = scene.feet
+        return x, max(0.0, y - scene.subject_height / 2)
+    return 0.5, 0.5
 
 
 def slug(name: str) -> str:
