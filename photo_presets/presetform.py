@@ -57,7 +57,8 @@ DEFAULTS = {
     "pa_outline": "#ff6f7d", "pa_bg": "#9a6a44", "pa_bg_amount": 0.85, "pa_crisp": False,
     "ps_on": False, "ps_amount": 0.85, "ps_strokes": 0.7, "ps_front": 0.25, "ps_whips": 0.0,
     "nl_on": False, "nl_darkness": 0.6, "nl_lines": 1.0, "nl_detail": 0.6, "nl_rim": 1.0, "nl_glow": 0.5,
-    "pb_on": False, "pb_amount": 0.9, "pb_size": 1.0, "pb_direction": 0.0,
+    "pb_on": False, "pb_amount": 0.9, "pb_size": 1.0, "pb_direction": 0.0, "pb_splash": 1.0, "pb_lines": 0.0,
+    "pb_specks": 0.0,
     "dr_on": False, "dr_colors": "#fff1d9,#ff9fc8,#a6ecd3,#7b4a32", "dr_amount": 0.8, "dr_length": 1.0,
     "dr_gloss": 0.8, "dr_front": 0.0,
 }
@@ -120,7 +121,8 @@ def to_recipe(v: dict) -> dict:
         s.append({"op": "neon_lineart", "darkness": v["nl_darkness"], "lines": v["nl_lines"], "detail": v["nl_detail"],
                   "rim": v["nl_rim"], "glow": v["nl_glow"]})
     if v["pb_on"]:
-        s.append({"op": "paint_burst", "amount": v["pb_amount"], "size": v["pb_size"], "direction": v["pb_direction"]})
+        s.append({"op": "paint_burst", "amount": v["pb_amount"], "size": v["pb_size"], "direction": v["pb_direction"],
+                  "splash": v["pb_splash"], "lines": v["pb_lines"], "specks": v["pb_specks"]})
     if v["dr_on"]:
         s.append({"op": "drip", "colors": v["dr_colors"], "amount": v["dr_amount"], "length": v["dr_length"],
                   "gloss": v["dr_gloss"], "front": v["dr_front"]})
@@ -250,7 +252,8 @@ def from_recipe(recipe: dict) -> dict:
             v.update(nl_on=True, nl_darkness=g("darkness", 0.6), nl_lines=g("lines", 1.0), nl_detail=g("detail", 0.6),
                      nl_rim=g("rim", 1.0), nl_glow=g("glow", 0.5))
         elif op == "paint_burst":
-            v.update(pb_on=True, pb_amount=g("amount", 0.9), pb_size=g("size", 1.0), pb_direction=g("direction", 0.0))
+            v.update(pb_on=True, pb_amount=g("amount", 0.9), pb_size=g("size", 1.0), pb_direction=g("direction", 0.0),
+                     pb_splash=g("splash", 1.0), pb_lines=g("lines", 0.0), pb_specks=g("specks", 0.0))
         elif op == "drip":
             v.update(dr_on=True, dr_colors=g("colors", v["dr_colors"]), dr_amount=g("amount", 0.8),
                      dr_length=g("length", 1.0), dr_gloss=g("gloss", 0.8), dr_front=g("front", 0.0))
@@ -482,6 +485,10 @@ def components(ids: dict) -> dict:
                     slider("pb_amount", 0, 1, "Amount")
                     slider("pb_size", 0.4, 2, "Size")
                     slider("pb_direction", -180, 180, "Trails toward (degrees)", step=5, info="0 = right, 90 = down.")
+                with gr.Row():
+                    slider("pb_splash", 0, 1, "Solid paint", info="Lower: lighter, smaller splashes.")
+                    slider("pb_lines", 0, 1, "Streak lines", info="Fine lines flying out, ending in drops.")
+                    slider("pb_specks", 0, 1, "Specks", info="Tiny drops scattered across the dark.")
             check("dr_on", "Ice cream drip", "Glossy melting ice cream running down from the top, behind the player.")
             with when("dr_on"):
                 c["dr_colors"] = gr.Textbox(DEFAULTS["dr_colors"], label="Flavors (colors, back to front)",

@@ -779,11 +779,13 @@ def _scaled_scene(scene):
 
 
 @op("paint_burst", cutout=True, label="Paint explosion (behind the player)", colors=RAINBOW, amount=0.9, size=1.0,
-    direction=0.0)
+    direction=0.0, splash=1.0, lines=0.0, specks=0.0)
 def paint_burst(a, p, ctx):
     """A big explosion of neon paint behind the player: organic splashes,
     flung drops and streaks, colors flowing across it. direction (degrees,
-    0 = to the right) is where it trails."""
+    0 = to the right) is where it trails. splash (0-1): how much of it is
+    solid paint; lines (0-1): fine streaks flying out, each ending in a drop;
+    specks (0-1): tiny drops scattered across the dark."""
     from photo_presets import procedural
     h, w = a.shape[:2]
     scale = min(1.0, 2400 / max(h, w))
@@ -800,7 +802,9 @@ def paint_burst(a, p, ctx):
     n1 = procedural.fractal(rng, sh, sw, max(sh, sw) / 12, octaves=6)
     n2 = procedural.fractal(rng, sh, sw, max(sh, sw) / 45, octaves=4)
     field = env * (0.5 * n1 + 0.5 * n2)
-    splash = np.clip((field - 0.3) * 40, 0, 1)  # hard-edged organic splashes, like thrown paint
+    # hard-edged organic splashes, like thrown paint (less splash: only the thickest coats)
+    splash = np.clip((field - (0.3 + 0.22 * (1 - float(p["splash"])))) * 40, 0, 1) if float(p["splash"]) > 0 \
+        else np.zeros_like(field)
     # flung drops and streaks radiating out of the burst
     drops = np.zeros((sh, sw), np.float32)
     for _ in range(int(160 * float(p["amount"]))):
@@ -816,6 +820,24 @@ def paint_burst(a, p, ctx):
         else:
             cv2.circle(drops, (int(x1), int(y1)), max(1, int(ph * rng.uniform(0.001, 0.006))),
                        float(rng.uniform(0.6, 1)), -1, cv2.LINE_AA)
+    # fine streak lines flying out of the burst, each ending in a round drop
+    for _ in range(int(260 * float(p["lines"]))):
+        b = ang + rng.normal(0, 1.4)
+        d0 = ph * rng.uniform(0.15, 0.45) * size
+        d1 = d0 + ph * rng.uniform(0.08, 0.6) * size
+        x0, y0 = ex + np.cos(b) * d0 * 0.7, ey + np.sin(b) * d0 * 0.7
+        x1, y1 = ex + np.cos(b) * d1, ey + np.sin(b) * d1
+        k = float(rng.uniform(0.55, 1))
+        cv2.line(drops, (int(x0), int(y0)), (int(x1), int(y1)), k, max(1, int(ph * 0.0014)), cv2.LINE_AA)
+        if rng.random() < 0.7:
+            cv2.circle(drops, (int(x1), int(y1)), max(1, int(ph * rng.uniform(0.003, 0.007))), 1.0, -1, cv2.LINE_AA)
+    # tiny specks scattered across the dark, thinning out away from the player
+    for _ in range(int(1800 * float(p["specks"]))):
+        x = fx + rng.normal(0, ph * 0.9)
+        y = cy + rng.normal(0, ph * 0.7)
+        if 0 <= x < sw and 0 <= y < sh:
+            cv2.circle(drops, (int(x), int(y)), max(1, int(ph * rng.uniform(0.0008, 0.0025))),
+                       float(rng.uniform(0.4, 1)), -1, cv2.LINE_AA)
     cover = np.clip(np.maximum(splash, drops), 0, 1)
     hue = _hue_field(sh, sw, ctx.scene, p["colors"], ctx.seed + 5)
     # splashes are brightest at their cores

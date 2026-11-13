@@ -178,6 +178,12 @@ STARTERS: dict[str, dict] = {
         {"op": "paint_splatter", "amount": 0.5, "strokes": 0.0, "front": 0.0, "whips": 0.25,
          "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
+    "Neon Streaks": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+        {"op": "neon_lineart", "darkness": 0.6, "lines": 1.0, "detail": 0.6, "rim": 1.0, "glow": 0.5},
+        {"op": "paint_burst", "amount": 0.9, "size": 0.9, "direction": 0.0, "splash": 0.3, "lines": 1.0, "specks": 1.0},
+        {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.4,
+         "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
+         "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
     "Ice Cream Drip": {"protect_faces": True, "steps": [
         {"op": "high_key", "amount": 0.25, "layer": "background"},
         {"op": "saturation", "amount": 0.85, "layer": "background"},
@@ -258,6 +264,7 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Neon Pop Art": (BOLD, "The player as a neon pop-art painting with paint splatters, on a dark sepia background"),
     "Neon Pop Art Sharp": (BOLD, "Neon Pop Art with crisp, screen-print edges and thin ink lines"),
     "Neon Splash": (BOLD, "The player as glowing neon line art on black, with a paint explosion behind them"),
+    "Neon Streaks": (BOLD, "Neon line art on black with fine paint streaks, drops and specks flying out behind the player"),
     "Ice Cream Drip": (STUDIO, "Glossy melting ice cream (vanilla, strawberry, mint, chocolate) dripping behind the player"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }

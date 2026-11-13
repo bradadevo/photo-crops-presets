@@ -10,7 +10,7 @@ with a Gradio app.
   B&W channel mix or duotone) with textures, blend modes, impact overlays,
   lighting and edge effects.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
-  run photos straight through them. 26 starter presets come built in, in
+  run photos straight through them. 27 starter presets come built in, in
   groups, each with a one-line description; tick any or all of them.
 - **Instagram reels**: turn the looks into a vertical video under a minute
   (2 seconds per photo, cuts on your song's beat), ready to post.
@@ -156,6 +156,7 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Neon Pop Art | The player as a neon pop-art painting (indigo, cyan, pink, orange and yellow-green paint, painted lines, a glowing outline) with paint splatter and swooping strokes, on a dark sepia background |
 | Neon Pop Art Sharp | Neon Pop Art with crisp, screen-print edges: hard-edged paint shapes, thin ink and bright etched lines, a thin outline, whip lines flying outward, and a near-black background |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
+| Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
 | Ice Cream Drip | Glossy melting ice cream (vanilla, strawberry, mint, chocolate) dripping from the top of the frame, behind the player, on a softly brightened background |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
@@ -222,7 +223,7 @@ A look is a recipe: a list of steps, run in order.
 | `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
 | `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`: the player as neon line art with a glowing rim; the background goes black |
-| `paint_burst` | `amount`, `size`, `direction`, `colors`: a hard-edged explosion of neon paint behind the player |
+| `paint_burst` | `amount`, `size`, `direction`, `colors`, `splash` (solid paint, 0-1), `lines` (streaks ending in drops, 0-1), `specks` (0-1): a hard-edged explosion of neon paint behind the player |
 | `drip` | `colors` (back to front), `amount`, `length`, `gloss`, `front`, `shadow`: glossy melting ice cream from the top of the frame |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
