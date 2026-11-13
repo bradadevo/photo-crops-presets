@@ -428,3 +428,50 @@ def test_paint_splatter_lands_around_the_player(empty_library):
     painted = (np.abs(out - 20).max(axis=-1) > 30)
     assert painted[:, :130].mean() + painted[:, 170:].mean() > 0.02   # paint around the player
     assert not painted[60:280, 135:165].any()                         # none over them with front 0
+
+
+def test_effects_that_use_the_cutout_get_it_traced():
+    # Neon Splash (2026-11-13) has no player/background steps, yet its effects need the cut-out
+    assert pipeline.needs_cutout(presets.STARTERS["Neon Splash"])
+    assert pipeline.needs_cutout({"steps": [{"op": "smoke_cloud"}]})
+    assert not pipeline.needs_cutout({"steps": [{"op": "grain"}]})
+
+
+def test_raw_camera_data_and_date_carry_into_saved_pictures(tmp_path):
+    # pictures made from RAW files showed Jan 1 1980: they had no date at all (2026-11-13)
+    from photo_crops import images
+    raw = next(iter(sorted((Path.home() / "Movies/11U PSG LAKE NONA VS WPARK").glob("*.ARW"))), None)
+    if raw is None:
+        pytest.skip("needs a Sony RAW test photo")
+    exif = images.raw_exif(raw)
+    when = images.taken_at(exif)
+    assert when is not None and when.year >= 2020
+    dest = tmp_path / "look.jpg"
+    images.save_jpeg(Image.new("RGB", (20, 20)), dest, exif)
+    saved = Image.open(dest).getexif()
+    assert saved.get(0x0110) and saved.get(0x0112) == 1            # camera model, upright
+    assert images.taken_at(saved.tobytes()) == when                 # the date it was taken
+    assert abs(dest.stat().st_mtime - when.timestamp()) < 2         # and the file is dated then too
+
+
+def test_jpeg_orientation_is_reset_after_turning_upright():
+    from photo_crops import images
+    ex = Image.Exif()
+    ex[0x0112] = 6
+    ex[0x0132] = "2026:11:07 11:18:29"
+    fixed = Image.Exif()
+    fixed.load(images.upright_exif(ex.tobytes()))
+    assert fixed[0x0112] == 1 and fixed[0x0132] == "2026:11:07 11:18:29"
+
+
+def test_ice_cream_drips_from_the_top_behind_the_player(empty_library):
+    img = Image.new("RGB", (300, 400), (60, 120, 60))
+    matte = np.zeros((400, 300), np.float32)
+    matte[60:390, 120:180] = 1
+    scene = Scene(feet=(0.5, 0.97), subject_height=0.8, matte=matte)
+    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [{"op": "drip"}]},
+                                     empty_library, scene)[0], np.int16)
+    changed = np.abs(out - [60, 120, 60]).max(axis=-1) > 25
+    assert changed[:15].mean() > 0.9                    # the top is covered in ice cream
+    assert changed[360:].mean() < 0.05                  # the drips stop well before the bottom
+    assert not changed[80:380, 125:175].any()           # the player stays clear (front 0)

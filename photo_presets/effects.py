@@ -410,7 +410,7 @@ def _blob(h, w, cx, cy, rx, ry):
     return np.exp(-(((x - cx) / max(rx, 1)) ** 2) - (((y - cy) / max(ry, 1)) ** 2)).astype(np.float32)
 
 
-@op("smoke_cloud", label="Smoke clouds", color="#ffffff", color2="", place="sides", amount=0.85, size=1.0,
+@op("smoke_cloud", cutout=True, label="Smoke clouds", color="#ffffff", color2="", place="sides", amount=0.85, size=1.0,
     front=0.0)
 def smoke_cloud(a, p, ctx):
     """Billowing studio smoke shaped around the player: at both sides, behind,
@@ -499,7 +499,7 @@ def stadium_lights(a, p, ctx):
     return blend(a, layer, "screen", float(p["amount"]))
 
 
-@op("subject_vignette", label="Vignette around the player", amount=0.6, spread=0.3)
+@op("subject_vignette", cutout=True, label="Vignette around the player", amount=0.6, spread=0.3)
 def subject_vignette(a, p, ctx):
     """Darkens away from the player's own outline (not the frame's center), so
     the light falls off around them wherever they are. Spread: how far out
@@ -540,7 +540,7 @@ def _art_mask(ctx, h, w) -> np.ndarray:
     return ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
 
 
-@op("pop_art", label="Neon pop art (player)", palette=POP_PALETTE, levels=7, mottle=0.35, lines=0.6,
+@op("pop_art", cutout=True, label="Neon pop art (player)", palette=POP_PALETTE, levels=7, mottle=0.35, lines=0.6,
     outline="#ff6f7d", glow=0.7, shading=0.45, background="#9a6a44", background_amount=0.85, crisp=0.0,
     ink="#1b0d3d", etch="#fff6c8", amount=1.0)
 def pop_art(a, p, ctx):
@@ -613,7 +613,7 @@ def pop_art(a, p, ctx):
     return out
 
 
-@op("paint_splatter", label="Paint splatter and strokes", palette="#ff4fa8,#2fc6ff,#ff8f5a,#e6ff4d,#7a5cff",
+@op("paint_splatter", cutout=True, label="Paint splatter and strokes", palette="#ff4fa8,#2fc6ff,#ff8f5a,#e6ff4d,#7a5cff",
     stroke_colors="#ff6f7d,#ff8f5a,#ff4fa8,#2fc6ff", amount=0.85, strokes=0.7, front=0.25, whips=0.0)
 def paint_splatter(a, p, ctx):
     """Paint splatters, sprays and swooping brush strokes around the player in
@@ -706,3 +706,197 @@ def paint_splatter(a, p, ctx):
     behind = 1 - ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
     where = behind + (1 - behind) * float(p["front"])
     return a + (paint - a) * (np.clip(cover, 0, 1) * where * float(p["amount"]))[..., None]
+
+
+# Neon line art -------------------------------------------------------------------
+
+RAINBOW = "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#4a5bff,#b14dff,#ff2d95"
+
+
+def _hue_field(h, w, scene, colors: str, seed: int) -> np.ndarray:
+    """Neon colors flowing across the frame (diagonally, wavering), so lines
+    and paint shift hue along the player's body."""
+    from photo_presets import procedural
+    y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+    fx, fy, ph = _player(scene, h, w)
+    u = ((x - fx) * 0.8 + (y - (fy - ph / 2)) * 0.6) / max(ph, 1) * 0.9 + 0.5
+    rng = np.random.default_rng(seed + 61)
+    small = procedural.fractal(rng, max(8, h // 8), max(8, w // 8), max(h, w) / 40, octaves=3)
+    u = u + (cv2.resize(small, (w, h)) - 0.5) * 0.5
+    return _gradient_map(np.mod(u, 1.0), _palette(colors))
+
+
+@op("neon_lineart", cutout=True, label="Neon line art (player)", colors=RAINBOW, body="#140a3a", darkness=0.75, lines=1.0,
+    detail=0.6, rim=1.0, glow=0.5, background="#000000", background_amount=1.0)
+def neon_lineart(a, p, ctx):
+    """The player as neon line art on black: a dark body (deep indigo, its
+    shading kept), crisp neon contour and detail lines and a glowing rim, in
+    colors that flow across the body. The background goes to `background`."""
+    h, w = a.shape[:2]
+    scale = min(1.0, 3200 / max(h, w))
+    sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
+    small = cv2.resize(a, (sw, sh), interpolation=cv2.INTER_AREA)
+    lum = _luma(small)
+    hue = _hue_field(sh, sw, _scaled_scene(ctx.scene), p["colors"], ctx.seed)
+    # the dark body: deep indigo with the photo's shading, highlights tinted by the neon colors
+    shade = np.clip(lum, 0, 1) ** 1.6
+    body = _hex(p["body"]) * (1 - float(p["darkness"]) + 0.6 * shade[..., None]) + hue * (shade * 0.5)[..., None]
+    px = max(1, int(0.0009 * max(sh, sw)))
+    # contour lines (strong edges) and fine detail lines (folds, hair, the face)
+    soft = cv2.GaussianBlur(lum, (0, 0), 1.2)
+    contour = cv2.Canny((soft * 255).astype(np.uint8), 35, 100)
+    dog = cv2.GaussianBlur(lum, (0, 0), 0.7) - cv2.GaussianBlur(lum, (0, 0), 2.2)
+    fine = (np.abs(dog) > 0.03).astype(np.uint8) * 255
+    fine = cv2.morphologyEx(fine, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    lines = np.maximum(cv2.dilate(contour, np.ones((px, px), np.uint8)).astype(np.float32) / 255,
+                       fine.astype(np.float32) / 255 * float(p["detail"]))
+    lines = np.clip(lines * float(p["lines"]), 0, 1)
+    art = body + (hue - body) * lines[..., None]
+    art = cv2.resize(art, (w, h), interpolation=cv2.INTER_CUBIC)
+    hue_full = cv2.resize(hue, (w, h), interpolation=cv2.INTER_LINEAR)
+    lines_full = cv2.resize(lines, (w, h), interpolation=cv2.INTER_LINEAR)
+    mask = _art_mask(ctx, h, w)
+    out = a + (art - a) * mask[..., None]
+    if ctx.alpha is not None:
+        bg = _hex(p["background"])
+        out = out + (bg - out) * ((1 - mask) * float(p["background_amount"]))[..., None]
+        # the neon rim: a bright edge fading into the body, plus a soft glow outside
+        m = (ctx.alpha > 0.5).astype(np.uint8)
+        d_in = cv2.distanceTransform(m, cv2.DIST_L2, 5)
+        r = max(2.0, 0.006 * max(h, w))
+        inner = np.exp(-d_in / r) * m
+        edge = cv2.dilate(m, np.ones((3, 3), np.uint8)).astype(np.float32) - m
+        rim = np.clip(inner * 0.9 + cv2.GaussianBlur(edge, (0, 0), 0.8), 0, 1) * float(p["rim"])
+        out = out + (hue_full - out) * rim[..., None]
+    # a little neon bloom on the lines and rim
+    lit = lines_full * mask + (rim if ctx.alpha is not None else 0)
+    bloom = cv2.GaussianBlur(hue_full * np.clip(lit, 0, 1)[..., None], (0, 0), max(1.5, 0.004 * max(h, w)))
+    return blend(np.clip(out, 0, 1), np.clip(bloom * 1.5, 0, 1), "screen", float(p["glow"]))
+
+
+def _scaled_scene(scene):
+    return scene  # player positions are shares of the frame, so they hold at any size
+
+
+@op("paint_burst", cutout=True, label="Paint explosion (behind the player)", colors=RAINBOW, amount=0.9, size=1.0,
+    direction=0.0)
+def paint_burst(a, p, ctx):
+    """A big explosion of neon paint behind the player: organic splashes,
+    flung drops and streaks, colors flowing across it. direction (degrees,
+    0 = to the right) is where it trails."""
+    from photo_presets import procedural
+    h, w = a.shape[:2]
+    scale = min(1.0, 2400 / max(h, w))
+    sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
+    fx, fy, ph = (v * scale for v in _player(ctx.scene, h, w))
+    cy = fy - ph * 0.5
+    size = float(p["size"])
+    rng = np.random.default_rng(ctx.seed + 73)
+    ang = np.deg2rad(float(p["direction"]))
+    # the burst: a lopsided cloud trailing behind the player
+    ex, ey = fx + np.cos(ang) * ph * 0.25 * size, cy + np.sin(ang) * ph * 0.25 * size
+    env = _blob(sh, sw, ex, ey, ph * 0.55 * size, ph * 0.55 * size)
+    env = np.maximum(env, 0.8 * _blob(sh, sw, fx, cy, ph * 0.35 * size, ph * 0.5 * size))
+    n1 = procedural.fractal(rng, sh, sw, max(sh, sw) / 12, octaves=6)
+    n2 = procedural.fractal(rng, sh, sw, max(sh, sw) / 45, octaves=4)
+    field = env * (0.5 * n1 + 0.5 * n2)
+    splash = np.clip((field - 0.3) * 40, 0, 1)  # hard-edged organic splashes, like thrown paint
+    # flung drops and streaks radiating out of the burst
+    drops = np.zeros((sh, sw), np.float32)
+    for _ in range(int(160 * float(p["amount"]))):
+        b = ang + rng.normal(0, 1.1)
+        d0 = ph * rng.uniform(0.25, 0.5) * size
+        d1 = d0 + ph * rng.uniform(0.03, 0.18) * size
+        x0, y0 = ex + np.cos(b) * d0 * 0.6, ey + np.sin(b) * d0 * 0.6
+        x1, y1 = ex + np.cos(b) * d1, ey + np.sin(b) * d1
+        if rng.random() < 0.3:  # a short streak ending in a drop
+            cv2.line(drops, (int(x0), int(y0)), (int(x1), int(y1)), float(rng.uniform(0.6, 1)),
+                     max(1, int(ph * 0.002)), cv2.LINE_AA)
+            cv2.circle(drops, (int(x1), int(y1)), max(1, int(ph * rng.uniform(0.003, 0.008))), 1.0, -1, cv2.LINE_AA)
+        else:
+            cv2.circle(drops, (int(x1), int(y1)), max(1, int(ph * rng.uniform(0.001, 0.006))),
+                       float(rng.uniform(0.6, 1)), -1, cv2.LINE_AA)
+    cover = np.clip(np.maximum(splash, drops), 0, 1)
+    hue = _hue_field(sh, sw, ctx.scene, p["colors"], ctx.seed + 5)
+    # splashes are brightest at their cores
+    # paint varies inside each splash (thicker and thinner coats), brightest at the cores
+    paint = hue * (0.6 + 0.25 * np.clip(field * 2, 0, 1) + 0.3 * (n2 - 0.5))[..., None]
+    paint = cv2.resize(paint, (w, h), interpolation=cv2.INTER_LINEAR)
+    cover = cv2.resize(cover, (w, h), interpolation=cv2.INTER_LINEAR)
+    behind = 1 - ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
+    return a + (paint - a) * (cover * behind * float(p["amount"]))[..., None]
+
+
+# Drips ---------------------------------------------------------------------------
+
+ICE_CREAM = "#fff1d9,#ff9fc8,#a6ecd3,#7b4a32"  # vanilla, strawberry, mint, chocolate
+
+
+@op("drip", cutout=True, label="Ice cream drip", colors=ICE_CREAM, amount=0.8, length=1.0, gloss=0.8,
+    front=0.0, shadow=0.35)
+def drip(a, p, ctx):
+    """Glossy melting ice cream running down from the top of the frame: one
+    layer per color, each a wavy band with drips of different lengths ending
+    in round drops, shaded with a shine and casting a soft shadow. The drips
+    run behind the players; front (0-1) lets them cover them too."""
+    from photo_presets import procedural
+    h, w = a.shape[:2]
+    scale = min(1.0, 2400 / max(h, w))
+    sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
+    rng = np.random.default_rng(ctx.seed + 89)
+    colors = _palette(p["colors"])
+    n = len(colors)
+    out_small = cv2.resize(a, (sw, sh), interpolation=cv2.INTER_AREA)
+    coat = np.zeros((sh, sw, 3), np.float32)
+    cover = np.zeros((sh, sw), np.float32)
+    shade_all = np.zeros((sh, sw), np.float32)
+    x = np.arange(sw, dtype=np.float32)
+    unit = max(sh, sw)
+    for i in range(n):  # back layer (longest drips) first; each next one sits on top, shorter
+        depth = (n - i) / n
+        wave = procedural.fractal(rng, 4, sw, sw / 5, octaves=3)[1]
+        scallop = np.abs(np.sin(x / (unit * rng.uniform(0.035, 0.06)) + rng.uniform(0, 6)))
+        base = sh * (0.05 + 0.06 * depth) + (wave - 0.5) * sh * 0.07 + scallop * unit * 0.012
+        m = np.zeros((sh, sw), np.float32)
+        ys = np.arange(sh, dtype=np.float32)[:, None]
+        m[ys < base[None, :]] = 1.0
+        for _ in range(int((4 + 8 * float(p["amount"])) * (0.6 + 0.4 * depth))):
+            cx = rng.uniform(0, sw)
+            width = unit * rng.uniform(0.014, 0.045)
+            top = float(base[int(np.clip(cx, 0, sw - 1))])
+            length = sh * rng.uniform(0.03, 0.4) * depth * float(p["length"])
+            bottom = top + length
+            pts = np.array([[cx - width / 2, top - 2], [cx + width / 2, top - 2],
+                            [cx + width * 0.42, bottom], [cx - width * 0.42, bottom]], np.int32)
+            cv2.fillConvexPoly(m, pts, 1.0, cv2.LINE_AA)
+            cv2.circle(m, (int(cx), int(bottom)), max(2, int(width * rng.uniform(0.6, 0.85))), 1.0, -1, cv2.LINE_AA)
+            # a wide melt where the drip leaves the band
+            cv2.ellipse(m, (int(cx), int(top)), (int(width * 1.3), int(width * 0.9)), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
+        # gooey: melt the shapes together (rounded joins), then crisp edge
+        m = cv2.GaussianBlur(m, (0, 0), unit * 0.004)
+        m = np.clip((m - 0.45) * 12, 0, 1)
+        # glossy shading: a dome across each drip, a shine toward the upper left
+        inside = (m > 0.5).astype(np.uint8)
+        dist = cv2.distanceTransform(inside, cv2.DIST_L2, 5)
+        dome = np.sqrt(np.clip(dist / (unit * 0.014), 0, 1))
+        shift = int(max(1, unit * 0.003))
+        lit = np.zeros_like(dome)
+        lit[shift:, shift:] = dome[:-shift, :-shift]  # the dome nudged down-right (no wrap-around at the edges)
+        spec = np.clip(dome - lit, 0, 1)
+        spec[:shift, :] = 0
+        spec[:, :shift] = 0
+        spec = np.clip(spec * 6, 0, 1) ** 2 * float(p["gloss"])
+        color = colors[i] * (0.78 + 0.22 * dome)[..., None]
+        color = color + (1 - color) * spec[..., None]
+        coat = coat + (color - coat) * m[..., None]
+        cover = np.maximum(cover, m)
+    # a soft shadow cast onto the photo, down and to the right
+    off = int(unit * 0.006)
+    cast = cv2.GaussianBlur(np.roll(np.roll(cover, off, 0), off // 2, 1), (0, 0), unit * 0.006)
+    coat = cv2.resize(coat, (w, h), interpolation=cv2.INTER_LINEAR)
+    cover = cv2.resize(cover, (w, h), interpolation=cv2.INTER_LINEAR)
+    cast = cv2.resize(cast, (w, h), interpolation=cv2.INTER_LINEAR)
+    behind = 1 - ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
+    where = behind + (1 - behind) * float(p["front"])
+    out = a * (1 - (cast * (1 - cover) * float(p["shadow"]) * where)[..., None])
+    return out + (coat - out) * (cover * where)[..., None]

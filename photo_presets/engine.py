@@ -37,6 +37,7 @@ class Result:
     before: Image.Image
     after: Image.Image
     notes: list[str] = field(default_factory=list)
+    exif: bytes | None = None  # the photo's camera data (date taken, camera, lens), for saved copies
 
     @property
     def title(self) -> str:
@@ -66,7 +67,7 @@ class Engine:
         small = p.image.copy()
         small.thumbnail((PREVIEW_EDGE, PREVIEW_EDGE))
         after, notes = pipeline.render(small, recipe, self.library, p.scene, seed)
-        return Result(path, crop, recipe, seed, small, after, notes)
+        return Result(path, crop, recipe, seed, small, after, notes, p.exif)
 
     def explore(self, paths: list[Path], count: int, crop: str = "none", seed: int | None = None,
                 progress=None) -> list[Result]:

@@ -10,7 +10,7 @@ with a Gradio app.
   B&W channel mix or duotone) with textures, blend modes, impact overlays,
   lighting and edge effects.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
-  run photos straight through them. 24 starter presets come built in, in
+  run photos straight through them. 26 starter presets come built in, in
   groups, each with a one-line description; tick any or all of them.
 - **Instagram reels**: turn the looks into a vertical video under a minute
   (2 seconds per photo, cuts on your song's beat), ready to post.
@@ -76,7 +76,7 @@ results):
    copy of themselves; portrait photos fill the screen. Reels are saved in
    `Reels` inside your export folder.
 
-Results are made at 1600 px for speed; export renders each again from the
+Every picture keeps the photo's real date and camera details (date taken, camera, lens, exposure), Sony RAW files included, and saved files are dated when the photo was taken. Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
 
 **Preset manager**: load a preset to start from, adjust it, preview it on a
@@ -152,6 +152,8 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Stadium Smoke | A dark night stadium, gray smoke at the player's sides and over the floor, and two banks of floodlights glowing through the haze |
 | Neon Pop Art | The player as a neon pop-art painting (indigo, cyan, pink, orange and yellow-green paint, painted lines, a glowing outline) with paint splatter and swooping strokes, on a dark sepia background |
 | Neon Pop Art Sharp | Neon Pop Art with crisp, screen-print edges: hard-edged paint shapes, thin ink and bright etched lines, a thin outline, whip lines flying outward, and a near-black background |
+| Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
+| Ice Cream Drip | Glossy melting ice cream (vanilla, strawberry, mint, chocolate) dripping from the top of the frame, behind the player, on a softly brightened background |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
 The black-and-white looks lean on blue in their mix (like a red filter on
@@ -216,6 +218,9 @@ A look is a recipe: a list of steps, run in order.
 | `stadium_lights` | `height` (share of the player's height above their feet), `amount`, `color`: two floodlight banks near the left and right edges |
 | `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
+| `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`: the player as neon line art with a glowing rim; the background goes black |
+| `paint_burst` | `amount`, `size`, `direction`, `colors`: a hard-edged explosion of neon paint behind the player |
+| `drip` | `colors` (back to front), `amount`, `length`, `gloss`, `front`, `shadow`: glossy melting ice cream from the top of the frame |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 

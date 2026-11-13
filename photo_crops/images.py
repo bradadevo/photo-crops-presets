@@ -125,11 +125,91 @@ def preview_image(path: Path, long_edge: int) -> Image.Image:
     return img
 
 
+def raw_exif(path: Path) -> bytes | None:
+    """The camera data of a RAW file (when it was taken, camera, lens,
+    exposure) as JPEG EXIF, so pictures made from it keep its real date."""
+    try:
+        import exifread
+        with open(path, "rb") as f:
+            tags = exifread.process_file(f, details=False)
+    except Exception:  # an unreadable file just has no camera data
+        return None
+    if not tags:
+        return None
+
+    def text(key):
+        v = tags.get(key)
+        return str(v).strip() if v is not None else None
+
+    def ratio(key):
+        v = tags.get(key)
+        if v is None or not v.values:
+            return None
+        r = v.values[0]
+        try:
+            from fractions import Fraction
+            return Fraction(r.num, r.den) if hasattr(r, "num") else Fraction(r)
+        except (ZeroDivisionError, ValueError, TypeError):
+            return None
+
+    exif = Image.Exif()
+    taken = text("EXIF DateTimeOriginal") or text("Image DateTime")
+    for tag, value in ((0x010F, text("Image Make")), (0x0110, text("Image Model")), (0x0132, taken)):
+        if value:
+            exif[tag] = value
+    exif[0x0112] = 1  # the picture is saved upright
+    sub = exif.get_ifd(0x8769)
+    for tag, value in ((0x9003, taken), (0x9004, text("EXIF DateTimeDigitized") or taken),
+                       (0x9011, text("EXIF OffsetTimeOriginal")), (0xA434, text("EXIF LensModel"))):
+        if value:
+            sub[tag] = value
+    for tag, key in ((0x829A, "EXIF ExposureTime"), (0x829D, "EXIF FNumber"), (0x920A, "EXIF FocalLength")):
+        r = ratio(key)
+        if r is not None:
+            from PIL.TiffImagePlugin import IFDRational
+            sub[tag] = IFDRational(r.numerator, r.denominator)
+    iso = tags.get("EXIF ISOSpeedRatings")
+    if iso is not None and iso.values:
+        sub[0x8827] = int(iso.values[0])
+    return exif.tobytes()
+
+
+def upright_exif(exif: bytes | None) -> bytes | None:
+    """The photo's EXIF with its orientation reset to upright (the picture
+    itself is already turned upright, so viewers must not turn it again)."""
+    if not exif:
+        return exif
+    data = Image.Exif()
+    try:
+        data.load(exif)
+    except Exception:
+        return exif
+    data[0x0112] = 1
+    return data.tobytes()
+
+
+def taken_at(exif: bytes | None):
+    """When the photo was taken (a datetime), from its EXIF, else None."""
+    if not exif:
+        return None
+    from datetime import datetime
+    data = Image.Exif()
+    try:
+        data.load(exif)
+    except Exception:
+        return None
+    value = data.get_ifd(0x8769).get(0x9003) or data.get(0x0132)
+    try:
+        return datetime.strptime(str(value).strip("\x00 "), "%Y:%m:%d %H:%M:%S") if value else None
+    except ValueError:
+        return None
+
+
 def load(path: Path) -> Photo:
     if is_raw(path):
-        return Photo(path, develop_raw(path), None, True)
+        return Photo(path, develop_raw(path), raw_exif(path), True)
     raw = Image.open(path)
-    exif = raw.info.get("exif")
+    exif = upright_exif(raw.info.get("exif"))
     return Photo(path, ImageOps.exif_transpose(raw).convert("RGB"), exif, False)
 
 
@@ -146,4 +226,9 @@ def save_original(photo: Photo, dest_stem: Path) -> Path:
 
 
 def save_jpeg(img: Image.Image, dest: Path, exif: bytes | None) -> None:
+    """Saves with the photo's camera data, and dates the file when the photo was taken."""
     img.save(dest, quality=95, **({"exif": exif} if exif else {}))
+    when = taken_at(exif)
+    if when:
+        import os
+        os.utime(dest, (when.timestamp(), when.timestamp()))

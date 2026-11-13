@@ -169,8 +169,21 @@ STARTERS: dict[str, dict] = {
         {"op": "exposure", "stops": -1.7, "layer": "background"},
         {"op": "lens_blur", "radius": 0.006, "layer": "background"},
         {"op": "pop_art", "crisp": 1.0, "levels": 9, "mottle": 0.12, "lines": 0.8, "glow": 0.6,
+         "palette": "#1a0e5c,#4a2fd6,#2fb4ff,#ff3f9a,#ff7a3a,#e2f53c",
          "background": "#9a6a44", "background_amount": 0.9},
         {"op": "paint_splatter", "amount": 0.95, "strokes": 0.7, "front": 0.25, "whips": 1.0}]},
+    "Neon Splash": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+        {"op": "neon_lineart", "darkness": 0.6, "lines": 1.0, "detail": 0.6, "rim": 1.0, "glow": 0.5},
+        {"op": "paint_burst", "amount": 0.9, "size": 1.0, "direction": 0.0},
+        {"op": "paint_splatter", "amount": 0.5, "strokes": 0.0, "front": 0.0, "whips": 0.25,
+         "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
+         "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
+    "Ice Cream Drip": {"protect_faces": True, "steps": [
+        {"op": "high_key", "amount": 0.25, "layer": "background"},
+        {"op": "saturation", "amount": 0.85, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+        {"op": "saturation", "amount": 1.15, "layer": "subject"},
+        {"op": "drip", "amount": 0.8, "length": 1.0, "gloss": 0.8, "front": 0.0}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
@@ -244,6 +257,8 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Stadium Smoke": (STUDIO, "Night stadium with smoke at the sides and feet and floodlights"),
     "Neon Pop Art": (BOLD, "The player as a neon pop-art painting with paint splatters, on a dark sepia background"),
     "Neon Pop Art Sharp": (BOLD, "Neon Pop Art with crisp, screen-print edges and thin ink lines"),
+    "Neon Splash": (BOLD, "The player as glowing neon line art on black, with a paint explosion behind them"),
+    "Ice Cream Drip": (STUDIO, "Glossy melting ice cream (vanilla, strawberry, mint, chocolate) dripping behind the player"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
 

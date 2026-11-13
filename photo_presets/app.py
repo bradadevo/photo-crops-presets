@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import sys
+import uuid
 from pathlib import Path
 
 import gradio as gr
@@ -36,6 +37,20 @@ def eng() -> Engine:
 
 
 # Make looks -----------------------------------------------------------------------
+
+# Pictures the app shows are saved here as dated JPEGs (with the photo's camera
+# data), so a downloaded look is properly named and keeps the date it was taken
+PREVIEWS = Path(tempfile.mkdtemp(prefix="photo-presets-"))
+
+
+def _jpeg(img, name: str, exif: bytes | None) -> str:
+    from photo_crops import images
+    folder = PREVIEWS / uuid.uuid4().hex[:12]
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = folder / (re.sub(r'[/:\\]+', "-", name) + ".jpg")
+    images.save_jpeg(img, dest, exif)
+    return str(dest)
+
 
 def _inputs(files, folder) -> list[Path]:
     items = [f if isinstance(f, str) else f.name for f in (files or [])]
@@ -66,7 +81,7 @@ def make_looks(files, folder, mode, count, seed, crop_label, *groups, progress=g
         if not chosen:
             raise gr.Error("Step 2: tick at least one preset (or press Select all).")
         results = eng().presets(paths, chosen, crop, progress=tick)
-    gallery = [(r.after, r.title) for r in results]
+    gallery = [(_jpeg(r.after, r.title, r.exif), r.title) for r in results]
     first = _show(results, 0)
     return (results, 0, gallery) + first
 
@@ -80,7 +95,8 @@ def _show(results, index):
     notes = ("\n\n**Notes:** " + "; ".join(r.notes)) if r.notes else ""
     info = (f"**{r.title}**" + (f" — {about}" if about else "")
             + f"\n\n<span class='meta'>Seed {r.seed} · {CROPS[r.crop]}</span>{notes}")
-    return (r.before, r.after), info, json.dumps(r.recipe, indent=1), name
+    pair = (_jpeg(r.before, f"{r.source.stem} · original", r.exif), _jpeg(r.after, r.title, r.exif))
+    return pair, info, json.dumps(r.recipe, indent=1), name
 
 
 def pick(results, evt: gr.SelectData):
@@ -293,7 +309,7 @@ def preview_preset(sample, files, folder, recipe_text, crop_label):
         raise gr.Error(f"The recipe is not valid JSON: {e}")
     r = eng().preset(paths[:1], "preview", CROP_LABELS.get(crop_label, "none"), recipe=recipe)[0]
     notes = ("Notes: " + "; ".join(r.notes)) if r.notes else ""
-    return (r.before, r.after), notes
+    return (_jpeg(r.before, f"{r.source.stem} · original", r.exif), _jpeg(r.after, f"{r.source.stem} · preview", r.exif)), notes
 
 
 # Assets ------------------------------------------------------------------------------

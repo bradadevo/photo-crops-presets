@@ -56,6 +56,10 @@ DEFAULTS = {
     "pa_on": False, "pa_levels": 7, "pa_mottle": 0.35, "pa_lines": 0.6, "pa_shading": 0.45, "pa_glow": 0.7,
     "pa_outline": "#ff6f7d", "pa_bg": "#9a6a44", "pa_bg_amount": 0.85, "pa_crisp": False,
     "ps_on": False, "ps_amount": 0.85, "ps_strokes": 0.7, "ps_front": 0.25, "ps_whips": 0.0,
+    "nl_on": False, "nl_darkness": 0.6, "nl_lines": 1.0, "nl_detail": 0.6, "nl_rim": 1.0, "nl_glow": 0.5,
+    "pb_on": False, "pb_amount": 0.9, "pb_size": 1.0, "pb_direction": 0.0,
+    "dr_on": False, "dr_colors": "#fff1d9,#ff9fc8,#a6ecd3,#7b4a32", "dr_amount": 0.8, "dr_length": 1.0,
+    "dr_gloss": 0.8, "dr_front": 0.0,
 }
 FIELDS = list(DEFAULTS)
 
@@ -112,6 +116,14 @@ def to_recipe(v: dict) -> dict:
                   "shading": v["pa_shading"], "glow": v["pa_glow"], "outline": v["pa_outline"],
                   "background": v["pa_bg"], "background_amount": v["pa_bg_amount"],
                   "crisp": 1.0 if v["pa_crisp"] else 0.0})
+    if v["nl_on"]:
+        s.append({"op": "neon_lineart", "darkness": v["nl_darkness"], "lines": v["nl_lines"], "detail": v["nl_detail"],
+                  "rim": v["nl_rim"], "glow": v["nl_glow"]})
+    if v["pb_on"]:
+        s.append({"op": "paint_burst", "amount": v["pb_amount"], "size": v["pb_size"], "direction": v["pb_direction"]})
+    if v["dr_on"]:
+        s.append({"op": "drip", "colors": v["dr_colors"], "amount": v["dr_amount"], "length": v["dr_length"],
+                  "gloss": v["dr_gloss"], "front": v["dr_front"]})
     if v["ps_on"]:
         s.append({"op": "paint_splatter", "amount": v["ps_amount"], "strokes": v["ps_strokes"], "front": v["ps_front"],
                   "whips": v["ps_whips"]})
@@ -234,6 +246,14 @@ def from_recipe(recipe: dict) -> dict:
                      pa_shading=g("shading", 0.45), pa_glow=g("glow", 0.7), pa_outline=g("outline", "#ff6f7d"),
                      pa_bg=g("background", "#9a6a44"), pa_bg_amount=g("background_amount", 0.85),
                      pa_crisp=float(g("crisp", 0.0)) >= 0.5)
+        elif op == "neon_lineart":
+            v.update(nl_on=True, nl_darkness=g("darkness", 0.6), nl_lines=g("lines", 1.0), nl_detail=g("detail", 0.6),
+                     nl_rim=g("rim", 1.0), nl_glow=g("glow", 0.5))
+        elif op == "paint_burst":
+            v.update(pb_on=True, pb_amount=g("amount", 0.9), pb_size=g("size", 1.0), pb_direction=g("direction", 0.0))
+        elif op == "drip":
+            v.update(dr_on=True, dr_colors=g("colors", v["dr_colors"]), dr_amount=g("amount", 0.8),
+                     dr_length=g("length", 1.0), dr_gloss=g("gloss", 0.8), dr_front=g("front", 0.0))
         elif op == "paint_splatter":
             v.update(ps_on=True, ps_amount=g("amount", 0.85), ps_strokes=g("strokes", 0.7), ps_front=g("front", 0.25),
                      ps_whips=g("whips", 0.0))
@@ -447,6 +467,30 @@ def components(ids: dict) -> dict:
                 with gr.Row():
                     color("pa_bg", "Background tone", "The background turns a dark shade of this.")
                     slider("pa_bg_amount", 0, 1, "Background tone amount")
+            check("nl_on", "Neon line art", "The player as glowing neon lines on a dark body, on black.")
+            with when("nl_on"):
+                with gr.Row():
+                    slider("nl_darkness", 0, 1, "Body darkness")
+                    slider("nl_lines", 0, 1, "Lines")
+                    slider("nl_detail", 0, 1, "Fine detail lines")
+                with gr.Row():
+                    slider("nl_rim", 0, 1, "Rim light")
+                    slider("nl_glow", 0, 1, "Glow")
+            check("pb_on", "Paint explosion", "A big burst of neon paint behind the player.")
+            with when("pb_on"):
+                with gr.Row():
+                    slider("pb_amount", 0, 1, "Amount")
+                    slider("pb_size", 0.4, 2, "Size")
+                    slider("pb_direction", -180, 180, "Trails toward (degrees)", step=5, info="0 = right, 90 = down.")
+            check("dr_on", "Ice cream drip", "Glossy melting ice cream running down from the top, behind the player.")
+            with when("dr_on"):
+                c["dr_colors"] = gr.Textbox(DEFAULTS["dr_colors"], label="Flavors (colors, back to front)",
+                                            info="Comma-separated colors, e.g. vanilla, strawberry, mint, chocolate.")
+                with gr.Row():
+                    slider("dr_amount", 0, 1, "Drips")
+                    slider("dr_length", 0.3, 2, "Drip length")
+                    slider("dr_gloss", 0, 1, "Shine")
+                    slider("dr_front", 0, 1, "Over the player", info="0 keeps the player (and faces) clear.")
             check("ps_on", "Paint splatter and strokes", "Splashes, droplets and swooping strokes around the player.")
             with when("ps_on"):
                 with gr.Row():

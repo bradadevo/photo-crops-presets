@@ -62,6 +62,7 @@ class Op:
     defaults: dict
     layer: str = "all"
     color_shift: bool = False
+    cutout: bool = False  # uses the players' cut-out itself (ctx.alpha), whatever its layer
 
 
 OPS: dict[str, Op] = {}
@@ -75,12 +76,13 @@ SKIN_LUMA = (25, 245)
 
 
 def op(name: str, protect: bool = False, label: str = "", layer: str = "all", color_shift: bool = False,
-       **defaults):
+       cutout: bool = False, **defaults):
     """Registers an operation: fn(image floats HxWx3 in 0-1, params, context) -> image.
     layer is where it runs unless a step says otherwise; color_shift marks
-    looks that skin protection applies to."""
+    looks that skin protection applies to; cutout marks operations that use
+    the players' cut-out themselves (so it is traced for them)."""
     def register(fn):
-        OPS[name] = Op(name, fn, protect, label or name.replace("_", " "), defaults, layer, color_shift)
+        OPS[name] = Op(name, fn, protect, label or name.replace("_", " "), defaults, layer, color_shift, cutout)
         return fn
     return register
 
@@ -93,7 +95,8 @@ def step_layer(step: dict) -> str:
 
 def needs_cutout(recipe: dict) -> bool:
     from photo_presets import effects  # noqa: F401
-    return any(step_layer(s) != "all" for s in recipe.get("steps", []))
+    return any(step_layer(s) != "all" or getattr(OPS.get(s.get("op", "")), "cutout", False)
+               for s in recipe.get("steps", []))
 
 
 def skin_mask(arr: np.ndarray, people: np.ndarray | None) -> np.ndarray:
