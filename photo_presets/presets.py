@@ -186,9 +186,9 @@ STARTERS: dict[str, dict] = {
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
     "Ice Cream Drip": {"protect_faces": False, "skin_protect": 0.0, "steps": [
         {"op": "neon_lineart", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "darkness": 0.5,
-         "lines": 1.0, "detail": 0.5, "rim": 0.9, "glow": 0.5},
-        {"op": "neon_drip", "amount": 0.8, "length": 1.0, "inner": 0.5, "gloss": 0.7, "glow": 0.5, "rain": 0.5,
-         "grid": 0.3},
+         "lines": 1.0, "detail": 0.15, "rim": 0.9, "glow": 0.5, "clean": 1.0},
+        {"op": "neon_drip", "amount": 0.6, "length": 1.0, "inner": 0.4, "gloss": 0.8, "glow": 0.45, "rain": 0.5,
+         "grid": 0.3, "coat": 0.5},
         {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.0,
          "palette": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f"}]},
     "Player Vignette": {"protect_faces": True, "steps": [

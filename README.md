@@ -222,9 +222,9 @@ A look is a recipe: a list of steps, run in order.
 | `stadium_lights` | `height` (share of the player's height above their feet), `amount`, `color`: two floodlight banks near the left and right edges |
 | `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
-| `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`: the player as neon line art with a glowing rim; the background goes black |
+| `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`, `clean` (1: bold, clean lines without texture scribbles): the player as neon line art with a glowing rim; the background goes black |
 | `paint_burst` | `amount`, `size`, `direction`, `colors`, `splash` (solid paint, 0-1), `lines` (streaks ending in drops, 0-1), `specks` (0-1): a hard-edged explosion of neon paint behind the player |
-| `neon_drip` | `amount`, `length`, `inner`, `gloss`, `glow`, `rain`, `grid`, `colors`: glossy neon drips running off the players' lower edges (and some over them, never over faces), with falling streaks and a grid behind |
+| `neon_drip` | `amount`, `length`, `inner`, `gloss`, `glow`, `rain`, `grid`, `coat`, `colors`: a melted coat of paint on the players' lower edges and glossy drips growing out of it (thick at the edge, swelling and thinning, fat drops, in clusters) (and some over them, never over faces), with falling streaks and a grid behind |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 

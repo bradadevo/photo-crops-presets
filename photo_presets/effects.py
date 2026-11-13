@@ -727,7 +727,7 @@ def _hue_field(h, w, scene, colors: str, seed: int) -> np.ndarray:
 
 
 @op("neon_lineart", cutout=True, label="Neon line art (player)", colors=RAINBOW, body="#140a3a", darkness=0.75, lines=1.0,
-    detail=0.6, rim=1.0, glow=0.5, background="#000000", background_amount=1.0)
+    detail=0.6, rim=1.0, glow=0.5, background="#000000", background_amount=1.0, clean=0.0)
 def neon_lineart(a, p, ctx):
     """The player as neon line art on black: a dark body (deep indigo, its
     shading kept), crisp neon contour and detail lines and a glowing rim, in
@@ -742,9 +742,22 @@ def neon_lineart(a, p, ctx):
     shade = np.clip(lum, 0, 1) ** 1.6
     body = _hex(p["body"]) * (1 - float(p["darkness"]) + 0.6 * shade[..., None]) + hue * (shade * 0.5)[..., None]
     px = max(1, int(0.0009 * max(sh, sw)))
+    clean = float(p["clean"]) >= 0.5
     # contour lines (strong edges) and fine detail lines (folds, hair, the face)
-    soft = cv2.GaussianBlur(lum, (0, 0), 1.2)
+    if clean:  # bold, clean lines: smooth away texture first, keep only long lines, draw them thicker
+        lum8 = (np.clip(lum, 0, 1) * 255).astype(np.uint8)
+        for _ in range(2):
+            lum8 = cv2.bilateralFilter(lum8, 9, 40, 9)
+        soft = cv2.GaussianBlur(lum8.astype(np.float32) / 255, (0, 0), 1.5)
+        px = max(2, int(0.0016 * max(sh, sw)))
+    else:
+        soft = cv2.GaussianBlur(lum, (0, 0), 1.2)
     contour = cv2.Canny((soft * 255).astype(np.uint8), 35, 100)
+    if clean:
+        count, labels, stats, _ = cv2.connectedComponentsWithStats((contour > 0).astype(np.uint8), connectivity=8)
+        long_enough = stats[:, cv2.CC_STAT_AREA] >= max(12, int(0.012 * max(sh, sw)))
+        long_enough[0] = False
+        contour = (long_enough[labels] * 255).astype(np.uint8)
     dog = cv2.GaussianBlur(lum, (0, 0), 0.7) - cv2.GaussianBlur(lum, (0, 0), 2.2)
     fine = (np.abs(dog) > 0.03).astype(np.uint8) * 255
     fine = cv2.morphologyEx(fine, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
@@ -855,12 +868,15 @@ DRIP_NEON = "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95"
 
 
 @op("neon_drip", cutout=True, label="Neon drip (melting)", colors=DRIP_NEON, amount=0.8, length=1.0,
-    inner=0.5, gloss=0.7, glow=0.5, rain=0.5, grid=0.3)
+    inner=0.5, gloss=0.7, glow=0.5, rain=0.5, grid=0.3, coat=0.8)
 def neon_drip(a, p, ctx):
-    """Turns the players (and what they hold) into melting neon paint: glossy
-    drips hang from every lower edge of them and run down past them, some
-    run over them from their own lines (inner), each ending in a drop. On the
-    background: faint neon drip streaks falling (rain) and a dim grid."""
+    """Turns the players (and what they hold) into melting neon paint: a thick
+    coat of paint along every lower edge (coat), and glossy drips growing out
+    of it, thick where they leave the edge, swelling and thinning on the way
+    down, in clusters, each ending in a fat drop; some run over the players
+    from their own lines (inner). Faces stay clear. On the background: faint
+    neon drip streaks falling (rain) and a dim grid."""
+    from photo_presets import procedural
     h, w = a.shape[:2]
     scale = min(1.0, 2400 / max(h, w))
     sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
@@ -879,58 +895,89 @@ def neon_drip(a, p, ctx):
 
     def clear_of_faces(x, y, length):
         return not faces[int(np.clip(y, 0, sh - 1)), int(np.clip(x, 0, sw - 1))] and not any(
-            x0 <= x <= x1 and y <= fy0 + length and y < fy0 + 1 and y + length > fy0 for x0, x1, fy0 in face_cols)
+            x0 <= x <= x1 and y < fy0 + 1 and y + length > fy0 for x0, x1, fy0 in face_cols)
 
     def drip_length(short, long):
-        return ph * (short + (long - short) * rng.random() ** 2.5) * float(p["length"])  # many short, a few long
+        return ph * (short + (long - short) * rng.random() ** 2.2) * float(p["length"])  # many short, a few long
 
-    paint = np.zeros((sh, sw, 3), np.float32)
-    cover = np.zeros((sh, sw), np.float32)
+    tube = np.zeros((sh, sw), np.float32)      # where paint is (0-1)
+    core = np.zeros((sh, sw), np.float32)      # the thickest middle of each drip, for the shine
+    source = np.zeros((sh, sw, 3), np.float32)  # each drip keeps the color of where it started
+    source_w = np.zeros((sh, sw), np.float32)
 
-    def draw(x, y, length, width, strength):
-        """One glossy drip from (x, y) straight down, a little wobble, ending in a round drop."""
+    def stamp(x, y, r, c, k=1.0):
+        cv2.circle(tube, (int(x), int(y)), max(1, int(r)), k, -1, cv2.LINE_AA)
+        cv2.circle(source, (int(x), int(y)), max(1, int(r)), c.tolist(), -1, cv2.LINE_AA)
+        cv2.circle(source_w, (int(x), int(y)), max(1, int(r)), 1.0, -1, cv2.LINE_AA)
+
+    def drip(x, y, length, width, k=1.0):
+        """A melting drip: wide where it leaves the edge, swelling and thinning on the way down, a fat drop."""
         c = hue[int(np.clip(y, 0, sh - 1)), int(np.clip(x, 0, sw - 1))]
-        steps = 8
-        pts = [(x + rng.normal(0, width * 0.15) * (k > 0), y + length * k / steps) for k in range(steps + 1)]
-        for k in range(steps):
-            wk = max(1, int(width * (1 - 0.35 * k / steps)))
-            p0, p1 = (int(pts[k][0]), int(pts[k][1])), (int(pts[k + 1][0]), int(pts[k + 1][1]))
-            cv2.line(paint, p0, p1, (c * 0.85).tolist(), wk, cv2.LINE_AA)
-            cv2.line(cover, p0, p1, strength, wk, cv2.LINE_AA)
-        end = (int(pts[-1][0]), int(pts[-1][1]))
-        r = max(1, int(width * rng.uniform(0.7, 1.0)))
-        cv2.circle(paint, end, r, (c * 0.85).tolist(), -1, cv2.LINE_AA)
-        cv2.circle(cover, end, r, strength, -1, cv2.LINE_AA)
-        # the shine: a thin bright line down the left of the drip
-        shine = (c + (1 - c) * 0.65 * float(p["gloss"])).tolist()
-        off = max(1, int(width * 0.25))
-        for k in range(steps):
-            p0 = (int(pts[k][0]) - off, int(pts[k][1]))
-            p1 = (int(pts[k + 1][0]) - off, int(pts[k + 1][1]))
-            cv2.line(paint, p0, p1, shine, max(1, int(width * 0.25)), cv2.LINE_AA)
-        cv2.circle(paint, (end[0] - off // 2, end[1] - off // 2), max(1, r // 3), shine, -1, cv2.LINE_AA)
+        phase, wob = rng.uniform(0, 6.3), rng.uniform(0.8, 2.2)
+        t, yy, last = 0.0, y, None
+        while t < 1.0:
+            r = width * (1.5 - 0.75 * t + 0.18 * np.sin(phase + t * 9 * wob))
+            xx = x + np.sin(phase + t * 3) * width * 0.12
+            stamp(xx, yy, r, c, k)
+            shine = (int(xx - r * 0.35), int(yy))
+            if last is not None:  # one smooth shine line down the drip's left side
+                cv2.line(core, last[0], shine, k, max(1, int(min(last[1], r) * 0.25)), cv2.LINE_AA)
+            last = (shine, r)
+            step = max(1.0, r * 0.45)
+            yy += step
+            t += step / max(length, 1)
+        drop = width * rng.uniform(1.0, 1.35)
+        stamp(x, yy + width * 0.4, drop, c, k)  # the drop, with its own highlight
+        cv2.circle(core, (int(x - drop * 0.35), int(yy + width * 0.4 - drop * 0.3)), max(1, int(drop * 0.25)), k, -1,
+                   cv2.LINE_AA)
 
-    # drips hanging from every lower edge of the players
+    # the melted coat along every lower edge, thicker in places, and drips growing out of it
     below = np.zeros_like(inside)
     below[:-1] = inside[1:]
-    edge_y, edge_x = np.nonzero(inside & (1 - below))
-    if len(edge_x):
-        for _ in range(int(90 * float(p["amount"]))):
-            k = rng.integers(len(edge_x))
-            width = ph * rng.uniform(0.005, 0.014)
-            length = drip_length(0.02, 0.4)
-            if clear_of_faces(edge_x[k], edge_y[k], length):
-                draw(edge_x[k], edge_y[k] - width, length, width, 1.0)
-        # and over the players, from their own lines (the net in a hoop, the folds of a jersey)
+    edge = inside & (1 - below) & (1 - faces)
+    if edge.any():
+        wobble = procedural.fractal(rng, sh, sw, unit / 25, octaves=3)
+        thick = unit * 0.012 * float(p["coat"]) * (0.4 + 1.2 * wobble)
+        d_up = cv2.distanceTransform((1 - edge).astype(np.uint8), cv2.DIST_L2, 5)
+        coat = ((d_up < thick) & (inside > 0) & (faces == 0)).astype(np.float32)
+        coat = cv2.GaussianBlur(coat, (0, 0), 0.7)
+        tube = np.maximum(tube, coat)
+        source = source + (hue - source) * coat[..., None]
+        source_w = np.maximum(source_w, coat)
+        ey, ex = np.nonzero(edge)
+        for _ in range(int(55 * float(p["amount"]))):  # clusters of drips
+            k0 = rng.integers(len(ex))
+            width = ph * rng.uniform(0.006, 0.016)
+            for _ in range(rng.integers(1, 4)):
+                x = ex[k0] + rng.normal(0, width * 2.5)
+                col = np.clip(int(x), 0, sw - 1)
+                rows = np.nonzero(edge[:, col])[0]
+                if not len(rows):
+                    continue
+                y = rows[np.argmin(np.abs(rows - ey[k0]))]
+                length = drip_length(0.02, 0.45)
+                wk = width * rng.uniform(0.6, 1.1)
+                if clear_of_faces(x, y, length):
+                    drip(x, y - wk, length, wk)
+        # and over the players, from their own lines (folds, a net, a crest)
         lum = (_luma(cv2.resize(a, (sw, sh), interpolation=cv2.INTER_AREA)) * 255).astype(np.uint8)
-        lines = cv2.Canny(cv2.GaussianBlur(lum, (0, 0), 1.5), 60, 140) & (inside * 255) & ((1 - faces) * 255)
+        lines = cv2.Canny(cv2.GaussianBlur(lum, (0, 0), 2.0), 70, 160) & (inside * 255) & ((1 - faces) * 255)
         ly, lx = np.nonzero(lines)
         if len(lx):
-            for _ in range(int(40 * float(p["amount"]) * float(p["inner"]))):
+            for _ in range(int(30 * float(p["amount"]) * float(p["inner"]))):
                 k = rng.integers(len(lx))
-                length = drip_length(0.015, 0.12)
+                length = drip_length(0.015, 0.14)
                 if clear_of_faces(lx[k], ly[k], length):
-                    draw(lx[k], ly[k], length, ph * rng.uniform(0.003, 0.007), 0.9)
+                    drip(lx[k], ly[k], length, ph * rng.uniform(0.004, 0.008), 0.95)
+    tube = np.clip(tube, 0, 1)
+    color = source / np.maximum(source_w, 1e-3)[..., None]
+    # glossy: darker toward the drip's sides, a bright shine along its thickest part
+    # glossy and crisp: a hard-edged tube, darker at its sides, a sharp white shine down its middle
+    soft_core = cv2.GaussianBlur(core, (0, 0), 0.6)
+    edge_dark = cv2.distanceTransform((tube > 0.5).astype(np.uint8), cv2.DIST_L2, 3)
+    shade = 0.62 + 0.38 * np.clip(edge_dark / max(2.0, unit * 0.004), 0, 1)
+    paint = color * shade[..., None]
+    paint = paint + (1 - paint) * (np.clip(soft_core, 0, 1) * 0.75 * float(p["gloss"]))[..., None]
     # the background: faint neon streaks falling, and a dim grid
     back = np.zeros((sh, sw, 3), np.float32)
     back_cover = np.zeros((sh, sw), np.float32)
@@ -955,13 +1002,14 @@ def neon_drip(a, p, ctx):
         back = back + (np.array([0.25, 0.75, 0.8], np.float32) - back) * (g * (back_cover < 0.05))[..., None]
         back_cover = np.maximum(back_cover, g)
     paint = cv2.resize(paint, (w, h), interpolation=cv2.INTER_LINEAR)
-    cover = cv2.resize(cover, (w, h), interpolation=cv2.INTER_LINEAR)
+    cover = cv2.resize(tube, (w, h), interpolation=cv2.INTER_LINEAR)
     back = cv2.resize(back, (w, h), interpolation=cv2.INTER_LINEAR)
     back_cover = cv2.resize(back_cover, (w, h), interpolation=cv2.INTER_LINEAR)
     behind = 1 - ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
     out = a + (back - a) * (back_cover * behind)[..., None]
     out = out + (paint - out) * cover[..., None]
-    if float(p["glow"]) > 0:  # neon glow around the drips
-        bloom = cv2.GaussianBlur(paint * cover[..., None], (0, 0), max(1.5, 0.004 * max(h, w)))
-        out = blend(np.clip(out, 0, 1), np.clip(bloom * 1.4, 0, 1), "screen", float(p["glow"]))
+    if float(p["glow"]) > 0:  # a soft neon glow around the drips (the drips themselves stay crisp)
+        bloom = cv2.GaussianBlur(paint * cover[..., None], (0, 0), max(2.0, 0.006 * max(h, w)))
+        glow = np.clip(bloom * 1.2, 0, 1) * (1 - cover)[..., None]
+        out = blend(np.clip(out, 0, 1), glow, "screen", float(p["glow"]))
     return out
