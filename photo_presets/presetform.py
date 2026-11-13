@@ -59,8 +59,8 @@ DEFAULTS = {
     "nl_on": False, "nl_darkness": 0.6, "nl_lines": 1.0, "nl_detail": 0.6, "nl_rim": 1.0, "nl_glow": 0.5,
     "pb_on": False, "pb_amount": 0.9, "pb_size": 1.0, "pb_direction": 0.0, "pb_splash": 1.0, "pb_lines": 0.0,
     "pb_specks": 0.0,
-    "dr_on": False, "dr_colors": "#fff1d9,#ff9fc8,#a6ecd3,#7b4a32", "dr_amount": 0.8, "dr_length": 1.0,
-    "dr_gloss": 0.8, "dr_front": 0.0,
+    "nd_on": False, "nd_amount": 0.8, "nd_length": 1.0, "nd_inner": 0.5, "nd_gloss": 0.7, "nd_glow": 0.5,
+    "nd_rain": 0.5, "nd_grid": 0.3,
 }
 FIELDS = list(DEFAULTS)
 
@@ -123,9 +123,9 @@ def to_recipe(v: dict) -> dict:
     if v["pb_on"]:
         s.append({"op": "paint_burst", "amount": v["pb_amount"], "size": v["pb_size"], "direction": v["pb_direction"],
                   "splash": v["pb_splash"], "lines": v["pb_lines"], "specks": v["pb_specks"]})
-    if v["dr_on"]:
-        s.append({"op": "drip", "colors": v["dr_colors"], "amount": v["dr_amount"], "length": v["dr_length"],
-                  "gloss": v["dr_gloss"], "front": v["dr_front"]})
+    if v["nd_on"]:
+        s.append({"op": "neon_drip", "amount": v["nd_amount"], "length": v["nd_length"], "inner": v["nd_inner"],
+                  "gloss": v["nd_gloss"], "glow": v["nd_glow"], "rain": v["nd_rain"], "grid": v["nd_grid"]})
     if v["ps_on"]:
         s.append({"op": "paint_splatter", "amount": v["ps_amount"], "strokes": v["ps_strokes"], "front": v["ps_front"],
                   "whips": v["ps_whips"]})
@@ -254,9 +254,9 @@ def from_recipe(recipe: dict) -> dict:
         elif op == "paint_burst":
             v.update(pb_on=True, pb_amount=g("amount", 0.9), pb_size=g("size", 1.0), pb_direction=g("direction", 0.0),
                      pb_splash=g("splash", 1.0), pb_lines=g("lines", 0.0), pb_specks=g("specks", 0.0))
-        elif op == "drip":
-            v.update(dr_on=True, dr_colors=g("colors", v["dr_colors"]), dr_amount=g("amount", 0.8),
-                     dr_length=g("length", 1.0), dr_gloss=g("gloss", 0.8), dr_front=g("front", 0.0))
+        elif op == "neon_drip":
+            v.update(nd_on=True, nd_amount=g("amount", 0.8), nd_length=g("length", 1.0), nd_inner=g("inner", 0.5),
+                     nd_gloss=g("gloss", 0.7), nd_glow=g("glow", 0.5), nd_rain=g("rain", 0.5), nd_grid=g("grid", 0.3))
         elif op == "paint_splatter":
             v.update(ps_on=True, ps_amount=g("amount", 0.85), ps_strokes=g("strokes", 0.7), ps_front=g("front", 0.25),
                      ps_whips=g("whips", 0.0))
@@ -489,15 +489,18 @@ def components(ids: dict) -> dict:
                     slider("pb_splash", 0, 1, "Solid paint", info="Lower: lighter, smaller splashes.")
                     slider("pb_lines", 0, 1, "Streak lines", info="Fine lines flying out, ending in drops.")
                     slider("pb_specks", 0, 1, "Specks", info="Tiny drops scattered across the dark.")
-            check("dr_on", "Ice cream drip", "Glossy melting ice cream running down from the top, behind the player.")
-            with when("dr_on"):
-                c["dr_colors"] = gr.Textbox(DEFAULTS["dr_colors"], label="Flavors (colors, back to front)",
-                                            info="Comma-separated colors, e.g. vanilla, strawberry, mint, chocolate.")
+            check("nd_on", "Neon drip (melting)", "Glossy neon drips run off every lower edge of the players and "
+                  "what they hold; faces stay clear.")
+            with when("nd_on"):
                 with gr.Row():
-                    slider("dr_amount", 0, 1, "Drips")
-                    slider("dr_length", 0.3, 2, "Drip length")
-                    slider("dr_gloss", 0, 1, "Shine")
-                    slider("dr_front", 0, 1, "Over the player", info="0 keeps the player (and faces) clear.")
+                    slider("nd_amount", 0, 1, "Drips")
+                    slider("nd_length", 0.3, 2, "Drip length")
+                    slider("nd_inner", 0, 1, "Drips over the player")
+                    slider("nd_gloss", 0, 1, "Shine")
+                with gr.Row():
+                    slider("nd_glow", 0, 1, "Glow")
+                    slider("nd_rain", 0, 1, "Falling streaks behind")
+                    slider("nd_grid", 0, 1, "Grid behind")
             check("ps_on", "Paint splatter and strokes", "Splashes, droplets and swooping strokes around the player.")
             with when("ps_on"):
                 with gr.Row():

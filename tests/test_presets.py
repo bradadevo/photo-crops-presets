@@ -464,14 +464,16 @@ def test_jpeg_orientation_is_reset_after_turning_upright():
     assert fixed[0x0112] == 1 and fixed[0x0132] == "2026:11:07 11:18:29"
 
 
-def test_ice_cream_drips_from_the_top_behind_the_player(empty_library):
-    img = Image.new("RGB", (300, 400), (60, 120, 60))
+def test_neon_drips_run_down_from_the_player_and_never_over_a_face(empty_library):
+    img = Image.new("RGB", (300, 400), (90, 90, 90))
     matte = np.zeros((400, 300), np.float32)
-    matte[60:390, 120:180] = 1
-    scene = Scene(feet=(0.5, 0.97), subject_height=0.8, matte=matte)
-    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [{"op": "drip"}]},
-                                     empty_library, scene)[0], np.int16)
-    changed = np.abs(out - [60, 120, 60]).max(axis=-1) > 25
-    assert changed[:15].mean() > 0.9                    # the top is covered in ice cream
-    assert changed[360:].mean() < 0.05                  # the drips stop well before the bottom
-    assert not changed[80:380, 125:175].any()           # the player stays clear (front 0)
+    matte[60:250, 110:190] = 1                           # a player whose lower edge is at y=250
+    scene = Scene(faces=[(0.5, 0.2, 0.06)], feet=(0.5, 0.62), subject_height=0.48, matte=matte)
+    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [
+        {"op": "neon_lineart"}, {"op": "neon_drip", "rain": 0.0, "grid": 0.0}]}, empty_library, scene)[0], np.int16)
+    lit = out.max(axis=-1) > 60
+    assert lit[255:330, 110:190].mean() > 0.03          # drips hang below the player
+    before = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [{"op": "neon_lineart"}]},
+                                        empty_library, scene)[0], np.int16)
+    face = (slice(60, 100), slice(130, 170))
+    assert np.abs(out[face] - before[face]).mean() < 3  # nothing runs over the face

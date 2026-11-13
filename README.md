@@ -157,7 +157,7 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Neon Pop Art Sharp | Neon Pop Art with crisp, screen-print edges: hard-edged paint shapes, thin ink and bright etched lines, a thin outline, whip lines flying outward, and a near-black background |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
-| Ice Cream Drip | Glossy melting ice cream (vanilla, strawberry, mint, chocolate) dripping from the top of the frame, behind the player, on a softly brightened background |
+| Ice Cream Drip | The player (and the ball) melting into neon paint: neon line art on black with glossy drips running off every lower edge, faces kept clear, faint falling streaks and a dim grid behind |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
 The black-and-white looks lean on blue in their mix (like a red filter on
@@ -224,7 +224,7 @@ A look is a recipe: a list of steps, run in order.
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
 | `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`: the player as neon line art with a glowing rim; the background goes black |
 | `paint_burst` | `amount`, `size`, `direction`, `colors`, `splash` (solid paint, 0-1), `lines` (streaks ending in drops, 0-1), `specks` (0-1): a hard-edged explosion of neon paint behind the player |
-| `drip` | `colors` (back to front), `amount`, `length`, `gloss`, `front`, `shadow`: glossy melting ice cream from the top of the frame |
+| `neon_drip` | `amount`, `length`, `inner`, `gloss`, `glow`, `rain`, `grid`, `colors`: glossy neon drips running off the players' lower edges (and some over them, never over faces), with falling streaks and a grid behind |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 
