@@ -10,7 +10,7 @@ with a Gradio app.
   B&W channel mix or duotone) with textures, blend modes, impact overlays,
   lighting and edge effects.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
-  run photos straight through them. 28 starter presets come built in, in
+  run photos straight through them. 29 starter presets come built in, in
   groups, each with a one-line description; tick any or all of them.
 - **Instagram reels**: turn the looks into a vertical video under a minute
   (2 seconds per photo, cuts on your song's beat), ready to post.
@@ -158,7 +158,8 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Neon Pop Art Sharp Black | Neon Pop Art Sharp on a true black background instead of sepia brown |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
-| Ice Cream Drip | The player (and the ball, a flag) melting into neon paint, like a neon drip illustration: vivid neon paint with black shadows and ink lines, crisp outlined glossy drips with teardrop ends running off every lower edge (faces kept clear), bold falling streaks and a dim grid on black |
+| Ice Cream Drip Attempt 1 | The player (and the ball, a flag) melting into neon paint: vivid neon paint, crisp outlined glossy drips (first attempt) |
+| Ice Cream Drip Attempt 2 | Melting neon paint with distinct drips: each drip its own smooth, outlined, glossy shape with a teardrop end, in rows along every sideways lower edge, drawn at twice the size for clean edges |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
 The black-and-white looks lean on blue in their mix (like a red filter on
@@ -221,11 +222,12 @@ A look is a recipe: a list of steps, run in order.
 | `smoke_cloud` | `color`, `color2` (right cloud, for two team colors), `place` (`sides`, `behind`, `floor`, `sides_floor`), `amount`, `size`, `front` (floor smoke over the feet): generated billowing smoke behind the players |
 | `stage_lights` | `count`, `amount`: studio lights along the top |
 | `stadium_lights` | `height` (share of the player's height above their feet), `amount`, `color`: two floodlight banks near the left and right edges |
-| `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `lift` (the background's darkest tone; #000000 for true black), `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
+| `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `lift` (the background's darkest tone; #000000 for true black), `smooth` (1: crisp edges drawn at 2x, no stair steps), `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
 | `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`, `clean` (1: bold, clean lines without texture scribbles): the player as neon line art with a glowing rim; the background goes black |
 | `paint_burst` | `amount`, `size`, `direction`, `colors`, `splash` (solid paint, 0-1), `lines` (streaks ending in drops, 0-1), `specks` (0-1): a hard-edged explosion of neon paint behind the player |
 | `neon_drip` | `amount`, `length`, `inner`, `gloss`, `glow`, `rain`, `grid`, `coat`, `outline` (crisp dark drip edges), `density` (drips side by side), `width`, `colors`: a melted coat of paint on the players' lower edges and glossy drips growing out of it (thick at the edge, swelling and thinning, fat drops, in clusters) (and some over them, never over faces), with falling streaks and a grid behind |
+| `neon_drip2` | as `neon_drip` (`amount`, `length`, `width`, `inner`, `gloss`, `glow`, `rain`, `grid`, `coat`, `outline`): every drip its own outlined, glossy shape, spaced apart, from sideways lower edges only, drawn at 2x for smooth edges |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 

@@ -191,13 +191,20 @@ STARTERS: dict[str, dict] = {
         {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.4,
          "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
-    "Ice Cream Drip": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+    "Ice Cream Drip Attempt 1": {"protect_faces": False, "skin_protect": 0.0, "steps": [
         {"op": "pop_art", "crisp": 1.0, "levels": 8, "mottle": 0.1, "lines": 0.9, "glow": 0.9,
          "palette": "#03040a,#0d2747,#1fb8d6,#ff2d95,#ff6a2a,#ffd23f", "outline": "#22e6ff", "ink": "#000000",
          "background": "#000000", "background_amount": 1.0, "lift": "#000000"},
         {"op": "neon_drip", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "amount": 0.5,
          "density": 1.4, "width": 0.6, "length": 0.8, "inner": 0.25, "gloss": 1.0, "glow": 0.3, "rain": 0.9,
          "grid": 0.4, "coat": 0.4, "outline": 1.0}]},
+    "Ice Cream Drip Attempt 2": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+        {"op": "pop_art", "crisp": 1.0, "smooth": 1.0, "levels": 8, "mottle": 0.1, "lines": 0.9, "glow": 0.9,
+         "palette": "#03040a,#0d2747,#1fb8d6,#ff2d95,#ff6a2a,#ffd23f", "outline": "#22e6ff", "ink": "#000000",
+         "background": "#000000", "background_amount": 1.0, "lift": "#000000"},
+        {"op": "neon_drip2", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "amount": 0.8,
+         "length": 0.8, "width": 0.7, "inner": 0.25, "gloss": 1.0, "glow": 0.3, "rain": 0.9, "grid": 0.4,
+         "coat": 0.5, "outline": 1.0}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
@@ -274,7 +281,8 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Neon Pop Art Sharp Black": (BOLD, "Neon Pop Art Sharp on a near-black background instead of sepia brown"),
     "Neon Splash": (BOLD, "The player as glowing neon line art on black, with a paint explosion behind them"),
     "Neon Streaks": (BOLD, "Neon line art on black with fine paint streaks, drops and specks flying out behind the player"),
-    "Ice Cream Drip": (BOLD, "The player melting into neon paint: neon line art on black with glossy drips running off every edge"),
+    "Ice Cream Drip Attempt 1": (BOLD, "Melting neon paint: the player in vivid neon with glossy, outlined drips (first attempt)"),
+    "Ice Cream Drip Attempt 2": (BOLD, "Melting neon paint with distinct, smooth drips: each drip its own outlined, glossy shape"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
 

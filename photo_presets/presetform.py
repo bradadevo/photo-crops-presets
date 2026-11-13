@@ -61,6 +61,7 @@ DEFAULTS = {
     "pb_specks": 0.0,
     "nd_on": False, "nd_amount": 0.8, "nd_length": 1.0, "nd_inner": 0.5, "nd_gloss": 0.7, "nd_glow": 0.5,
     "nd_rain": 0.5, "nd_grid": 0.3, "nd_outline": 0.0, "nd_density": 1.0, "nd_width": 1.0, "nd_coat": 0.8,
+    "nd_v2": False, "pa_smooth": False,
 }
 FIELDS = list(DEFAULTS)
 
@@ -116,14 +117,18 @@ def to_recipe(v: dict) -> dict:
         s.append({"op": "pop_art", "levels": int(v["pa_levels"]), "mottle": v["pa_mottle"], "lines": v["pa_lines"],
                   "shading": v["pa_shading"], "glow": v["pa_glow"], "outline": v["pa_outline"],
                   "background": v["pa_bg"], "background_amount": v["pa_bg_amount"],
-                  "crisp": 1.0 if v["pa_crisp"] else 0.0})
+                  "crisp": 1.0 if v["pa_crisp"] else 0.0, "smooth": 1.0 if v["pa_smooth"] else 0.0})
     if v["nl_on"]:
         s.append({"op": "neon_lineart", "darkness": v["nl_darkness"], "lines": v["nl_lines"], "detail": v["nl_detail"],
                   "rim": v["nl_rim"], "glow": v["nl_glow"]})
     if v["pb_on"]:
         s.append({"op": "paint_burst", "amount": v["pb_amount"], "size": v["pb_size"], "direction": v["pb_direction"],
                   "splash": v["pb_splash"], "lines": v["pb_lines"], "specks": v["pb_specks"]})
-    if v["nd_on"]:
+    if v["nd_on"] and v["nd_v2"]:
+        s.append({"op": "neon_drip2", "amount": v["nd_amount"], "length": v["nd_length"], "inner": v["nd_inner"],
+                  "gloss": v["nd_gloss"], "glow": v["nd_glow"], "rain": v["nd_rain"], "grid": v["nd_grid"],
+                  "outline": v["nd_outline"], "width": v["nd_width"], "coat": v["nd_coat"]})
+    elif v["nd_on"]:
         s.append({"op": "neon_drip", "amount": v["nd_amount"], "length": v["nd_length"], "inner": v["nd_inner"],
                   "gloss": v["nd_gloss"], "glow": v["nd_glow"], "rain": v["nd_rain"], "grid": v["nd_grid"],
                   "outline": v["nd_outline"], "density": v["nd_density"], "width": v["nd_width"], "coat": v["nd_coat"]})
@@ -248,13 +253,17 @@ def from_recipe(recipe: dict) -> dict:
             v.update(pa_on=True, pa_levels=g("levels", 7), pa_mottle=g("mottle", 0.35), pa_lines=g("lines", 0.6),
                      pa_shading=g("shading", 0.45), pa_glow=g("glow", 0.7), pa_outline=g("outline", "#ff6f7d"),
                      pa_bg=g("background", "#9a6a44"), pa_bg_amount=g("background_amount", 0.85),
-                     pa_crisp=float(g("crisp", 0.0)) >= 0.5)
+                     pa_crisp=float(g("crisp", 0.0)) >= 0.5, pa_smooth=float(g("smooth", 0.0)) >= 0.5)
         elif op == "neon_lineart":
             v.update(nl_on=True, nl_darkness=g("darkness", 0.6), nl_lines=g("lines", 1.0), nl_detail=g("detail", 0.6),
                      nl_rim=g("rim", 1.0), nl_glow=g("glow", 0.5))
         elif op == "paint_burst":
             v.update(pb_on=True, pb_amount=g("amount", 0.9), pb_size=g("size", 1.0), pb_direction=g("direction", 0.0),
                      pb_splash=g("splash", 1.0), pb_lines=g("lines", 0.0), pb_specks=g("specks", 0.0))
+        elif op == "neon_drip2":
+            v.update(nd_on=True, nd_v2=True, nd_amount=g("amount", 0.8), nd_length=g("length", 0.8),
+                     nd_inner=g("inner", 0.25), nd_gloss=g("gloss", 1.0), nd_glow=g("glow", 0.3), nd_rain=g("rain", 0.9),
+                     nd_grid=g("grid", 0.4), nd_outline=g("outline", 1.0), nd_width=g("width", 0.7), nd_coat=g("coat", 0.5))
         elif op == "neon_drip":
             v.update(nd_on=True, nd_amount=g("amount", 0.8), nd_length=g("length", 1.0), nd_inner=g("inner", 0.5),
                      nd_gloss=g("gloss", 0.7), nd_glow=g("glow", 0.5), nd_rain=g("rain", 0.5), nd_grid=g("grid", 0.3),
@@ -460,6 +469,8 @@ def components(ids: dict) -> dict:
             check("pa_on", "Neon pop-art painting", "The player in neon paint (indigo, cyan, pink, orange, "
                   "yellow-green) with painted lines and a glowing outline.")
             with when("pa_on"):
+                check("pa_smooth", "Smooth edges", "With sharp edges on: draws the paint at twice the size and "
+                      "scales it down, so edges have no stair steps.")
                 check("pa_crisp", "Sharp, screen-print edges", "Hard-edged paint shapes, thin ink and bright etched "
                       "lines, and a thin outline, at full resolution. Off: softer, blended paint with a wide glow.")
                 with gr.Row():
@@ -495,6 +506,8 @@ def components(ids: dict) -> dict:
             check("nd_on", "Neon drip (melting)", "Glossy neon drips run off every lower edge of the players and "
                   "what they hold; faces stay clear.")
             with when("nd_on"):
+                check("nd_v2", "Distinct drips (attempt 2)", "Each drip its own smooth, outlined, glossy shape, "
+                      "spaced apart. Off: attempt 1.")
                 with gr.Row():
                     slider("nd_amount", 0, 1, "Drips")
                     slider("nd_length", 0.3, 2, "Drip length")

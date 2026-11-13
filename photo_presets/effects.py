@@ -542,7 +542,7 @@ def _art_mask(ctx, h, w) -> np.ndarray:
 
 @op("pop_art", cutout=True, label="Neon pop art (player)", palette=POP_PALETTE, levels=7, mottle=0.35, lines=0.6,
     outline="#ff6f7d", glow=0.7, shading=0.45, background="#9a6a44", background_amount=0.85, lift="#0d0805", crisp=0.0,
-    ink="#1b0d3d", etch="#fff6c8", amount=1.0)
+    ink="#1b0d3d", etch="#fff6c8", smooth=0.0, amount=1.0)
 def pop_art(a, p, ctx):
     """The player as a neon pop-art painting: brightness mapped onto a neon
     gradient, mottled like brush strokes and posterized into paint bands, with
@@ -566,6 +566,13 @@ def pop_art(a, p, ctx):
     t = np.clip(lum * 0.85 + 0.08 + (mottle - 0.5) * 2 * float(p["mottle"]), 0, 1)
     levels = max(2, int(p["levels"]))
     if crisp:
+        ss = 2 if float(p["smooth"]) >= 0.5 and max(sh, sw) <= 3200 else 1
+        if ss > 1:  # work at twice the size, then scale down: smooth, anti-aliased paint edges
+            sh0, sw0 = sh, sw
+            sh, sw = sh * ss, sw * ss
+            t = cv2.resize(t, (sw, sh), interpolation=cv2.INTER_CUBIC)
+            lum = cv2.resize(lum, (sw, sh), interpolation=cv2.INTER_CUBIC)
+            small = cv2.resize(small, (sw, sh), interpolation=cv2.INTER_CUBIC)
         # hard-edged shapes: each pixel takes one paint band, cleaned of specks
         band = np.clip(np.round(t * (levels - 1)), 0, levels - 1).astype(np.uint8)
         k = max(3, int(0.003 * max(sh, sw)) | 1)
@@ -585,6 +592,9 @@ def pop_art(a, p, ctx):
         art = art + (_hex(p["outline"]) - art) * (seams * float(p["lines"]) * 0.8)[..., None]
         art = art + (_hex(p["ink"]) - art) * (ink * float(p["lines"]) * 0.7)[..., None]
         art = art + (_hex(p["etch"]) - art) * (etch * float(p["lines"]) * 0.75)[..., None]
+        if ss > 1:
+            art = cv2.resize(art, (sw0, sh0), interpolation=cv2.INTER_AREA)
+            sh, sw = sh0, sw0
     else:
         banded = np.round(t * (levels - 1)) / (levels - 1)
         t = cv2.GaussianBlur(banded * 0.75 + t * 0.25, (0, 0), 0.8)
@@ -1028,4 +1038,184 @@ def neon_drip(a, p, ctx):
         bloom = cv2.GaussianBlur(paint * cover[..., None], (0, 0), max(2.0, 0.006 * max(h, w)))
         glow = np.clip(bloom * 1.2, 0, 1) * (1 - cover)[..., None]
         out = blend(np.clip(out, 0, 1), glow, "screen", float(p["glow"]))
+    return out
+
+@op("neon_drip2", cutout=True, label="Neon drip, distinct drips (attempt 2)", colors=DRIP_NEON, amount=0.8,
+    length=0.8, width=0.7, inner=0.25, gloss=1.0, glow=0.3, rain=0.9, grid=0.4, coat=0.5, outline=1.0)
+def neon_drip2(a, p, ctx):
+    """Melting neon paint, every drip its own shape: drawn one by one (dark
+    outline, color, a darker side, one shine, a teardrop end with its own
+    highlight), spaced apart so overlapping drips stay distinct, coming out
+    of a melted coat on the players' lower edges. Drawn at twice the size and
+    scaled down, so every edge is smooth. Faces stay clear."""
+    from photo_presets import procedural
+    h, w = a.shape[:2]
+    s = min(2.0, 4800 / max(h, w))                       # the drawing canvas, larger than the picture
+    ch, cw = max(16, int(h * s)), max(16, int(w * s))
+    fx, fy, ph = (v * s for v in _player(ctx.scene, h, w))
+    unit = max(ch, cw)
+    rng = np.random.default_rng(ctx.seed + 101)
+    q = 4                                                   # colors and edges are worked out at 1/4 of the canvas
+    qh, qw = max(8, ch // q), max(8, cw // q)
+    hue_q = (np.clip(_hue_field(qh, qw, ctx.scene, p["colors"], ctx.seed + 3), 0, 1) * 255).astype(np.uint8)
+
+    def color_at(x, y):
+        return hue_q[int(np.clip(y / q, 0, qh - 1)), int(np.clip(x / q, 0, qw - 1))].astype(np.float32)
+
+    alpha_q = cv2.resize(ctx.alpha, (qw, qh), interpolation=cv2.INTER_AREA) if ctx.alpha is not None \
+        else np.zeros((qh, qw), np.float32)
+    inside_q = (alpha_q > 0.5).astype(np.uint8)
+    faces = []
+    for x, y, r in ctx.scene.faces:
+        faces.append((x * cw, y * ch, r * cw * 1.3))
+
+    def clear_of_faces(x, y, length):
+        for cx, cy, r in faces:
+            if abs(x - cx) < r and y < cy + r and y + length > cy - r:
+                return False
+        return True
+
+    canvas = np.zeros((ch, cw, 3), np.uint8)
+    cover = np.zeros((ch, cw), np.uint8)
+    SHIFT = 2  # draw with quarter-pixel precision
+    F = 1 << SHIFT
+    o = max(1.0, unit * 0.0017 * float(p["outline"]))      # outline thickness
+
+    def poly(xs, ys, rs, grow):
+        left = np.stack([xs - rs - grow, ys], 1)
+        right = np.stack([xs + rs + grow, ys], 1)[::-1]
+        return (np.concatenate([left, right]) * F).astype(np.int32)
+
+    def circle(img, x, y, r, col):
+        cv2.circle(img, (int(x * F), int(y * F)), max(1, int(r * F)), col, -1, cv2.LINE_AA, SHIFT)
+
+    def drip(x, y, length, width):
+        c = color_at(x, y + width * 2)
+        phase, wob = rng.uniform(0, 6.3), rng.uniform(0.8, 2.0)
+        n = max(6, int(length / max(width * 0.6, 1)))
+        ts = np.linspace(0, 1, n + 1)
+        xs = x + np.sin(phase + ts * 4 * wob) * width * 0.25
+        ys = y + ts * length
+        # about the same width all the way down (a little thinner low), gentle swells, flaring at the top
+        rs = width * (1.0 - 0.25 * ts + 0.14 * np.sin(phase + ts * 8 * wob) + 0.55 * np.exp(-ts / 0.07))
+        dr = width * rng.uniform(1.0, 1.3)
+        dx, dy = xs[-1], ys[-1] + dr * 0.55
+        dark = tuple(float(v) for v in c * 0.18)
+        # 1) the dark outline (drawn first, so a later drip's outline sits on top of an earlier drip)
+        cv2.fillPoly(canvas, [poly(xs, ys, rs, o)], dark, cv2.LINE_AA, SHIFT)
+        circle(canvas, dx, dy, dr + o, dark)
+        cv2.fillPoly(cover, [poly(xs, ys, rs, o)], 255, cv2.LINE_AA, SHIFT)
+        circle(cover, dx, dy, dr + o, 255)
+        # 2) the paint, with a darker right side for roundness
+        base = tuple(float(v) for v in c * 0.92)
+        cv2.fillPoly(canvas, [poly(xs, ys, rs, 0)], base, cv2.LINE_AA, SHIFT)
+        circle(canvas, dx, dy, dr, base)
+        side = tuple(float(v) for v in c * 0.7)
+        cv2.fillPoly(canvas, [poly(xs + rs * 0.55, ys, rs * 0.45, 0)], side, cv2.LINE_AA, SHIFT)
+        circle(canvas, dx + dr * 0.5, dy + dr * 0.1, dr * 0.45, side)
+        # 3) one smooth shine down the left, and a highlight on the drop
+        shine = tuple(float(v) for v in c + (255 - c) * 0.75 * float(p["gloss"]))
+        pts = (np.stack([xs - rs * 0.45, ys], 1)[1:-1] * F).astype(np.int32)
+        if len(pts) > 1:
+            cv2.polylines(canvas, [pts], False, shine, max(1, int(width * 0.28)), cv2.LINE_AA, SHIFT)
+        circle(canvas, dx - dr * 0.38, dy - dr * 0.32, dr * 0.26, shine)
+
+    # where the paint melts from: the players' lower edges (and a few of their own lines)
+    below = np.zeros_like(inside_q)
+    below[:-1] = inside_q[1:]
+    edge_q = inside_q & (1 - below)
+    # only edges that run sideways (an arm's underside, a ball's bottom): the stair steps of a
+    # nearly upright edge (a pole) would melt into a column of dots
+    smooth_a = cv2.GaussianBlur(alpha_q, (0, 0), 1.5)
+    gy = cv2.Sobel(smooth_a, cv2.CV_32F, 0, 1, ksize=3)
+    gx = cv2.Sobel(smooth_a, cv2.CV_32F, 1, 0, ksize=3)
+    edge_q = (edge_q & (np.abs(gy) > np.abs(gx) * 0.45)).astype(np.uint8)  # flat to steep, not upright
+    ey, ex = np.nonzero(edge_q)
+    placed: list[tuple[float, float, float]] = []
+
+    def room(x, y, width):
+        return all(abs(x - px) > (width + pw) * 1.15 or abs(y - py) > ph * 0.12 for px, py, pw in placed)
+
+    widths = []
+    if len(ex):
+        for _ in range(int(260 * float(p["amount"]))):
+            k = rng.integers(len(ex))
+            x, y = ex[k] * q + rng.uniform(0, q), ey[k] * q + q
+            width = ph * rng.uniform(0.005, 0.013) * float(p["width"])
+            length = ph * (0.06 + 0.38 * rng.random() ** 1.8) * float(p["length"])
+            if room(x, y, width) and clear_of_faces(x, y, length):
+                placed.append((x, y, width))
+                widths.append(width)
+                drip(x, y - width * 1.6, length, width)
+        lum_q = (_luma(cv2.resize(a, (qw, qh), interpolation=cv2.INTER_AREA)) * 255).astype(np.uint8)
+        lines_q = cv2.Canny(cv2.GaussianBlur(lum_q, (0, 0), 1.2), 70, 160) & (inside_q * 255)
+        ly, lx = np.nonzero(lines_q)
+        if len(lx):
+            for _ in range(int(40 * float(p["amount"]) * float(p["inner"]))):
+                k = rng.integers(len(lx))
+                x, y = lx[k] * q, ly[k] * q
+                width = ph * rng.uniform(0.005, 0.009) * float(p["width"])
+                length = ph * (0.04 + 0.08 * rng.random() ** 2) * float(p["length"])
+                # only from lines with room on both sides (not thin poles, where drips would read as dots)
+                yq, xq = int(np.clip(y / q, 0, qh - 1)), int(np.clip(x / q, 0, qw - 1))
+                span = int(np.ceil(width * 3 / q)) + 1
+                solid = inside_q[yq, max(0, xq - span):xq + span + 1]
+                if solid.size and solid.all() and room(x, y, width) and clear_of_faces(x, y, length):
+                    placed.append((x, y, width))
+                    drip(x, y, length, width)
+    # the melted coat on the lower edges (drawn over the drips' tops, so they grow out of it)
+    if len(ex) and float(p["coat"]) > 0:
+        wobble = procedural.fractal(rng, qh, qw, max(qh, qw) / 20, octaves=3)
+        thick_q = (max(widths) * 1.7 / q if widths else 3.0) * float(p["coat"]) * (0.7 + 0.8 * wobble)
+        d_up = cv2.distanceTransform((1 - edge_q).astype(np.uint8), cv2.DIST_L2, 5)
+        face_q = np.zeros((qh, qw), np.uint8)
+        for cx, cy, r in faces:
+            cv2.circle(face_q, (int(cx / q), int(cy / q)), int(r / q), 1, -1)
+        band_q = ((d_up < np.maximum(thick_q, 1.5)) & (inside_q > 0) & (face_q == 0)).astype(np.float32)
+        band = cv2.resize(band_q, (cw, ch), interpolation=cv2.INTER_LINEAR)
+        band = cv2.GaussianBlur(band, (0, 0), q * 0.6)
+        solid = band > 0.5
+        hue_full = cv2.resize(hue_q, (cw, ch), interpolation=cv2.INTER_LINEAR)
+        inside_full = cv2.resize(inside_q.astype(np.float32), (cw, ch), interpolation=cv2.INTER_LINEAR) > 0.5
+        # its outline only where it hangs below the players (not across them)
+        k = max(2, int(o))
+        rim = cv2.dilate(solid.astype(np.uint8), np.ones((2 * k + 1, 2 * k + 1), np.uint8)).astype(bool) & ~solid
+        rim &= ~cv2.erode(inside_full.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        canvas[rim] = (hue_full[rim].astype(np.float32) * 0.18).astype(np.uint8)
+        cover[rim] = 255
+        canvas[solid] = (hue_full[solid].astype(np.float32) * 0.92).astype(np.uint8)
+        cover[solid] = 255
+    # the background: neon streaks falling, and a dim grid (behind the players)
+    back = np.zeros((ch, cw, 3), np.uint8)
+    back_cover = np.zeros((ch, cw), np.uint8)
+    for _ in range(int(60 * float(p["rain"]))):
+        x = rng.uniform(0, cw)
+        y0 = rng.uniform(-0.2, 0.6) * ch
+        y1 = y0 + rng.uniform(0.1, 0.6) * ch
+        c = tuple(float(v) for v in color_at(x, (y0 + y1) / 2))
+        wide = max(1, int(unit * 0.0012 * rng.uniform(1, 2.2)))
+        k = int(255 * min(1.0, rng.uniform(0.3, 0.7) * (1 + max(0.0, float(p["rain"]) - 0.6))))
+        cv2.line(back, (int(x * F), int(y0 * F)), (int(x * F), int(y1 * F)), c, wide, cv2.LINE_AA, SHIFT)
+        cv2.line(back_cover, (int(x * F), int(y0 * F)), (int(x * F), int(y1 * F)), k, wide, cv2.LINE_AA, SHIFT)
+        if rng.random() < 0.4:
+            circle(back, x, y1, unit * 0.0022, c)
+            circle(back_cover, x, y1, unit * 0.0022, k)
+    paint = cv2.resize(canvas, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    cov = cv2.resize(cover, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    bk = cv2.resize(back, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    bk_cov = cv2.resize(back_cover, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    if float(p["grid"]) > 0:
+        step = max(8, int(max(h, w) * 0.045))
+        grid = np.zeros((h, w), np.float32)
+        grid[::step, :] = 1
+        grid[:, ::step] = 1
+        g = grid * _blob(h, w, fx / s, (fy - ph * 0.5) / s, ph / s * 1.4, ph / s * 1.2) * 0.18 * float(p["grid"])
+        bk = bk + (np.array([0.25, 0.75, 0.8], np.float32) - bk) * (g * (bk_cov < 0.05))[..., None]
+        bk_cov = np.maximum(bk_cov, g)
+    behind = 1 - ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
+    out = a + (bk - a) * (bk_cov * behind)[..., None]
+    out = out + (paint / np.maximum(cov, 1e-3)[..., None] - out) * cov[..., None]
+    if float(p["glow"]) > 0:  # a soft neon glow outside the paint
+        bloom = cv2.GaussianBlur(paint, (0, 0), max(2.0, 0.006 * max(h, w)))
+        out = blend(np.clip(out, 0, 1), np.clip(bloom * 1.3, 0, 1) * (1 - cov)[..., None], "screen", float(p["glow"]))
     return out
