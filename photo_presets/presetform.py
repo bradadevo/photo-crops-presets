@@ -60,7 +60,7 @@ DEFAULTS = {
     "pb_on": False, "pb_amount": 0.9, "pb_size": 1.0, "pb_direction": 0.0, "pb_splash": 1.0, "pb_lines": 0.0,
     "pb_specks": 0.0,
     "nd_on": False, "nd_amount": 0.8, "nd_length": 1.0, "nd_inner": 0.5, "nd_gloss": 0.7, "nd_glow": 0.5,
-    "nd_rain": 0.5, "nd_grid": 0.3,
+    "nd_rain": 0.5, "nd_grid": 0.3, "nd_outline": 0.0, "nd_density": 1.0, "nd_width": 1.0, "nd_coat": 0.8,
 }
 FIELDS = list(DEFAULTS)
 
@@ -125,7 +125,8 @@ def to_recipe(v: dict) -> dict:
                   "splash": v["pb_splash"], "lines": v["pb_lines"], "specks": v["pb_specks"]})
     if v["nd_on"]:
         s.append({"op": "neon_drip", "amount": v["nd_amount"], "length": v["nd_length"], "inner": v["nd_inner"],
-                  "gloss": v["nd_gloss"], "glow": v["nd_glow"], "rain": v["nd_rain"], "grid": v["nd_grid"]})
+                  "gloss": v["nd_gloss"], "glow": v["nd_glow"], "rain": v["nd_rain"], "grid": v["nd_grid"],
+                  "outline": v["nd_outline"], "density": v["nd_density"], "width": v["nd_width"], "coat": v["nd_coat"]})
     if v["ps_on"]:
         s.append({"op": "paint_splatter", "amount": v["ps_amount"], "strokes": v["ps_strokes"], "front": v["ps_front"],
                   "whips": v["ps_whips"]})
@@ -256,7 +257,9 @@ def from_recipe(recipe: dict) -> dict:
                      pb_splash=g("splash", 1.0), pb_lines=g("lines", 0.0), pb_specks=g("specks", 0.0))
         elif op == "neon_drip":
             v.update(nd_on=True, nd_amount=g("amount", 0.8), nd_length=g("length", 1.0), nd_inner=g("inner", 0.5),
-                     nd_gloss=g("gloss", 0.7), nd_glow=g("glow", 0.5), nd_rain=g("rain", 0.5), nd_grid=g("grid", 0.3))
+                     nd_gloss=g("gloss", 0.7), nd_glow=g("glow", 0.5), nd_rain=g("rain", 0.5), nd_grid=g("grid", 0.3),
+                     nd_outline=g("outline", 0.0), nd_density=g("density", 1.0), nd_width=g("width", 1.0),
+                     nd_coat=g("coat", 0.8))
         elif op == "paint_splatter":
             v.update(ps_on=True, ps_amount=g("amount", 0.85), ps_strokes=g("strokes", 0.7), ps_front=g("front", 0.25),
                      ps_whips=g("whips", 0.0))
@@ -501,6 +504,11 @@ def components(ids: dict) -> dict:
                     slider("nd_glow", 0, 1, "Glow")
                     slider("nd_rain", 0, 1, "Falling streaks behind")
                     slider("nd_grid", 0, 1, "Grid behind")
+                with gr.Row():
+                    slider("nd_outline", 0, 1.5, "Dark drip edges", info="Crisp edges so each drip stands apart.")
+                    slider("nd_density", 0.5, 2, "Drips side by side")
+                    slider("nd_width", 0.3, 1.5, "Drip thickness")
+                    slider("nd_coat", 0, 1.5, "Melted coat on the edges")
             check("ps_on", "Paint splatter and strokes", "Splashes, droplets and swooping strokes around the player.")
             with when("ps_on"):
                 with gr.Row():

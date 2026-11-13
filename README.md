@@ -158,7 +158,7 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Neon Pop Art Sharp Black | Neon Pop Art Sharp on a true black background instead of sepia brown |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
-| Ice Cream Drip | The player (and the ball) melting into neon paint: neon line art on black with glossy drips running off every lower edge, faces kept clear, faint falling streaks and a dim grid behind |
+| Ice Cream Drip | The player (and the ball, a flag) melting into neon paint, like a neon drip illustration: vivid neon paint with black shadows and ink lines, crisp outlined glossy drips with teardrop ends running off every lower edge (faces kept clear), bold falling streaks and a dim grid on black |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
 The black-and-white looks lean on blue in their mix (like a red filter on
@@ -225,7 +225,7 @@ A look is a recipe: a list of steps, run in order.
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
 | `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`, `clean` (1: bold, clean lines without texture scribbles): the player as neon line art with a glowing rim; the background goes black |
 | `paint_burst` | `amount`, `size`, `direction`, `colors`, `splash` (solid paint, 0-1), `lines` (streaks ending in drops, 0-1), `specks` (0-1): a hard-edged explosion of neon paint behind the player |
-| `neon_drip` | `amount`, `length`, `inner`, `gloss`, `glow`, `rain`, `grid`, `coat`, `colors`: a melted coat of paint on the players' lower edges and glossy drips growing out of it (thick at the edge, swelling and thinning, fat drops, in clusters) (and some over them, never over faces), with falling streaks and a grid behind |
+| `neon_drip` | `amount`, `length`, `inner`, `gloss`, `glow`, `rain`, `grid`, `coat`, `outline` (crisp dark drip edges), `density` (drips side by side), `width`, `colors`: a melted coat of paint on the players' lower edges and glossy drips growing out of it (thick at the edge, swelling and thinning, fat drops, in clusters) (and some over them, never over faces), with falling streaks and a grid behind |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
 

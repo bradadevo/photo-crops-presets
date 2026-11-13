@@ -869,7 +869,7 @@ DRIP_NEON = "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95"
 
 
 @op("neon_drip", cutout=True, label="Neon drip (melting)", colors=DRIP_NEON, amount=0.8, length=1.0,
-    inner=0.5, gloss=0.7, glow=0.5, rain=0.5, grid=0.3, coat=0.8)
+    inner=0.5, gloss=0.7, glow=0.5, rain=0.5, grid=0.3, coat=0.8, outline=0.0, density=1.0, width=1.0)
 def neon_drip(a, p, ctx):
     """Turns the players (and what they hold) into melting neon paint: a thick
     coat of paint along every lower edge (coat), and glossy drips growing out
@@ -922,7 +922,8 @@ def neon_drip(a, p, ctx):
             stamp(xx, yy, r, c, k)
             shine = (int(xx - r * 0.35), int(yy))
             if last is not None:  # one smooth shine line down the drip's left side
-                cv2.line(core, last[0], shine, k, max(1, int(min(last[1], r) * 0.25)), cv2.LINE_AA)
+                cv2.line(core, last[0], shine, k, max(1, int(min(last[1], r) * (0.32 if float(p["outline"]) > 0 else 0.25))),
+                         cv2.LINE_AA)
             last = (shine, r)
             step = max(1.0, r * 0.45)
             yy += step
@@ -946,11 +947,14 @@ def neon_drip(a, p, ctx):
         source = source + (hue - source) * coat[..., None]
         source_w = np.maximum(source_w, coat)
         ey, ex = np.nonzero(edge)
-        for _ in range(int(55 * float(p["amount"]))):  # clusters of drips
+        dens = float(p["density"])
+        for _ in range(int(55 * float(p["amount"]) * dens)):  # clusters of drips, side by side
             k0 = rng.integers(len(ex))
-            width = ph * rng.uniform(0.006, 0.016)
-            for _ in range(rng.integers(1, 4)):
-                x = ex[k0] + rng.normal(0, width * 2.5)
+            width = ph * rng.uniform(0.006, 0.016) * float(p["width"])
+            n = rng.integers(1, 4) if dens <= 1 else rng.integers(2, 6)
+            for j in range(n):
+                x = ex[k0] + (j - n / 2) * width * 2.4 + rng.normal(0, width * 0.5) if dens > 1 \
+                    else ex[k0] + rng.normal(0, width * 2.5)
                 col = np.clip(int(x), 0, sw - 1)
                 rows = np.nonzero(edge[:, col])[0]
                 if not len(rows):
@@ -969,8 +973,12 @@ def neon_drip(a, p, ctx):
                 k = rng.integers(len(lx))
                 length = drip_length(0.015, 0.08)
                 if clear_of_faces(lx[k], ly[k], length):
-                    drip(lx[k], ly[k], length, ph * rng.uniform(0.006, 0.011), 0.95)
+                    drip(lx[k], ly[k], length, ph * rng.uniform(0.006, 0.011) * float(p["width"]), 0.95)
     tube = np.clip(tube, 0, 1)
+    if float(p["outline"]) > 0:  # smooth, rounded drip shapes (no jagged steps)
+        k = max(3, int(unit * 0.003) | 1)
+        tube = cv2.morphologyEx(tube, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        tube = np.clip((cv2.GaussianBlur(tube, (0, 0), unit * 0.0012) - 0.5) * 6 + 0.5, 0, 1)
     color = source / np.maximum(source_w, 1e-3)[..., None]
     # glossy: darker toward the drip's sides, a bright shine along its thickest part
     # glossy and crisp: a hard-edged tube, darker at its sides, a sharp white shine down its middle
@@ -979,6 +987,12 @@ def neon_drip(a, p, ctx):
     shade = 0.62 + 0.38 * np.clip(edge_dark / max(2.0, unit * 0.004), 0, 1)
     paint = color * shade[..., None]
     paint = paint + (1 - paint) * (np.clip(soft_core, 0, 1) * 0.75 * float(p["gloss"]))[..., None]
+    if float(p["outline"]) > 0:  # a crisp dark edge, so each drip stands apart from its neighbours and the black
+        # a smooth band where the paint's edge is (anti-aliased, no stair steps)
+        soft = cv2.GaussianBlur(tube, (0, 0), max(0.8, unit * 0.0011 * float(p["outline"])))
+        ring = np.clip(1 - np.abs(soft - 0.5) * 2.4, 0, 1) ** 1.5
+        paint = paint * (1 - 0.85 * ring)[..., None]
+        tube = np.maximum(tube, ring)
     # the background: faint neon streaks falling, and a dim grid
     back = np.zeros((sh, sw, 3), np.float32)
     back_cover = np.zeros((sh, sw), np.float32)
@@ -987,9 +1001,10 @@ def neon_drip(a, p, ctx):
         y0 = rng.uniform(-0.2, 0.6) * sh
         y1 = y0 + rng.uniform(0.1, 0.6) * sh
         c = hue[int(np.clip((y0 + y1) / 2, 0, sh - 1)), int(np.clip(x, 0, sw - 1))]
-        k = float(rng.uniform(0.25, 0.6))
-        cv2.line(back, (int(x), int(y0)), (int(x), int(y1)), c.tolist(), max(1, int(unit * 0.0012)), cv2.LINE_AA)
-        cv2.line(back_cover, (int(x), int(y0)), (int(x), int(y1)), k, max(1, int(unit * 0.0012)), cv2.LINE_AA)
+        k = float(rng.uniform(0.25, 0.6)) * (1 + max(0.0, float(p["rain"]) - 0.6))
+        wide = max(1, int(unit * 0.0012 * (1 + 1.5 * max(0.0, float(p["rain"]) - 0.6) * rng.random())))
+        cv2.line(back, (int(x), int(y0)), (int(x), int(y1)), c.tolist(), wide, cv2.LINE_AA)
+        cv2.line(back_cover, (int(x), int(y0)), (int(x), int(y1)), min(1.0, k), wide, cv2.LINE_AA)
         if rng.random() < 0.4:
             cv2.circle(back, (int(x), int(y1)), max(1, int(unit * 0.002)), c.tolist(), -1, cv2.LINE_AA)
             cv2.circle(back_cover, (int(x), int(y1)), max(1, int(unit * 0.002)), k, -1, cv2.LINE_AA)

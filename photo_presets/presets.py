@@ -192,10 +192,12 @@ STARTERS: dict[str, dict] = {
          "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
     "Ice Cream Drip": {"protect_faces": False, "skin_protect": 0.0, "steps": [
-        {"op": "neon_lineart", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "darkness": 0.5,
-         "lines": 1.0, "detail": 0.15, "rim": 0.9, "glow": 0.5, "clean": 1.0},
-        {"op": "neon_drip", "amount": 0.6, "length": 1.0, "inner": 0.4, "gloss": 0.8, "glow": 0.45, "rain": 0.5,
-         "grid": 0.3, "coat": 0.5}]},
+        {"op": "pop_art", "crisp": 1.0, "levels": 8, "mottle": 0.1, "lines": 0.9, "glow": 0.9,
+         "palette": "#03040a,#0d2747,#1fb8d6,#ff2d95,#ff6a2a,#ffd23f", "outline": "#22e6ff", "ink": "#000000",
+         "background": "#000000", "background_amount": 1.0, "lift": "#000000"},
+        {"op": "neon_drip", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "amount": 0.5,
+         "density": 1.4, "width": 0.6, "length": 0.8, "inner": 0.25, "gloss": 1.0, "glow": 0.3, "rain": 0.9,
+         "grid": 0.4, "coat": 0.4, "outline": 1.0}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
