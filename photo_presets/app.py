@@ -343,6 +343,41 @@ def choices_updates():
             gr.update(choices=[NONE] + ids["texture"]), gr.update(choices=[NONE] + ids["overlay"]))
 
 
+# Pasting ------------------------------------------------------------------------------
+
+# ⌘V anywhere puts copied images (a screenshot, a photo copied from Photos, a
+# browser or Finder) into the upload box on screen: Photos on Make looks, the
+# sample photo on Preset manager. Pasting text into a text box works as usual.
+PASTE_JS = """
+<script>
+document.addEventListener("paste", (e) => {
+  const PHOTO = /\.(jpe?g|png|heic|heif|webp|tiff?|arw|dng|cr2|cr3|nef|raf|orf)$/i;
+  const files = [...((e.clipboardData && e.clipboardData.files) || [])]
+    .filter(f => f.type.startsWith("image/") || PHOTO.test(f.name));
+  if (!files.length) return;  // text: paste as usual
+  const shown = id => { const el = document.getElementById(id); return el && el.offsetParent !== null ? el : null; };
+  const box = shown("sample-upload") || shown("photos-upload");
+  const input = box && box.querySelector('input[type="file"]');
+  if (!input) return;
+  e.preventDefault();
+  const now = new Date(), two = n => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ` +
+                `${two(now.getHours())}.${two(now.getMinutes())}.${two(now.getSeconds())}`;
+  const dt = new DataTransfer();
+  files.forEach((f, i) => {
+    // a copied picture arrives as "image.png": give it a name you can find later
+    const generic = /^image\.\w+$/i.test(f.name) || !f.name;
+    const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+    const name = generic ? `Pasted ${stamp}${files.length > 1 ? "-" + (i + 1) : ""}.${ext}` : f.name;
+    dt.items.add(generic ? new File([f], name, { type: f.type }) : f);
+  });
+  input.files = dt.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+});
+</script>
+"""
+
+
 # Layout ---------------------------------------------------------------------------------
 
 THEME = gr.themes.Soft(
@@ -414,8 +449,10 @@ def build() -> gr.Blocks:
             with gr.Row(equal_height=False):
                 # Left: the steps to set up a run, top to bottom
                 with gr.Column(scale=2, min_width=340, elem_classes="panel"):
-                    step(1, "Add photos", "Drop photos here (JPG or RAW), or choose a whole folder.")
-                    files = gr.File(label="Photos", file_count="multiple", type="filepath", height=150)
+                    step(1, "Add photos", "Paste a copied image (⌘V), drag photos in (JPG or RAW), click to "
+                         "browse, or choose a whole folder.")
+                    files = gr.File(label="Photos", file_count="multiple", type="filepath", height=150,
+                                    elem_id="photos-upload")
                     with gr.Row(equal_height=False, elem_classes="row-end"):
                         folder = gr.Textbox(label="Or a folder of photos", placeholder="~/Pictures/Game day",
                                             scale=4)
@@ -516,8 +553,8 @@ def build() -> gr.Blocks:
                     fields = presetform.components(ids)
                 with gr.Column(scale=2, min_width=340, elem_classes=["panel", "sticky"]):
                     gr.Markdown("**Preview**", elem_classes="hint")
-                    sample = gr.File(label="Sample photo (optional; else your first photo on Make looks)",
-                                     type="filepath", height=110)
+                    sample = gr.File(label="Sample photo (optional; paste with ⌘V, or your first photo on Make looks)",
+                                     type="filepath", height=110, elem_id="sample-upload")
                     pm_crop = gr.Radio(list(CROPS.values()), value=CROPS["none"], label="Crop first")
                     pm_preview = gr.Button("Preview")
                     pm_compare = gr.ImageSlider(label="Before / after", height=380)
@@ -594,7 +631,8 @@ def build() -> gr.Blocks:
 
 
 def main() -> int:
-    build().queue().launch(inbrowser=True, server_name="127.0.0.1", show_error=True, theme=THEME, css=CSS)
+    build().queue().launch(inbrowser=True, server_name="127.0.0.1", show_error=True, theme=THEME, css=CSS,
+                           head=PASTE_JS)
     return 0
 
 

@@ -48,8 +48,11 @@ It opens in your browser on this Mac.
 **Make looks** walks you through five numbered steps (left: set up, right:
 results):
 
-1. **Add photos** (any mix, including RAW and HEIC), or type a folder or press
-   **Browse…**.
+1. **Add photos** (any mix, including RAW and HEIC): paste a copied image with
+   **⌘V** (a screenshot, or a photo copied from Photos, a browser or Finder;
+   each paste adds to the list), drag photos in, click to browse, or type a
+   folder or press **Browse…**. On Preset manager, ⌘V puts the image in the
+   sample photo box.
 2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
    dramatic, Clean editorial, Studio smoke and lights, My presets), each with a
    one-line description. Tick any, or **Select all**; every photo goes through
