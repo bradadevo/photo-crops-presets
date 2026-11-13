@@ -401,3 +401,30 @@ def test_stadium_lights_shine_at_the_sides_behind_the_player(empty_library):
     assert out[y - 10:y + 10, 20:70].max() > 200 and out[y - 10:y + 10, 330:380].max() > 200  # both banks
     assert (out[60:290, 180:220] == 10).all()           # the player is untouched
     assert out[5, 200].mean() < 60                      # the sky between stays dark
+
+
+def test_pop_art_paints_the_player_in_neon_and_tones_the_background(empty_library):
+    rng = np.random.default_rng(0)
+    img = Image.fromarray((rng.random((200, 200, 3)) * 80 + 90).astype(np.uint8))   # dull, mid-gray photo
+    matte = np.zeros((200, 200), np.float32)
+    matte[30:190, 70:130] = 1
+    scene = Scene(feet=(0.5, 0.95), subject_height=0.8, matte=matte)
+    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [{"op": "pop_art"}]},
+                                     empty_library, scene)[0], np.int16)
+    player, background = out[60:160, 85:115], out[10:60, 5:40]
+    chroma = lambda a: (a.max(axis=-1) - a.min(axis=-1)).mean()
+    assert chroma(player) > 80                                   # vivid neon paint
+    assert background.mean() < 0.7 * 135 and chroma(background) < chroma(player) / 2   # darker, muted tone
+    assert background[..., 0].mean() > background[..., 2].mean()   # warm (sepia), not cold
+
+
+def test_paint_splatter_lands_around_the_player(empty_library):
+    img = Image.new("RGB", (300, 300), (20, 20, 20))
+    matte = np.zeros((300, 300), np.float32)
+    matte[40:290, 130:170] = 1
+    scene = Scene(feet=(0.5, 0.95), subject_height=0.8, matte=matte)
+    out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [
+        {"op": "paint_splatter", "front": 0.0}]}, empty_library, scene)[0], np.int16)
+    painted = (np.abs(out - 20).max(axis=-1) > 30)
+    assert painted[:, :130].mean() + painted[:, 170:].mean() > 0.02   # paint around the player
+    assert not painted[60:280, 135:165].any()                         # none over them with front 0

@@ -516,3 +516,159 @@ def subject_vignette(a, p, ctx):
     fall = _smoothstep(0.0, max(float(p["spread"]), 0.01), dist)
     fall = cv2.resize(cv2.GaussianBlur(fall, (0, 0), max(sh, sw) / 60), (w, h), interpolation=cv2.INTER_LINEAR)
     return a * (1 - float(p["amount"]) * fall)[..., None]
+
+
+# Neon pop art ------------------------------------------------------------------
+
+# Indigo shadows, then violet, cyan, pink, salmon and yellow-green highlights (a neon paint gradient)
+POP_PALETTE = "#24157a,#5b3dff,#2fc6ff,#ff4fa8,#ff8f5a,#e6ff4d,#fbffd2"
+
+
+def _palette(colors: str) -> np.ndarray:
+    return np.stack([_hex(c.strip()) for c in colors.split(",") if c.strip()])
+
+
+def _gradient_map(t: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    pos = np.clip(t, 0, 1) * (len(palette) - 1)
+    i = np.minimum(pos.astype(np.int32), len(palette) - 2)
+    f = (pos - i)[..., None]
+    return palette[i] * (1 - f) + palette[i + 1] * f
+
+
+def _art_mask(ctx, h, w) -> np.ndarray:
+    """Where the art goes: the player's cut-out, or the whole photo without one."""
+    return ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
+
+
+@op("pop_art", label="Neon pop art (player)", palette=POP_PALETTE, levels=7, mottle=0.35, lines=0.6,
+    outline="#ff6f7d", glow=0.7, shading=0.45, background="#9a6a44", background_amount=0.85, amount=1.0)
+def pop_art(a, p, ctx):
+    """The player as a neon pop-art painting: brightness mapped onto a neon
+    gradient, mottled like brush strokes and posterized into paint bands, with
+    painted contour lines and a glowing outline. The background (with a
+    cut-out) turns a dark, low-color tone of `background` (sepia brown by default)."""
+    from photo_presets import procedural
+    h, w = a.shape[:2]
+    scale = min(1.0, 1600 / max(h, w))
+    sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
+    small = cv2.resize(a, (sw, sh), interpolation=cv2.INTER_AREA)
+    lum = _luma(small)
+    # even out the player's tones so every part reaches across the gradient
+    lum8 = (np.clip(lum, 0, 1) * 255).astype(np.uint8)
+    lum = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(6, 6)).apply(lum8).astype(np.float32) / 255
+    lum = cv2.bilateralFilter(lum, 9, 0.15, 6)  # flatter, painted areas
+    rng = np.random.default_rng(ctx.seed + 31)
+    mottle = procedural.fractal(rng, sh, sw, max(sh, sw) / 14, octaves=4)
+    t = np.clip(lum * 0.85 + 0.08 + (mottle - 0.5) * 2 * float(p["mottle"]), 0, 1)
+    levels = max(2, int(p["levels"]))
+    banded = np.round(t * (levels - 1)) / (levels - 1)
+    t = cv2.GaussianBlur(banded * 0.75 + t * 0.25, (0, 0), 0.8)
+    art = _gradient_map(t, _palette(p["palette"]))
+    # keep the photo's shading (eyes, folds, the face's shape) under the paint
+    shade = cv2.GaussianBlur(lum, (0, 0), 1.0)
+    art = art * (1 - float(p["shading"]) + float(p["shading"]) * 1.6 * shade[..., None])
+    # painted contour lines along the strong edges inside the player
+    edges = cv2.Canny((cv2.GaussianBlur(lum, (0, 0), 1.2) * 255).astype(np.uint8), 40, 110).astype(np.float32) / 255
+    edges = cv2.GaussianBlur(cv2.dilate(edges, np.ones((2, 2), np.uint8)), (0, 0), 0.7)
+    art = art + (_hex(p["outline"]) - art) * (np.clip(edges * 1.5, 0, 1) * float(p["lines"]))[..., None]
+    art = cv2.resize(art, (w, h), interpolation=cv2.INTER_LINEAR)
+    mask = _art_mask(ctx, h, w)[..., None]
+    out = a + (art - a) * mask * float(p["amount"])
+    if ctx.alpha is not None and float(p["background_amount"]) > 0:  # the background in one dark tone
+        tone = _luma(a)[..., None] ** 1.2 * _hex(p["background"]) * 1.3 + np.array([0.05, 0.03, 0.02], np.float32)
+        out = out + (tone - out) * (1 - mask) * float(p["background_amount"])
+    if ctx.alpha is not None and float(p["glow"]) > 0:  # a glowing outline around the player
+        m = (ctx.alpha > 0.5).astype(np.uint8)
+        k = max(3, int(0.004 * max(h, w)) | 1)
+        ring = cv2.dilate(m, np.ones((k, k), np.uint8)).astype(np.float32) - cv2.erode(m, np.ones((k, k), np.uint8))
+        ring = cv2.GaussianBlur(ring, (0, 0), k * 0.6)
+        halo = cv2.GaussianBlur(ring, (0, 0), k * 3) * 0.6
+        light = np.clip(ring + halo, 0, 1)[..., None] * _hex(p["outline"])
+        out = blend(np.clip(out, 0, 1), light, "screen", float(p["glow"]))
+    return out
+
+
+@op("paint_splatter", label="Paint splatter and strokes", palette="#ff4fa8,#2fc6ff,#ff8f5a,#e6ff4d,#7a5cff",
+    stroke_colors="#ff6f7d,#ff8f5a,#ff4fa8,#2fc6ff", amount=0.85, strokes=0.7, front=0.25)
+def paint_splatter(a, p, ctx):
+    """Paint splatters, sprays and swooping brush strokes around the player in
+    neon colors: mostly behind them; front (0-1) lets some land over their edges."""
+    h, w = a.shape[:2]
+    scale = min(1.0, 1800 / max(h, w))
+    sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
+    fx, fy, ph = (v * scale for v in _player(ctx.scene, h, w))
+    cy = fy - ph * 0.5
+    rng = np.random.default_rng(ctx.seed + 47)
+    colors = _palette(p["palette"])
+    paint = np.zeros((sh, sw, 3), np.float32)
+    cover = np.zeros((sh, sw), np.float32)
+
+    def dab(layer, x, y, r, color, alpha):
+        m = np.zeros((sh, sw), np.float32)
+        cv2.circle(m, (int(x), int(y)), max(1, int(r)), 1.0, -1, cv2.LINE_AA)
+        layer[0][:] = layer[0] + (color - layer[0]) * (m * alpha)[..., None]
+        layer[1][:] = np.maximum(layer[1], m * alpha)
+
+    layer = (paint, cover)
+    # splatter clusters around the player, each a blob with a spray of droplets
+    for _ in range(int(30 * float(p["amount"])) + 6):
+        ang = rng.uniform(0, 2 * np.pi)
+        dist = ph * rng.uniform(0.15, 0.6)
+        x, y = fx + np.cos(ang) * dist * 0.8, cy + np.sin(ang) * dist
+        color = colors[rng.integers(len(colors))]
+        # an irregular splat: overlapping lobes and a few flung streaks, never a clean disc
+        r0 = ph * rng.uniform(0.006, 0.016)
+        alpha = rng.uniform(0.7, 1.0)
+        for _ in range(rng.integers(4, 9)):
+            dab(layer, x + rng.normal(0, r0 * 0.8), y + rng.normal(0, r0 * 0.8), r0 * rng.uniform(0.3, 0.9), color, alpha)
+        for _ in range(rng.integers(0, 3)):  # flicked paint: a streak that thins out, ending in a drop
+            b = rng.uniform(0, 2 * np.pi)
+            length = r0 * rng.uniform(2, 4.5)
+            m = np.zeros((sh, sw), np.float32)
+            for k in range(4):
+                a0, a1 = length * k / 4, length * (k + 1) / 4
+                p0 = (int(x + np.cos(b) * a0), int(y + np.sin(b) * a0))
+                p1 = (int(x + np.cos(b) * a1), int(y + np.sin(b) * a1))
+                cv2.line(m, p0, p1, 1.0, max(1, int(r0 * 0.4 * (1 - k / 4.5))), cv2.LINE_AA)
+            cv2.circle(m, (int(x + np.cos(b) * length), int(y + np.sin(b) * length)), max(1, int(r0 * 0.25)), 1.0, -1,
+                       cv2.LINE_AA)
+            paint[:] = paint + (color - paint) * (m * alpha)[..., None]
+            cover[:] = np.maximum(cover, m * alpha)
+        for _ in range(rng.integers(25, 70)):
+            d = abs(rng.normal(0, ph * 0.09))
+            b = rng.uniform(0, 2 * np.pi)
+            dab(layer, x + np.cos(b) * d, y + np.sin(b) * d, ph * rng.uniform(0.0012, 0.005), color,
+                rng.uniform(0.5, 1.0))
+    # fine speckle over the whole area around the player
+    n = int(2500 * float(p["amount"]))
+    xs = fx + rng.normal(0, ph * 0.45, n)
+    ys = cy + rng.normal(0, ph * 0.45, n)
+    for x, y in zip(xs, ys):
+        if 0 <= x < sw and 0 <= y < sh:
+            c = colors[rng.integers(len(colors))]
+            r = max(1, int(ph * rng.uniform(0.001, 0.003)))
+            cv2.circle(paint, (int(x), int(y)), r, c.tolist(), -1, cv2.LINE_AA)
+            cv2.circle(cover, (int(x), int(y)), r, float(rng.uniform(0.5, 0.9)), -1, cv2.LINE_AA)
+    # swooping brush strokes: thin arcs sweeping around the player
+    strokes = np.zeros((sh, sw), np.float32)
+    stroke_color = np.zeros((sh, sw, 3), np.float32)
+    stroke_colors = _palette(p["stroke_colors"])
+    for _ in range(int(26 * float(p["strokes"]))):
+        c = stroke_colors[rng.integers(len(stroke_colors))]
+        axes = (int(ph * rng.uniform(0.3, 0.8)), int(ph * rng.uniform(0.12, 0.55)))
+        center = (int(fx + rng.normal(0, ph * 0.22)), int(cy + rng.normal(0, ph * 0.22)))
+        start = rng.uniform(0, 360)
+        thick = max(1, int(ph * rng.uniform(0.003, 0.009)))
+        m = np.zeros((sh, sw), np.float32)
+        cv2.ellipse(m, center, axes, rng.uniform(0, 180), start, start + rng.uniform(40, 120), 1.0, thick,
+                    cv2.LINE_AA)
+        m *= rng.uniform(0.6, 1.0)
+        stroke_color = stroke_color + (c - stroke_color) * m[..., None]
+        strokes = np.maximum(strokes, m)
+    paint = paint * (1 - strokes[..., None]) + stroke_color * strokes[..., None]
+    cover = np.maximum(cover, strokes)
+    paint = cv2.resize(paint, (w, h), interpolation=cv2.INTER_LINEAR)
+    cover = cv2.resize(cover, (w, h), interpolation=cv2.INTER_LINEAR)
+    behind = 1 - ctx.alpha if ctx.alpha is not None else np.ones((h, w), np.float32)
+    where = behind + (1 - behind) * float(p["front"])
+    return a + (paint - a) * (np.clip(cover, 0, 1) * where * float(p["amount"]))[..., None]

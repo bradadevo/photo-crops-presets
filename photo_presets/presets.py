@@ -158,6 +158,13 @@ STARTERS: dict[str, dict] = {
         {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
         {"op": "contrast", "amount": 0.15},
         {"op": "subject_vignette", "amount": 0.3, "spread": 0.4}]},
+    "Neon Pop Art": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+        {"op": "exposure", "stops": -1.1, "layer": "background"},
+        {"op": "lens_blur", "radius": 0.008, "layer": "background"},
+        {"op": "pop_art", "levels": 7, "mottle": 0.35, "lines": 0.6, "glow": 0.7, "background": "#9a6a44",
+         "background_amount": 0.85},
+        {"op": "paint_splatter", "amount": 0.85, "strokes": 0.7, "front": 0.25},
+        {"op": "grain", "amount": 0.1}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
@@ -229,6 +236,7 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Smoke Studio": (STUDIO, "Red studio backdrop, white smoke at the sides and feet, lights above"),
     "Color Smoke": (STUDIO, "Night background with two-color smoke bombs (blue and gold)"),
     "Stadium Smoke": (STUDIO, "Night stadium with smoke at the sides and feet and floodlights"),
+    "Neon Pop Art": (BOLD, "The player as a neon pop-art painting with paint splatters, on a dark sepia background"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
 

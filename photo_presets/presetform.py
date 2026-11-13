@@ -53,6 +53,9 @@ DEFAULTS = {
     "grain_on": False, "grain_amount": 0.2,
     "vig_on": True, "vig_amount": 0.35,
     "sv_on": False, "sv_amount": 0.6, "sv_spread": 0.3,
+    "pa_on": False, "pa_levels": 7, "pa_mottle": 0.35, "pa_lines": 0.6, "pa_shading": 0.45, "pa_glow": 0.7,
+    "pa_outline": "#ff6f7d", "pa_bg": "#9a6a44", "pa_bg_amount": 0.85,
+    "ps_on": False, "ps_amount": 0.85, "ps_strokes": 0.7, "ps_front": 0.25,
 }
 FIELDS = list(DEFAULTS)
 
@@ -104,6 +107,12 @@ def to_recipe(v: dict) -> dict:
             s.append({"op": "lens_blur", "radius": v["bg_blur"], "layer": "background"})
         if v["bg_saturation"] != 1.0:
             s.append({"op": "saturation", "amount": v["bg_saturation"], "layer": "background"})
+    if v["pa_on"]:
+        s.append({"op": "pop_art", "levels": int(v["pa_levels"]), "mottle": v["pa_mottle"], "lines": v["pa_lines"],
+                  "shading": v["pa_shading"], "glow": v["pa_glow"], "outline": v["pa_outline"],
+                  "background": v["pa_bg"], "background_amount": v["pa_bg_amount"]})
+    if v["ps_on"]:
+        s.append({"op": "paint_splatter", "amount": v["ps_amount"], "strokes": v["ps_strokes"], "front": v["ps_front"]})
     for n in ("t1", "t2"):
         if v[n] and v[n] != NONE:
             s.append({"op": "texture", "asset": v[n], "blend": v[f"{n}_blend"], "opacity": v[f"{n}_opacity"]})
@@ -218,6 +227,12 @@ def from_recipe(recipe: dict) -> dict:
         elif op == "stadium_lights":
             v.update(st_on=True, st_height=g("height", 0.7), st_amount=g("amount", 0.9),
                      st_color=g("color", v["st_color"]))
+        elif op == "pop_art":
+            v.update(pa_on=True, pa_levels=g("levels", 7), pa_mottle=g("mottle", 0.35), pa_lines=g("lines", 0.6),
+                     pa_shading=g("shading", 0.45), pa_glow=g("glow", 0.7), pa_outline=g("outline", "#ff6f7d"),
+                     pa_bg=g("background", "#9a6a44"), pa_bg_amount=g("background_amount", 0.85))
+        elif op == "paint_splatter":
+            v.update(ps_on=True, ps_amount=g("amount", 0.85), ps_strokes=g("strokes", 0.7), ps_front=g("front", 0.25))
         elif op == "subject_vignette":
             v.update(sv_on=True, sv_amount=g("amount", 0.6), sv_spread=g("spread", 0.3))
         elif op == "rain":
@@ -409,6 +424,29 @@ def components(ids: dict) -> dict:
                 with gr.Row():
                     slider("rain_amount", 0, 1, "Amount")
                     slider("rain_angle", -40, 40, "Angle", step=1, info="Degrees from straight down.")
+
+        with gr.Tab("Pop art"):
+            hint("Turn the player into a neon pop-art painting, with paint splattered around them.")
+            check("pa_on", "Neon pop-art painting", "The player in neon paint (indigo, cyan, pink, orange, "
+                  "yellow-green) with painted lines and a glowing outline.")
+            with when("pa_on"):
+                with gr.Row():
+                    slider("pa_levels", 3, 12, "Paint bands", step=1, info="Fewer = bolder, poster-like areas.")
+                    slider("pa_mottle", 0, 0.8, "Brush mottling", info="How patchy the colors are.")
+                    slider("pa_shading", 0, 1, "Shading", info="Keeps faces and folds readable.")
+                with gr.Row():
+                    slider("pa_lines", 0, 1, "Painted lines")
+                    slider("pa_glow", 0, 1, "Outline glow")
+                    color("pa_outline", "Line and glow color")
+                with gr.Row():
+                    color("pa_bg", "Background tone", "The background turns a dark shade of this.")
+                    slider("pa_bg_amount", 0, 1, "Background tone amount")
+            check("ps_on", "Paint splatter and strokes", "Splashes, droplets and swooping strokes around the player.")
+            with when("ps_on"):
+                with gr.Row():
+                    slider("ps_amount", 0, 1, "Splatter")
+                    slider("ps_strokes", 0, 1, "Brush strokes")
+                    slider("ps_front", 0, 1, "Over the player", info="How much paint lands over the player's edges.")
 
         with gr.Tab("Overlays"):
             hint("Effects and textures from your asset library (see the Assets tab).")
