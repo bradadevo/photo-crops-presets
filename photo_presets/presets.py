@@ -172,6 +172,13 @@ STARTERS: dict[str, dict] = {
          "palette": "#1a0e5c,#4a2fd6,#2fb4ff,#ff3f9a,#ff7a3a,#e2f53c",
          "background": "#9a6a44", "background_amount": 0.9},
         {"op": "paint_splatter", "amount": 0.95, "strokes": 0.7, "front": 0.25, "whips": 1.0}]},
+    "Neon Pop Art Sharp Black": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+        {"op": "exposure", "stops": -2.5, "layer": "background"},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
+        {"op": "pop_art", "crisp": 1.0, "levels": 9, "mottle": 0.12, "lines": 0.8, "glow": 0.6,
+         "palette": "#1a0e5c,#4a2fd6,#2fb4ff,#ff3f9a,#ff7a3a,#e2f53c",
+         "background": "#26262c", "background_amount": 1.0, "lift": "#000000"},
+        {"op": "paint_splatter", "amount": 0.95, "strokes": 0.7, "front": 0.25, "whips": 1.0}]},
     "Neon Splash": {"protect_faces": False, "skin_protect": 0.0, "steps": [
         {"op": "neon_lineart", "darkness": 0.6, "lines": 1.0, "detail": 0.6, "rim": 1.0, "glow": 0.5},
         {"op": "paint_burst", "amount": 0.9, "size": 1.0, "direction": 0.0},
@@ -262,6 +269,7 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Stadium Smoke": (STUDIO, "Night stadium with smoke at the sides and feet and floodlights"),
     "Neon Pop Art": (BOLD, "The player as a neon pop-art painting with paint splatters, on a dark sepia background"),
     "Neon Pop Art Sharp": (BOLD, "Neon Pop Art with crisp, screen-print edges and thin ink lines"),
+    "Neon Pop Art Sharp Black": (BOLD, "Neon Pop Art Sharp on a near-black background instead of sepia brown"),
     "Neon Splash": (BOLD, "The player as glowing neon line art on black, with a paint explosion behind them"),
     "Neon Streaks": (BOLD, "Neon line art on black with fine paint streaks, drops and specks flying out behind the player"),
     "Ice Cream Drip": (BOLD, "The player melting into neon paint: neon line art on black with glossy drips running off every edge"),

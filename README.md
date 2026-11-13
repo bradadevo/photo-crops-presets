@@ -10,7 +10,7 @@ with a Gradio app.
   B&W channel mix or duotone) with textures, blend modes, impact overlays,
   lighting and edge effects.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
-  run photos straight through them. 27 starter presets come built in, in
+  run photos straight through them. 28 starter presets come built in, in
   groups, each with a one-line description; tick any or all of them.
 - **Instagram reels**: turn the looks into a vertical video under a minute
   (2 seconds per photo, cuts on your song's beat), ready to post.
@@ -155,6 +155,7 @@ uv run photo-presets-batch ~/Movies/"Game day" --all-presets
 | Stadium Smoke | A dark night stadium, gray smoke at the player's sides and over the floor, and two banks of floodlights glowing through the haze |
 | Neon Pop Art | The player as a neon pop-art painting (indigo, cyan, pink, orange and yellow-green paint, painted lines, a glowing outline) with paint splatter and swooping strokes, on a dark sepia background |
 | Neon Pop Art Sharp | Neon Pop Art with crisp, screen-print edges: hard-edged paint shapes, thin ink and bright etched lines, a thin outline, whip lines flying outward, and a near-black background |
+| Neon Pop Art Sharp Black | Neon Pop Art Sharp on a true black background instead of sepia brown |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
 | Ice Cream Drip | The player (and the ball) melting into neon paint: neon line art on black with glossy drips running off every lower edge, faces kept clear, faint falling streaks and a dim grid behind |
@@ -220,7 +221,7 @@ A look is a recipe: a list of steps, run in order.
 | `smoke_cloud` | `color`, `color2` (right cloud, for two team colors), `place` (`sides`, `behind`, `floor`, `sides_floor`), `amount`, `size`, `front` (floor smoke over the feet): generated billowing smoke behind the players |
 | `stage_lights` | `count`, `amount`: studio lights along the top |
 | `stadium_lights` | `height` (share of the player's height above their feet), `amount`, `color`: two floodlight banks near the left and right edges |
-| `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
+| `pop_art` | `levels`, `mottle`, `lines`, `shading`, `glow`, `outline`, `palette`, `background`, `background_amount`, `lift` (the background's darkest tone; #000000 for true black), `crisp` (1: sharp screen-print edges, ink and etched lines): the player as a neon pop-art painting; the background turns a dark tone |
 | `paint_splatter` | `amount`, `strokes`, `front`, `whips`, `palette`, `stroke_colors`: paint splats, droplets and swooping strokes around the player |
 | `neon_lineart` | `darkness`, `lines`, `detail`, `rim`, `glow`, `colors`, `background`, `clean` (1: bold, clean lines without texture scribbles): the player as neon line art with a glowing rim; the background goes black |
 | `paint_burst` | `amount`, `size`, `direction`, `colors`, `splash` (solid paint, 0-1), `lines` (streaks ending in drops, 0-1), `specks` (0-1): a hard-edged explosion of neon paint behind the player |

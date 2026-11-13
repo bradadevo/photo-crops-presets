@@ -541,7 +541,7 @@ def _art_mask(ctx, h, w) -> np.ndarray:
 
 
 @op("pop_art", cutout=True, label="Neon pop art (player)", palette=POP_PALETTE, levels=7, mottle=0.35, lines=0.6,
-    outline="#ff6f7d", glow=0.7, shading=0.45, background="#9a6a44", background_amount=0.85, crisp=0.0,
+    outline="#ff6f7d", glow=0.7, shading=0.45, background="#9a6a44", background_amount=0.85, lift="#0d0805", crisp=0.0,
     ink="#1b0d3d", etch="#fff6c8", amount=1.0)
 def pop_art(a, p, ctx):
     """The player as a neon pop-art painting: brightness mapped onto a neon
@@ -600,7 +600,8 @@ def pop_art(a, p, ctx):
     mask = _art_mask(ctx, h, w)[..., None]
     out = a + (art - a) * mask * float(p["amount"])
     if ctx.alpha is not None and float(p["background_amount"]) > 0:  # the background in one dark tone
-        tone = _luma(a)[..., None] ** 1.2 * _hex(p["background"]) * 1.3 + np.array([0.05, 0.03, 0.02], np.float32)
+        # the background's darkest tone is `lift` (a warm near-black by default; #000000 for true black)
+        tone = _luma(a)[..., None] ** 1.2 * _hex(p["background"]) * 1.3 + _hex(p["lift"])
         out = out + (tone - out) * (1 - mask) * float(p["background_amount"])
     if ctx.alpha is not None and float(p["glow"]) > 0:  # a glowing outline around the player
         m = (ctx.alpha > 0.5).astype(np.uint8)
