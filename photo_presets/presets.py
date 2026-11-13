@@ -188,9 +188,7 @@ STARTERS: dict[str, dict] = {
         {"op": "neon_lineart", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "darkness": 0.5,
          "lines": 1.0, "detail": 0.15, "rim": 0.9, "glow": 0.5, "clean": 1.0},
         {"op": "neon_drip", "amount": 0.6, "length": 1.0, "inner": 0.4, "gloss": 0.8, "glow": 0.45, "rain": 0.5,
-         "grid": 0.3, "coat": 0.5},
-        {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.0,
-         "palette": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f"}]},
+         "grid": 0.3, "coat": 0.5}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},

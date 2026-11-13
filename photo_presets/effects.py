@@ -966,9 +966,9 @@ def neon_drip(a, p, ctx):
         if len(lx):
             for _ in range(int(30 * float(p["amount"]) * float(p["inner"]))):
                 k = rng.integers(len(lx))
-                length = drip_length(0.015, 0.14)
+                length = drip_length(0.015, 0.08)
                 if clear_of_faces(lx[k], ly[k], length):
-                    drip(lx[k], ly[k], length, ph * rng.uniform(0.004, 0.008), 0.95)
+                    drip(lx[k], ly[k], length, ph * rng.uniform(0.006, 0.011), 0.95)
     tube = np.clip(tube, 0, 1)
     color = source / np.maximum(source_w, 1e-3)[..., None]
     # glossy: darker toward the drip's sides, a bright shine along its thickest part
