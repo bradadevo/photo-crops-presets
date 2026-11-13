@@ -54,8 +54,8 @@ DEFAULTS = {
     "vig_on": True, "vig_amount": 0.35,
     "sv_on": False, "sv_amount": 0.6, "sv_spread": 0.3,
     "pa_on": False, "pa_levels": 7, "pa_mottle": 0.35, "pa_lines": 0.6, "pa_shading": 0.45, "pa_glow": 0.7,
-    "pa_outline": "#ff6f7d", "pa_bg": "#9a6a44", "pa_bg_amount": 0.85,
-    "ps_on": False, "ps_amount": 0.85, "ps_strokes": 0.7, "ps_front": 0.25,
+    "pa_outline": "#ff6f7d", "pa_bg": "#9a6a44", "pa_bg_amount": 0.85, "pa_crisp": False,
+    "ps_on": False, "ps_amount": 0.85, "ps_strokes": 0.7, "ps_front": 0.25, "ps_whips": 0.0,
 }
 FIELDS = list(DEFAULTS)
 
@@ -110,9 +110,11 @@ def to_recipe(v: dict) -> dict:
     if v["pa_on"]:
         s.append({"op": "pop_art", "levels": int(v["pa_levels"]), "mottle": v["pa_mottle"], "lines": v["pa_lines"],
                   "shading": v["pa_shading"], "glow": v["pa_glow"], "outline": v["pa_outline"],
-                  "background": v["pa_bg"], "background_amount": v["pa_bg_amount"]})
+                  "background": v["pa_bg"], "background_amount": v["pa_bg_amount"],
+                  "crisp": 1.0 if v["pa_crisp"] else 0.0})
     if v["ps_on"]:
-        s.append({"op": "paint_splatter", "amount": v["ps_amount"], "strokes": v["ps_strokes"], "front": v["ps_front"]})
+        s.append({"op": "paint_splatter", "amount": v["ps_amount"], "strokes": v["ps_strokes"], "front": v["ps_front"],
+                  "whips": v["ps_whips"]})
     for n in ("t1", "t2"):
         if v[n] and v[n] != NONE:
             s.append({"op": "texture", "asset": v[n], "blend": v[f"{n}_blend"], "opacity": v[f"{n}_opacity"]})
@@ -230,9 +232,11 @@ def from_recipe(recipe: dict) -> dict:
         elif op == "pop_art":
             v.update(pa_on=True, pa_levels=g("levels", 7), pa_mottle=g("mottle", 0.35), pa_lines=g("lines", 0.6),
                      pa_shading=g("shading", 0.45), pa_glow=g("glow", 0.7), pa_outline=g("outline", "#ff6f7d"),
-                     pa_bg=g("background", "#9a6a44"), pa_bg_amount=g("background_amount", 0.85))
+                     pa_bg=g("background", "#9a6a44"), pa_bg_amount=g("background_amount", 0.85),
+                     pa_crisp=float(g("crisp", 0.0)) >= 0.5)
         elif op == "paint_splatter":
-            v.update(ps_on=True, ps_amount=g("amount", 0.85), ps_strokes=g("strokes", 0.7), ps_front=g("front", 0.25))
+            v.update(ps_on=True, ps_amount=g("amount", 0.85), ps_strokes=g("strokes", 0.7), ps_front=g("front", 0.25),
+                     ps_whips=g("whips", 0.0))
         elif op == "subject_vignette":
             v.update(sv_on=True, sv_amount=g("amount", 0.6), sv_spread=g("spread", 0.3))
         elif op == "rain":
@@ -430,6 +434,8 @@ def components(ids: dict) -> dict:
             check("pa_on", "Neon pop-art painting", "The player in neon paint (indigo, cyan, pink, orange, "
                   "yellow-green) with painted lines and a glowing outline.")
             with when("pa_on"):
+                check("pa_crisp", "Sharp, screen-print edges", "Hard-edged paint shapes, thin ink and bright etched "
+                      "lines, and a thin outline, at full resolution. Off: softer, blended paint with a wide glow.")
                 with gr.Row():
                     slider("pa_levels", 3, 12, "Paint bands", step=1, info="Fewer = bolder, poster-like areas.")
                     slider("pa_mottle", 0, 0.8, "Brush mottling", info="How patchy the colors are.")
@@ -447,6 +453,7 @@ def components(ids: dict) -> dict:
                     slider("ps_amount", 0, 1, "Splatter")
                     slider("ps_strokes", 0, 1, "Brush strokes")
                     slider("ps_front", 0, 1, "Over the player", info="How much paint lands over the player's edges.")
+                    slider("ps_whips", 0, 1, "Whip lines", info="Fast flicks flying outward from the player.")
 
         with gr.Tab("Overlays"):
             hint("Effects and textures from your asset library (see the Assets tab).")
