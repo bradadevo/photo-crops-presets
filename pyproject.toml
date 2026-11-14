@@ -14,12 +14,16 @@ dependencies = [
     "pillow-heif>=1.8.1",
     "rawpy",
     "rembg[cpu]>=2.0.87",
+    "tifffile>=2026.10.15",
     "ultralytics",
 ]
 
 [project.scripts]
 photo-crops = "photo_crops.cli:main"
 photo-crops-ui = "photo_crops.ui:main"
+allprophoto = "photo_presets.app:main"
+allprophoto-batch = "photo_presets.cli:main"
+# the earlier names still work
 photo-presets = "photo_presets.app:main"
 photo-presets-batch = "photo_presets.cli:main"
 

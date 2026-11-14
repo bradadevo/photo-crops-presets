@@ -5,6 +5,14 @@ channel by color channel, to the camera's own JPEG preview stored inside the
 RAW. A plain RAW development comes out much darker and harsher than the
 camera's JPEG (median brightness about 70-100 against 125-165 on a sunny
 field); the match gives the camera's look with the RAW's full detail.
+
+Color: every photo is turned into sRGB, the color space the edits work in and
+that the web, phones and print labs expect. A photo saved in another space
+(an iPhone's Display P3, a camera set to Adobe RGB) is converted with its
+profile, so its colors stay true. Saved pictures carry the sRGB profile.
+
+Precision: RAW and 16-bit TIFF photos also keep a 16-bit copy (Photo.fine),
+so full-size edits and 16-bit exports have no banding in smooth gradients.
 """
 
 import io
@@ -34,9 +42,43 @@ MATCH_SMOOTH = 200
 @dataclass
 class Photo:
     path: Path
-    image: Image.Image
+    image: Image.Image  # 8-bit sRGB, for finding players and quick previews
     exif: bytes | None
     from_raw: bool
+    fine: np.ndarray | None = None  # the same picture in 16 bits (uint16), when the file has more than 8
+
+
+def srgb_profile() -> bytes:
+    """The sRGB color profile, embedded in saved pictures."""
+    global _SRGB
+    if _SRGB is None:
+        mac = Path("/System/Library/ColorSync/Profiles/sRGB Profile.icc")  # the standard sRGB IEC61966-2.1
+        if mac.exists():
+            _SRGB = mac.read_bytes()
+        else:
+            from PIL import ImageCms
+            _SRGB = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    return _SRGB
+
+
+_SRGB = None
+
+
+def to_srgb(img: Image.Image, icc: bytes | None) -> Image.Image:
+    """The picture in sRGB, converted from its own color profile if it has
+    another one (Display P3, Adobe RGB...)."""
+    if not icc:
+        return img
+    from PIL import ImageCms
+    try:
+        src = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        if "srgb" in ImageCms.getProfileDescription(src).lower().replace(" ", ""):
+            return img
+        dst = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB"))
+        return ImageCms.profileToProfile(img, src, dst, renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC,
+                                         outputMode="RGB")
+    except (ImageCms.PyCMSError, OSError, ValueError):
+        return img
 
 
 def is_raw(path: Path) -> bool:
@@ -68,24 +110,26 @@ def collect(folder: Path) -> tuple[list[Path], list[Path]]:
     return sorted(photos.values()), shots
 
 
-def match_tones(raw16: np.ndarray, reference: np.ndarray) -> np.ndarray:
+def match_tones(raw16: np.ndarray, reference: np.ndarray, fine: bool = False) -> np.ndarray:
     """Maps each channel of a 16-bit image so its tones follow the reference
     8-bit image of the same scene (any size): a smooth curve per channel from
-    their histograms, so it needs no exact alignment."""
+    their histograms, so it needs no exact alignment. fine: a 16-bit result
+    (uint16) instead of 8-bit, keeping the RAW's smooth gradients."""
     h, w = reference.shape[:2]
     scale = min(1.0, 1500 / max(h, w))
     size = (max(1, int(w * scale)), max(1, int(h * scale)))
     small_raw = cv2.resize(raw16, size, interpolation=cv2.INTER_AREA)
     small_ref = cv2.resize(reference, size, interpolation=cv2.INTER_AREA)
     q = np.linspace(0, 100, MATCH_POINTS)
-    out = np.empty(raw16.shape, np.uint8)
+    out = np.empty(raw16.shape, np.uint16 if fine else np.uint8)
+    top = 65535 / 255 if fine else 1.0
     for c in range(3):
         src = np.percentile(small_raw[..., c], q)
         src = np.maximum.accumulate(src + np.arange(len(q)) * 1e-6)  # strictly increasing
         dst = np.percentile(small_ref[..., c], q)
         lut = np.interp(np.arange(65536), src, dst).astype(np.float32)
         lut = cv2.GaussianBlur(lut.reshape(1, -1), (0, 0), MATCH_SMOOTH, borderType=cv2.BORDER_REPLICATE).ravel()
-        out[..., c] = np.clip(lut[raw16[..., c]] + 0.5, 0, 255).astype(np.uint8)
+        out[..., c] = np.clip(lut[raw16[..., c]] * top + 0.5, 0, 255 * top).astype(out.dtype)
     return out
 
 
@@ -102,12 +146,35 @@ def camera_preview(raw: rawpy.RawPy) -> np.ndarray | None:
 
 
 def develop_raw(path: Path) -> Image.Image:
+    return develop_raw_fine(path)[0]
+
+
+def develop_raw_fine(path: Path) -> tuple[Image.Image, np.ndarray]:
+    """The RAW in the camera's look: 8-bit, and the same in 16 bits."""
     with rawpy.imread(str(path)) as raw:
         preview = camera_preview(raw)
         if preview is None:
-            return Image.fromarray(raw.postprocess(use_camera_wb=True, output_bps=8))
-        raw16 = raw.postprocess(use_camera_wb=True, output_bps=16, no_auto_bright=True)
-    return Image.fromarray(match_tones(raw16, preview))
+            fine = raw.postprocess(use_camera_wb=True, output_bps=16)
+        else:
+            raw16 = raw.postprocess(use_camera_wb=True, output_bps=16, no_auto_bright=True)
+            fine = match_tones(raw16, preview, fine=True)
+    return Image.fromarray(to_8bit(fine)), fine
+
+
+def to_8bit(fine: np.ndarray) -> np.ndarray:
+    return ((fine.astype(np.uint32) * 255 + 32767) // 65535).astype(np.uint8)
+
+
+def _tiff16(path: Path) -> np.ndarray | None:
+    """A 16-bit RGB TIFF as uint16 (which Pillow cannot read), else None."""
+    try:
+        import tifffile
+        a = tifffile.imread(str(path))
+    except Exception:
+        return None
+    if a.dtype != np.uint16 or a.ndim != 3 or a.shape[2] < 3:
+        return None
+    return np.ascontiguousarray(a[..., :3])
 
 
 def preview_image(path: Path, long_edge: int) -> Image.Image:
@@ -207,10 +274,14 @@ def taken_at(exif: bytes | None):
 
 def load(path: Path) -> Photo:
     if is_raw(path):
-        return Photo(path, develop_raw(path), raw_exif(path), True)
+        img, fine = develop_raw_fine(path)
+        return Photo(path, img, raw_exif(path), True, fine)
+    if path.suffix.lower() in {".tif", ".tiff"} and (fine := _tiff16(path)) is not None:
+        return Photo(path, Image.fromarray(to_8bit(fine)), None, False, fine)
     raw = Image.open(path)
     exif = upright_exif(raw.info.get("exif"))
-    return Photo(path, ImageOps.exif_transpose(raw).convert("RGB"), exif, False)
+    img = ImageOps.exif_transpose(raw).convert("RGB")
+    return Photo(path, to_srgb(img, raw.info.get("icc_profile")), exif, False)
 
 
 def save_original(photo: Photo, dest_stem: Path) -> Path:
@@ -226,9 +297,38 @@ def save_original(photo: Photo, dest_stem: Path) -> Path:
 
 
 def save_jpeg(img: Image.Image, dest: Path, exif: bytes | None) -> None:
-    """Saves with the photo's camera data, and dates the file when the photo was taken."""
-    img.save(dest, quality=95, **({"exif": exif} if exif else {}))
+    """Saves with the photo's camera data and the sRGB profile, and dates the
+    file when the photo was taken."""
+    img.save(dest, quality=95, subsampling=0, icc_profile=srgb_profile(), **({"exif": exif} if exif else {}))
+    date_file(dest, exif)
+
+
+def date_file(dest: Path, exif: bytes | None) -> None:
     when = taken_at(exif)
     if when:
         import os
         os.utime(dest, (when.timestamp(), when.timestamp()))
+
+
+def save_tiff16(arr: np.ndarray, dest: Path, exif: bytes | None) -> None:
+    """A 16-bit TIFF (for print and further editing) from floats 0-1, with
+    the sRGB profile, the camera, the date taken, and the file dated then too."""
+    import tifffile
+    data = Image.Exif()
+    if exif:
+        try:
+            data.load(exif)
+        except Exception:
+            pass
+    when = taken_at(exif)
+    icc = srgb_profile()
+    extra = [(34675, "B", len(icc), icc, True)]
+    for tag, value in ((271, data.get(0x010F)), (272, data.get(0x0110)),
+                       (306, when.strftime("%Y:%m:%d %H:%M:%S") if when else None)):
+        if value:
+            text = str(value).strip("\x00 ")
+            extra.append((tag, "s", 0, text, True))
+    pixels = np.round(np.clip(arr, 0, 1) * 65535).astype(np.uint16)
+    tifffile.imwrite(str(dest), pixels, photometric="rgb", compression="zlib", predictor=True,
+                     resolution=(300, 300), resolutionunit="INCH", extratags=extra, metadata=None)
+    date_file(dest, exif)

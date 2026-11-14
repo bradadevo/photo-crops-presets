@@ -8,7 +8,7 @@ It serves two ways of working:
   on every photo, fine-tune it once for all of them, export them all (and make
   a reel).
 
-    uv run photo-presets
+    uv run allprophoto
 """
 
 import json
@@ -254,7 +254,11 @@ def save_look(results, index, name, recipe_text):
     return [gr.update(choices=list(presets.load_all()), value=name.strip())] + picker_updates()
 
 
-def export(results, index, folder, scope, progress=gr.Progress()):
+FILE_KINDS = [("JPEG: web, Instagram and clients", engine.JPEG),
+              ("16-bit TIFF: print and further editing", engine.TIFF), ("Both", engine.BOTH)]
+
+
+def export(results, index, folder, scope, kind, progress=gr.Progress()):
     if not results:
         raise gr.Error("Make some looks first.")
     if scope == ALL_RESULTS:
@@ -268,8 +272,10 @@ def export(results, index, folder, scope, progress=gr.Progress()):
     def tick(done, total, name):
         progress(done / max(total, 1), desc=f"Exporting {done}/{total} {name}")
 
-    saved = eng().export(chosen, dest, tick)
-    return f"Saved {len(saved)} full-size photo(s), each with its recipe (.json), to `{dest}`"
+    saved = eng().export(chosen, dest, tick, kind)
+    what = {engine.JPEG: "JPEG", engine.TIFF: "16-bit TIFF", engine.BOTH: "JPEG and 16-bit TIFF"}[kind]
+    return (f"Saved {len(saved)} full-size photo(s) as {what} (sRGB color profile, with the date taken), "
+            f"each with its recipe (.json), to `{dest}`")
 
 
 def open_folder(folder):
@@ -565,13 +571,13 @@ def build() -> gr.Blocks:
     ids = lib.ids()
     names = list(presets.load_all())
     src = lib.sources
-    with gr.Blocks(title="Photo Presets") as demo:
+    with gr.Blocks(title="AllProPhoto") as demo:
         results = gr.State([])
         selected = gr.State(0)
         thumbs = gr.State([])  # the gallery's pictures, so one fine-tuned look updates alone
         trial = gr.State([])  # every photo from step 1, while looks were tried on one of them
         gr.Markdown(
-            "# Photo Presets\n"
+            "# AllProPhoto\n"
             "Pro looks for your sports photos. Faces stay clean of effects, and your originals are never "
             "changed.\n\n"
             "<div class='steps-strip'><span>1 · Add photos</span><span>2 · Choose looks</span>"
@@ -667,9 +673,12 @@ def build() -> gr.Blocks:
                         with gr.Row(equal_height=False, elem_classes="row-end"):
                             export_dir = gr.Textbox(value=DEFAULT_EXPORT, label="Export folder", scale=4)
                             export_choose = gr.Button("Browse…", scale=1, min_width=90)
+                        scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED], value=ALL_RESULTS, label="Export")
+                        file_kind = gr.Radio(FILE_KINDS, value=engine.JPEG, label="File type",
+                                             info="Both are full size, in the sRGB color profile. A TIFF keeps 16 "
+                                                  "bits (from RAW photos), for big prints and editing in "
+                                                  "Lightroom or Photoshop; it is about 6 times bigger.")
                         with gr.Row(equal_height=False, elem_classes="row-end"):
-                            scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED], value=ALL_RESULTS,
-                                             label="Export", scale=3)
                             export_btn = gr.Button("Export full size", variant="primary", scale=2, min_width=150)
                             open_btn = gr.Button("Open folder", scale=1, min_width=140)
                         export_msg = gr.Markdown(elem_classes="hint")
@@ -793,7 +802,7 @@ def build() -> gr.Blocks:
         t_copy.click(copy_to_look, [results, thumbs, selected] + tune, [results, thumbs, gallery])
         show_cut.input(show_cutout, [results, selected, show_cut], compare)
         save_btn.click(save_look, [results, selected, look_name, recipe_box], [pm_pick] + pickers)
-        export_btn.click(export, [results, selected, export_dir, scope], export_msg)
+        export_btn.click(export, [results, selected, export_dir, scope, file_kind], export_msg)
         open_btn.click(open_folder, export_dir, None)
 
         form = [fields[n] for n in presetform.FIELDS]

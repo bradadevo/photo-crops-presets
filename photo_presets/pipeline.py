@@ -185,11 +185,40 @@ def finish(before: np.ndarray, look: np.ndarray, recipe: dict, alpha: np.ndarray
     return np.clip(out, 0, 1).astype(np.float32), notes
 
 
+DITHER_TILE = 256
+
+
+def _dither(h: int, w: int) -> np.ndarray:
+    """A fixed, fine noise pattern, the same every time (so the same look
+    always gives the same picture). It is under half a level and the same in
+    every color: a pixel the look did not change keeps its exact value, and
+    grays stay gray; only in-between values are spread, which breaks bands."""
+    global _DITHER
+    if _DITHER is None:
+        rng = np.random.default_rng(0)
+        _DITHER = ((rng.random((DITHER_TILE, DITHER_TILE, 1), np.float32) - 0.5) * 0.98)
+    reps = (-(-h // DITHER_TILE), -(-w // DITHER_TILE), 1)
+    return np.tile(_DITHER, reps)[:h, :w]
+
+
+_DITHER = None
+
+
 def to_image(arr: np.ndarray) -> Image.Image:
-    return Image.fromarray((np.clip(arr, 0, 1) * 255 + 0.5).astype(np.uint8))
+    """An 8-bit picture from floats 0-1, dithered: a smooth glow, sky or
+    shadow gradient comes out smooth instead of in visible bands."""
+    h, w = arr.shape[:2]
+    return Image.fromarray(np.clip(np.clip(arr, 0, 1) * 255 + 0.5 + _dither(h, w), 0, 255).astype(np.uint8))
 
 
-def to_array(img: Image.Image) -> np.ndarray:
+def to_array(img: Image.Image | np.ndarray) -> np.ndarray:
+    """Floats 0-1 from a picture, or from a 16-bit (uint16) or float array."""
+    if isinstance(img, np.ndarray):
+        if img.dtype == np.uint16:
+            return img.astype(np.float32) / 65535.0
+        if img.dtype == np.uint8:
+            return img.astype(np.float32) / 255.0
+        return img.astype(np.float32)
     return np.asarray(img.convert("RGB"), np.float32) / 255.0
 
 
@@ -249,6 +278,28 @@ def render_parts(img: Image.Image, recipe: dict, library: Library, scene: Scene,
                  seed: int = 0) -> tuple[Image.Image, Image.Image, list[str]]:
     """The finished photo, the look before its quick adjustments (so they can
     be changed without making the look again), and notes."""
+    before, look, alpha, notes = _steps(img, recipe, library, scene, seed)
+    look_img = to_image(look)
+    if not adjusted(recipe):
+        return look_img, look_img, notes
+    # adjust the 8-bit look, exactly as a later change to the adjustments does
+    done, more = finish(before, to_array(look_img), recipe, alpha)
+    return to_image(done), look_img, notes + more
+
+
+def render_fine(img: Image.Image | np.ndarray, recipe: dict, library: Library, scene: Scene,
+                seed: int = 0) -> tuple[np.ndarray, list[str]]:
+    """The finished photo as floats 0-1, never rounded to 8 bits on the way:
+    for full-size exports (pass the 16-bit image when there is one)."""
+    before, look, alpha, notes = _steps(img, recipe, library, scene, seed)
+    if not adjusted(recipe):
+        return look, notes
+    done, more = finish(before, look, recipe, alpha)
+    return done, notes + more
+
+
+def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int):
+    """The photo before, after the recipe's steps (floats), its cut-out, and notes."""
     from photo_presets import effects  # noqa: F401  (registers the built-in operations)
     load_plugins()
     arr = to_array(img)
@@ -299,12 +350,7 @@ def render_parts(img: Image.Image, recipe: dict, library: Library, scene: Scene,
             else:
                 out = out + (arr - out) * alpha[..., None]
         arr = np.clip(out, 0, 1).astype(np.float32)
-    look = to_image(arr)
-    if not adjusted(recipe):
-        return look, look, ctx.notes
-    # adjust the rounded look, exactly as a later change to the adjustments does
-    done, notes = finish(before, to_array(look), recipe, alpha)
-    return to_image(done), look, ctx.notes + notes
+    return before, arr, alpha, ctx.notes
 
 
 _plugins_loaded = False

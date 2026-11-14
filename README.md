@@ -1,8 +1,8 @@
-# Photo Crops Presets
+# AllProPhoto
 
 Everything in [photo-crops](https://github.com/bradadevo/photo-crops)
 (professional crops, face close-ups, screenshots rebuilt from the camera
-files), plus **Photo Presets**: a creative looks engine for sports photos
+files), plus **AllProPhoto**: a creative looks engine for sports photos
 with a Gradio app.
 
 - **Random exploration**: drop in photos and get a gallery of different,
@@ -37,13 +37,13 @@ once) to `~/.rembg` the first time a look separates player and background
 (already there if you use ai-versions). Reels and video overlays need ffmpeg
 (`brew install ffmpeg`).
 
-## Photo Presets app
+## The AllProPhoto app
 
 ```bash
-uv run photo-presets
+uv run allprophoto
 ```
 
-It opens in your browser on this Mac.
+It opens in your browser on this Mac. (`uv run photo-presets` still works too.)
 
 **Make looks** walks you through six numbered steps (left: set up, right:
 results). It suits both ways of working:
@@ -93,6 +93,9 @@ results). It suits both ways of working:
    look, or just the selected one) at full
    resolution to your export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
+   **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
+   prints, further editing in Lightroom or Photoshop; about 6 times bigger),
+   or **Both**.
 
 6. **Make an Instagram reel**: a vertical MP4 (1080 x 1920, 30 fps) under a
    minute, ready to post, made from the looks above or from a folder of photos
@@ -104,6 +107,19 @@ results). It suits both ways of working:
    photos show about half their width, centered on the players, on a blurred
    copy of themselves; portrait photos fill the screen. Reels are saved in
    `Reels` inside your export folder.
+
+**Quality and color** (for paid and print work):
+- RAW (and 16-bit TIFF) photos keep a 16-bit copy, and full-size exports make
+  the look from it, in floating point to the end, so smooth gradients (neon
+  glows on black, smoke, skies, blurred backgrounds) have no bands.
+- Every 8-bit picture is finely dithered when it is rounded, which also
+  breaks up bands; untouched pixels keep their exact values.
+- Every saved file carries the standard sRGB color profile (IEC61966-2.1),
+  what Instagram, phones and print labs expect; JPEGs are saved at quality 95
+  with full color detail. TIFFs are tagged 300 ppi.
+- Photos in another color space (an iPhone's Display P3, a camera set to
+  Adobe RGB) are converted to sRGB with their own profile when they load, so
+  their colors stay true.
 
 Every picture keeps the photo's real date and camera details (date taken, camera, lens, exposure), Sony RAW files included, and saved files are dated when the photo was taken. Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
@@ -139,11 +155,11 @@ show; it is what gets saved.
 ### Command line
 
 ```bash
-uv run photo-presets-batch --list
-uv run photo-presets-batch ~/Movies/"Game day" --random 6 --crop crop
-uv run photo-presets-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
-uv run photo-presets-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
-uv run photo-presets-batch ~/Movies/"Game day" --all-presets
+uv run allprophoto-batch --list
+uv run allprophoto-batch ~/Movies/"Game day" --random 6 --crop crop
+uv run allprophoto-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
+uv run allprophoto-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
+uv run allprophoto-batch ~/Movies/"Game day" --all-presets
 ```
 
 ## Starter presets
@@ -353,7 +369,7 @@ The tests never load the large models.
 photo_crops/          photo-crops (see its README)
 photo_presets/
   app.py              The Gradio app
-  cli.py              photo-presets-batch
+  cli.py              allprophoto-batch
   engine.py           Random and preset modes, previews, full-size export
   pipeline.py         Running recipes, the step registry, plugins, keeping faces clean
   effects.py          The built-in steps

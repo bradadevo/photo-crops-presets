@@ -1959,6 +1959,7 @@ dependencies = [
     { name = "pillow-heif" },
     { name = "rawpy" },
     { name = "rembg", extra = ["cpu"] },
+    { name = "tifffile" },
     { name = "ultralytics" },
 ]
 
@@ -1978,6 +1979,7 @@ requires-dist = [
     { name = "pillow-heif", specifier = ">=1.8.1" },
     { name = "rawpy" },
     { name = "rembg", extras = ["cpu"], specifier = ">=2.0.87" },
+    { name = "tifffile", specifier = ">=2026.10.15" },
     { name = "ultralytics" },
 ]
 

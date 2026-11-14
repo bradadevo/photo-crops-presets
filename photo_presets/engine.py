@@ -27,6 +27,8 @@ from photo_presets import explore, pipeline, presets, reel
 from photo_presets.assets import Library
 from photo_presets.scene import Prepared, prepare, resized
 
+# Export file types: JPEG (web, Instagram, clients), 16-bit TIFF (print and further editing), or both
+JPEG, TIFF, BOTH = "jpeg", "tiff", "both"
 PREVIEW_EDGE = 1600
 REEL_EDGE = 2400  # a landscape photo shows half its width across the reel's 1080 px
 PREPARED_CACHE = 4
@@ -173,18 +175,32 @@ class Engine:
                 progress(i + 1, len(results), r.title)
         return shots
 
-    def export(self, results: list[Result], folder: Path, progress=None) -> list[Path]:
-        """Full-resolution JPEGs, each with its recipe beside it as JSON."""
+    def export(self, results: list[Result], folder: Path, progress=None, kind: str = JPEG) -> list[Path]:
+        """Full-resolution files, each with its recipe beside it as JSON.
+
+        The look is made from the photo's 16-bit copy when it has one (RAW,
+        16-bit TIFF) and kept in floats to the end: a JPEG is rounded to 8 bits
+        once, dithered (no bands in glows and skies); a TIFF keeps 16 bits.
+        Both carry the sRGB profile and the photo's date and camera."""
         folder.mkdir(parents=True, exist_ok=True)
         saved = []
         for i, r in enumerate(results):
             p = self.prepared(r.source, r.crop)
             if pipeline.needs_cutout(r.recipe):
                 p.ensure_matte()
-            full, notes = pipeline.render(p.image, r.recipe, self.library, p.scene, r.seed)
+            full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
+                                               self.library, p.scene, r.seed)
             stem = f"{r.source.stem}_{slug(r.recipe.get('name', 'look'))}" + (f"_{r.crop}" if r.crop != "none" else "")
             dest = _unique(folder / f"{stem}.jpg")
-            images.save_jpeg(full, dest, p.exif)
+            if kind == TIFF:
+                dest = _unique(folder / f"{stem}.tif")
+            elif kind == BOTH:  # the JPEG and the TIFF share a name
+                while dest.with_suffix(".tif").exists():
+                    dest = _unique(dest.with_name(dest.stem + "-2.jpg"))
+            if kind in (JPEG, BOTH):
+                images.save_jpeg(pipeline.to_image(full), dest, p.exif)
+            if kind in (TIFF, BOTH):
+                images.save_tiff16(full, dest.with_suffix(".tif"), p.exif)
             dest.with_suffix(".json").write_text(json.dumps(
                 {"source": str(r.source), "crop": r.crop, "seed": r.seed, "recipe": r.recipe, "notes": notes},
                 indent=1))

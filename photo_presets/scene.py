@@ -95,6 +95,7 @@ class Prepared:
     image: Image.Image
     scene: Scene
     exif: bytes | None
+    fine: np.ndarray | None = None  # the image in 16 bits (uint16), from RAW and 16-bit TIFF photos
 
     def ensure_matte(self) -> np.ndarray | None:
         if self.scene.matte is None and self.scene.subject_mask is not None:
@@ -209,5 +210,13 @@ def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None
     elif crop == "face" and plan.face_person:
         box = framing.face_box(plan.face_person, img.size, "sharp", framing.crop_box(plan, img.size, shape))
     if box:
-        return Prepared(path, img.crop(box), scene.in_crop(box, img.size), photo.exif)
-    return Prepared(path, img, scene, photo.exif)
+        cropped = img.crop(box)
+        fine = None
+        if photo.fine is not None:
+            # the same pixels as Pillow's crop (which pads past the edges with black)
+            l, t = int(round(box[0])), int(round(box[1]))
+            fine = np.zeros((cropped.height, cropped.width, 3), np.uint16)
+            part = photo.fine[max(t, 0):t + cropped.height, max(l, 0):l + cropped.width]
+            fine[max(-t, 0):max(-t, 0) + part.shape[0], max(-l, 0):max(-l, 0) + part.shape[1]] = part
+        return Prepared(path, cropped, scene.in_crop(box, img.size), photo.exif, fine)
+    return Prepared(path, img, scene, photo.exif, photo.fine)

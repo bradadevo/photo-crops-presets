@@ -91,3 +91,64 @@ def test_preset_form_round_trips_adjustments():
     v = dict(presetform.DEFAULTS, adj_subject=0.35, adj_strength=70, adj_auto=True)
     back = presetform.from_recipe(presetform.to_recipe(v))
     assert (back["adj_subject"], back["adj_strength"], back["adj_auto"]) == (0.35, 70, True)
+
+
+# 16-bit and color ------------------------------------------------------------------------
+
+def test_gradients_are_dithered_not_banded():
+    """A slow dark glow covering under 3 levels across 300 px: dithering turns
+    its 2-3 flat bands into a fine mix, so the average follows the true ramp."""
+    ramp = np.tile(np.linspace(0.02, 0.03, 300, dtype=np.float32)[None, :, None], (40, 1, 3))
+    out = np.asarray(pipeline.to_image(ramp), np.float32) / 255
+    columns = out.mean(axis=(0, 2))
+    assert np.abs(columns - ramp[0, :, 0]).max() < 0.6 / 255
+    assert len(np.unique(out[..., 0][:, 150])) >= 2  # mixed, not one flat band
+    assert np.array_equal(out[..., 0], out[..., 2])  # grays stay gray
+
+
+def test_untouched_pixels_keep_their_values():
+    a = np.random.default_rng(3).integers(0, 256, (50, 50, 3), np.uint8)
+    assert np.array_equal(np.asarray(pipeline.to_image(pipeline.to_array(Image.fromarray(a)))), a)
+
+
+def test_16_bit_input_and_tiff_export(tmp_path):
+    from photo_crops import images
+    import tifffile
+    fine = (np.linspace(0, 65535, 64 * 48 * 3) % 65536).astype(np.uint16).reshape(48, 64, 3)
+    arr = pipeline.to_array(fine)
+    assert arr.dtype == np.float32 and abs(arr.max() - fine.max() / 65535) < 1e-6
+    exif = Image.Exif()
+    exif[0x010F], exif[0x0110] = "SONY", "ILCE-7M4"
+    exif.get_ifd(0x8769)[0x9003] = "2026:11:08 10:30:00"
+    dest = tmp_path / "x.tif"
+    images.save_tiff16(arr, dest, exif.tobytes())
+    back = tifffile.imread(dest)
+    assert back.dtype == np.uint16 and np.abs(back.astype(int) - fine).max() <= 1
+    with tifffile.TiffFile(dest) as t:
+        tags = t.pages[0].tags
+        assert tags["Make"].value == "SONY" and "2026:11:08" in tags["DateTime"].value
+        assert len(tags["InterColorProfile"].value) > 100
+    assert images.load(dest).fine is not None  # read back with its 16 bits
+
+
+def test_saved_jpegs_carry_srgb_and_other_profiles_are_converted(tmp_path):
+    from photo_crops import images
+    from PIL import ImageCms
+    dest = tmp_path / "a.jpg"
+    images.save_jpeg(Image.new("RGB", (8, 8), (200, 40, 40)), dest, None)
+    assert Image.open(dest).info.get("icc_profile") == images.srgb_profile()
+    assert images.to_srgb(Image.new("RGB", (4, 4), (200, 40, 40)), None).getpixel((0, 0)) == (200, 40, 40)
+    # an iPhone-style Display P3 photo: its orange is more saturated than the same numbers in sRGB
+    p3 = tmp_path / "p3.jpg"
+    Image.new("RGB", (8, 8), (230, 120, 40)).save(p3, quality=100, icc_profile=_display_p3())
+    r, g, b = images.load(p3).image.getpixel((0, 0))
+    assert r > 240 and b < 30  # converted: redder and deeper than the raw numbers
+
+
+def _display_p3() -> bytes:
+    """A Display P3 profile (from macOS when present, else built: P3 primaries, sRGB curve)."""
+    mac = Path("/System/Library/ColorSync/Profiles/Display P3.icc")
+    if mac.exists():
+        return mac.read_bytes()
+    import pytest
+    pytest.skip("no Display P3 profile on this machine")
