@@ -296,10 +296,13 @@ def save_original(photo: Photo, dest_stem: Path) -> Path:
     return dest
 
 
-def save_jpeg(img: Image.Image, dest: Path, exif: bytes | None) -> None:
-    """Saves with the photo's camera data and the sRGB profile, and dates the
-    file when the photo was taken."""
-    img.save(dest, quality=95, subsampling=0, icc_profile=srgb_profile(), **({"exif": exif} if exif else {}))
+def save_jpeg(img: Image.Image, dest: Path, exif: bytes | None, xmp: bytes | None = None) -> None:
+    """Saves with the photo's camera data, the sRGB profile and any XMP (your
+    name and copyright), and dates the file when the photo was taken."""
+    extra = {"exif": exif} if exif else {}
+    if xmp:
+        extra["xmp"] = xmp
+    img.save(dest, quality=95, subsampling=0, icc_profile=srgb_profile(), **extra)
     date_file(dest, exif)
 
 
@@ -310,9 +313,10 @@ def date_file(dest: Path, exif: bytes | None) -> None:
         os.utime(dest, (when.timestamp(), when.timestamp()))
 
 
-def save_tiff16(arr: np.ndarray, dest: Path, exif: bytes | None) -> None:
+def save_tiff16(arr: np.ndarray, dest: Path, exif: bytes | None, xmp: bytes | None = None) -> None:
     """A 16-bit TIFF (for print and further editing) from floats 0-1, with
-    the sRGB profile, the camera, the date taken, and the file dated then too."""
+    the sRGB profile, the camera, the date taken, your name and copyright
+    (from the EXIF, and any XMP), and the file dated then too."""
     import tifffile
     data = Image.Exif()
     if exif:
@@ -323,8 +327,11 @@ def save_tiff16(arr: np.ndarray, dest: Path, exif: bytes | None) -> None:
     when = taken_at(exif)
     icc = srgb_profile()
     extra = [(34675, "B", len(icc), icc, True)]
+    if xmp:
+        extra.append((700, "B", len(xmp), xmp, True))
     for tag, value in ((271, data.get(0x010F)), (272, data.get(0x0110)),
-                       (306, when.strftime("%Y:%m:%d %H:%M:%S") if when else None)):
+                       (306, when.strftime("%Y:%m:%d %H:%M:%S") if when else None),
+                       (315, data.get(0x013B)), (33432, data.get(0x8298))):
         if value:
             text = str(value).strip("\x00 ")
             extra.append((tag, "s", 0, text, True))

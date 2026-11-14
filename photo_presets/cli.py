@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from photo_presets import engine, presets
+from photo_presets import deliver, engine, presets
 from photo_presets.app import DEFAULT_EXPORT
 from photo_presets.engine import CROPS, Engine
 
@@ -48,7 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     e = Engine()
     results = (e.explore(paths, a.random, a.crop, a.seed, progress) if a.random
                else e.presets(paths, names, a.crop, progress=progress))
-    saved = e.export(results, Path(a.out).expanduser(), progress)
+    saved, notes = e.export(results, Path(a.out).expanduser(), progress, credit=deliver.Credit.load())
+    for note in notes:
+        print(note)
     print(f"Saved {len(saved)} photo(s) to {Path(a.out).expanduser()}")
     return 0
 

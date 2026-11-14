@@ -99,14 +99,43 @@ results). It suits both ways of working:
 
    Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when
    you export, make a reel, or save the look as a preset.
+
+   **Match the game** (with more than one photo): **Match all photos to the
+   selected one** evens out exposure and white balance across the set, so a
+   gallery looks like one shoot instead of changing light. Each photo is
+   measured before any look (its middle brightness, and the color of its
+   near-neutral tones: white kits, lines, haze; a green field or a blue sky
+   does not count) and gently corrected toward the selected photo (three
+   quarters of the difference, at most 0.75 stops and 8% per color), then its
+   looks are made again. The correction is in each result's recipe as
+   `"match"` (left out when you save a preset). **Undo matching** puts every
+   photo back as shot.
 5. **Save or export**: name a look and **Save preset** to keep it, or
    **Export full size** to save every result (or every photo with the selected
    look, or just the selected one) at full
    resolution to your export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
+   **Sizes** (tick any): **Full size**, **Instagram post 4:5** (1080 x
+   1350), **Instagram square** (1080 x 1080), **Instagram story / reel cover
+   9:16** (1080 x 1920), and prints at 300 ppi: **4 x 6**, **5 x 7**, **8 x 10**,
+   **11 x 14** (turned to match the photo). Each size is cropped to its shape
+   around the players (kept whole whenever the shape allows; a cut-out fix
+   that adds a teammate keeps them in too), then resized; Instagram sizes get
+   a light output sharpening. A print size bigger than the photo's own pixels
+   is enlarged, and the export says so. Files are named with the size, e.g.
+   `DSC03424_vivid-pro_ig-4x5.jpg`.
    **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
    prints, further editing in Lightroom or Photoshop; about 6 times bigger),
    or **Both**.
+   **Your name, copyright and watermark**: your name, a copyright notice
+   (empty: `© <year taken> <your name>`) and contact (email, website or
+   handle) go into every file: EXIF Artist and Copyright, and XMP (creator,
+   rights, IPTC creator contact), where Lightroom, Photo Mechanic, Photos and
+   print labs look. They are remembered (in
+   `~/.config/photo-crops-presets/delivery.json`). **Add a watermark** for
+   client proofs or posts: **Corner** (small text, bottom right) or **Across**
+   (large and repeated), with its text (empty: your copyright notice) and
+   strength.
 
 6. **Make an Instagram reel**: a vertical MP4 (1080 x 1920, 30 fps) under a
    minute, ready to post, made from the looks above or from a folder of photos

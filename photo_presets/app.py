@@ -23,7 +23,7 @@ from pathlib import Path
 import gradio as gr
 
 from photo_crops.ui import choose_folder
-from photo_presets import engine, pipeline, presets, presetform, reel
+from photo_presets import deliver, engine, pipeline, presets, presetform, reel
 from photo_presets.assets import Library, Sources
 from photo_presets.engine import CROPS, Engine
 from photo_presets.scene import Fix
@@ -126,7 +126,9 @@ def _shown(results, trial, show_cut, index=0):
     photos = len(trial)
     use_all = gr.update(visible=bool(trial and results),
                         value=f"Use the selected look on all {photos} photos")
-    return ((results, index, thumbs, thumbs, trial, use_all, gr.update(visible=bool(results)))
+    several = len({(str(r.source), r.crop) for r in results}) > 1
+    return ((results, index, thumbs, thumbs, trial, use_all, gr.update(visible=bool(results)),
+             gr.update(visible=several))
             + _show(results, index) + _controls(results, index) + (_fix_picture(results, index, show_cut),))
 
 
@@ -308,6 +310,7 @@ def picker_updates(ticked=None):
 def save_look(results, index, name, recipe_text):
     try:
         recipe = json.loads(recipe_text)
+        recipe.pop("match", None)  # a game match belongs to its photo, not to the look
         presets.save(name, recipe)
     except (ValueError, json.JSONDecodeError) as e:
         raise gr.Error(f"Could not save: {e}")
@@ -319,7 +322,13 @@ FILE_KINDS = [("JPEG: web, Instagram and clients", engine.JPEG),
               ("16-bit TIFF: print and further editing", engine.TIFF), ("Both", engine.BOTH)]
 
 
-def export(results, index, folder, scope, kind, progress=gr.Progress()):
+SIZE_CHOICES = [("Full size", deliver.FULL)] + [(s.label, k) for k, s in deliver.SIZES.items()]
+WATERMARK_STYLES = [("Corner: small text, bottom right", deliver.CORNER),
+                    ("Across: large, repeated (for client proofs)", deliver.ACROSS)]
+
+
+def export(results, index, folder, scope, kind, sizes, creator, notice, contact, marked, mark_text, mark_style,
+           mark_opacity, progress=gr.Progress()):
     if not results:
         raise gr.Error("Make some looks first.")
     if scope == ALL_RESULTS:
@@ -333,10 +342,60 @@ def export(results, index, folder, scope, kind, progress=gr.Progress()):
     def tick(done, total, name):
         progress(done / max(total, 1), desc=f"Exporting {done}/{total} {name}")
 
-    saved = eng().export(chosen, dest, tick, kind)
+    if not sizes:
+        raise gr.Error("Tick at least one size.")
+    credit = deliver.Credit(creator or "", notice or "", contact or "")
+    if credit != deliver.Credit.load():
+        credit.save()  # remembered for next time
+    mark = None
+    if marked:
+        text = (mark_text or "").strip() or credit.notice() or "PROOF"
+        mark = deliver.Watermark(text, mark_style, float(mark_opacity))
+    saved, notes = eng().export(chosen, dest, tick, kind, list(sizes), credit, mark)
     what = {engine.JPEG: "JPEG", engine.TIFF: "16-bit TIFF", engine.BOTH: "JPEG and 16-bit TIFF"}[kind]
-    return (f"Saved {len(saved)} full-size photo(s) as {what} (sRGB color profile, with the date taken), "
-            f"each with its recipe (.json), to `{dest}`")
+    names = [label.split(" (")[0] for label, key in SIZE_CHOICES if key in sizes]
+    extras = ["sRGB color profile", "the date taken"]
+    if not credit.empty:
+        extras.append("your name and copyright")
+    if mark:
+        extras.append("a watermark")
+    text = (f"Saved {len(saved)} file(s) ({len(chosen)} photo(s) × {', '.join(names)}) as {what}, with "
+            f"{', '.join(extras)}, each with its recipe (.json), to `{dest}`")
+    if notes:
+        text += "\n\n**Note:** " + "; ".join(notes)
+    return text
+
+
+def match_game(results, thumbs, index, progress=gr.Progress()):
+    """Every photo's exposure and white balance evened out to the selected one."""
+    if not results:
+        raise gr.Error("Make some looks first.")
+
+    def tick(done, total, title):
+        progress(done / max(total, 1), desc=f"Matching {done}/{total} {title}")
+
+    out, changed = eng().match_game(results, results[index], tick)
+    thumbs = [(_jpeg(r.after, r.title, r.exif), r.title) if r is not old else t
+              for r, old, t in zip(out, results, thumbs)]
+    pair, info, recipe, _ = _show(out, index)
+    photos = len({(str(r.source), r.crop) for r in out})
+    msg = (f"Matched {changed} of {photos} photos to **{results[index].source.name}** (the others already agreed). "
+           "Each photo's correction is in its recipe as `match`.")
+    return out, thumbs, thumbs, pair, info, recipe, msg
+
+
+def clear_match(results, thumbs, index, progress=gr.Progress()):
+    if not results:
+        raise gr.Error("Make some looks first.")
+
+    def tick(done, total, title):
+        progress(done / max(total, 1), desc=f"Undoing {done}/{total} {title}")
+
+    out = eng().clear_match(results, tick)
+    thumbs = [(_jpeg(r.after, r.title, r.exif), r.title) if r is not old else t
+              for r, old, t in zip(out, results, thumbs)]
+    pair, info, recipe, _ = _show(out, index)
+    return out, thumbs, thumbs, pair, info, recipe, "Matching undone: every photo as it was shot."
 
 
 def open_folder(folder):
@@ -699,6 +758,15 @@ def build() -> gr.Blocks:
                                              show_label=False)
                         use_all = gr.Button("Use the selected look on all photos", variant="primary",
                                             visible=False)
+                        with gr.Group(visible=False) as match_box:
+                            gr.Markdown("**Match the game.** Evens out exposure and white balance across the "
+                                        "photos, to the selected photo, so the gallery looks like one shoot. "
+                                        "Gentle: it evens out the light, it does not force every frame alike.",
+                                        elem_classes="hint")
+                            with gr.Row():
+                                match_btn = gr.Button("Match all photos to the selected one", size="sm")
+                                unmatch_btn = gr.Button("Undo matching", size="sm")
+                            match_msg = gr.Markdown(elem_classes="hint")
                         compare = gr.ImageSlider(label="Before / after", height=480)
                         info = gr.Markdown()
                         with gr.Group(visible=False) as tune_box:
@@ -749,10 +817,34 @@ def build() -> gr.Blocks:
                             export_dir = gr.Textbox(value=DEFAULT_EXPORT, label="Export folder", scale=4)
                             export_choose = gr.Button("Browse…", scale=1, min_width=90)
                         scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED], value=ALL_RESULTS, label="Export")
+                        sizes = gr.CheckboxGroup(SIZE_CHOICES, value=[deliver.FULL], label="Sizes",
+                                                 info="Each size is cropped to its shape around the players. "
+                                                      "Instagram sizes get a light sharpening for phones; print "
+                                                      "sizes are exact at 300 ppi.")
                         file_kind = gr.Radio(FILE_KINDS, value=engine.JPEG, label="File type",
                                              info="Both are full size, in the sRGB color profile. A TIFF keeps 16 "
                                                   "bits (from RAW photos), for big prints and editing in "
                                                   "Lightroom or Photoshop; it is about 6 times bigger.")
+                        saved_credit = deliver.Credit.load()
+                        with gr.Accordion("Your name, copyright and watermark", open=saved_credit.empty):
+                            gr.Markdown("Written into every file, where Lightroom, Photo Mechanic, Photos and print "
+                                        "labs look. Remembered for next time.", elem_classes="hint")
+                            with gr.Row():
+                                c_creator = gr.Textbox(saved_credit.creator, label="Photographer",
+                                                       placeholder="Your name or studio")
+                                c_contact = gr.Textbox(saved_credit.contact, label="Contact",
+                                                       placeholder="Email, website or @handle")
+                            c_notice = gr.Textbox(saved_credit.copyright, label="Copyright notice",
+                                                  placeholder="Leave empty for: © <year taken> <photographer>")
+                            w_on = gr.Checkbox(False, label="Add a watermark",
+                                               info="For client proofs or posts; the files you keep stay clean "
+                                                    "unless this is on.")
+                            with gr.Group(visible=False) as w_box:
+                                w_style = gr.Radio(WATERMARK_STYLES, value=deliver.CORNER, show_label=False)
+                                with gr.Row():
+                                    w_text = gr.Textbox(label="Watermark text", placeholder="Empty: your copyright notice "
+                                                        "(or PROOF)")
+                                    w_opacity = gr.Slider(0.1, 1, 0.5, step=0.05, label="Strength")
                         with gr.Row(equal_height=False, elem_classes="row-end"):
                             export_btn = gr.Button("Export full size", variant="primary", scale=2, min_width=150)
                             open_btn = gr.Button("Open folder", scale=1, min_width=140)
@@ -863,7 +955,8 @@ def build() -> gr.Blocks:
         choose.click(lambda f: choose_folder("Choose a folder of photos", f) or f, folder, folder)
         export_choose.click(lambda f: choose_folder("Choose where to export", f) or f, export_dir, export_dir)
         tune = [t_strength, t_subject, t_background, t_warmth, t_auto]
-        shown = ([results, selected, thumbs, gallery, trial, use_all, tune_box, compare, info, recipe_box, look_name]
+        shown = ([results, selected, thumbs, gallery, trial, use_all, tune_box, match_box, compare, info, recipe_box,
+                  look_name]
                  + tune + [tune_note, fix_img])
         go.click(make_looks, [files, folder, mode, count, seed, crop, run_on, try_photo, show_cut] + pickers, shown)
         use_all.click(use_on_all, [results, selected, trial, show_cut], shown)
@@ -882,7 +975,11 @@ def build() -> gr.Blocks:
         fix_reset_btn.click(fix_reset, [results, selected], [fix_img, fix_msg])
         fix_remake.click(remake_photo, [results, thumbs, selected], tuned)
         save_btn.click(save_look, [results, selected, look_name, recipe_box], [pm_pick] + pickers)
-        export_btn.click(export, [results, selected, export_dir, scope, file_kind], export_msg)
+        export_btn.click(export, [results, selected, export_dir, scope, file_kind, sizes, c_creator, c_notice,
+                                  c_contact, w_on, w_text, w_style, w_opacity], export_msg)
+        w_on.change(lambda v: gr.update(visible=v), w_on, w_box, show_progress="hidden", queue=False)
+        match_btn.click(match_game, [results, thumbs, selected], tuned + [match_msg])
+        unmatch_btn.click(clear_match, [results, thumbs, selected], tuned + [match_msg])
         open_btn.click(open_folder, export_dir, None)
 
         form = [fields[n] for n in presetform.FIELDS]

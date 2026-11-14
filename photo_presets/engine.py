@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 from photo_crops import images
-from photo_presets import explore, pipeline, presets, reel
+from photo_presets import deliver, explore, match, pipeline, presets, reel
 from photo_presets.assets import Library
 from photo_presets.scene import Fix, Prepared, prepare, resized
 
@@ -109,7 +109,8 @@ class Engine:
         recipe = pipeline.with_adjust(r.recipe, adj)
         alpha = self.cutout(r) if pipeline.needs_cutout({"adjust": recipe.get("adjust")}) else None
         look = r.look or r.after
-        done, notes = pipeline.finish(pipeline.to_array(r.before), pipeline.to_array(look), recipe, alpha)
+        before = pipeline.matched(pipeline.to_array(r.before), recipe)
+        done, notes = pipeline.finish(before, pipeline.to_array(look), recipe, alpha)
         kept = [n for n in r.notes if not n.startswith(("fill light", "no player cut-out here, so the player/"))]
         return dataclasses.replace(r, recipe=recipe, after=pipeline.to_image(done), notes=kept + notes, look=look)
 
@@ -222,40 +223,106 @@ class Engine:
                 progress(i + 1, len(results), r.title)
         return shots
 
-    def export(self, results: list[Result], folder: Path, progress=None, kind: str = JPEG) -> list[Path]:
-        """Full-resolution files, each with its recipe beside it as JSON.
+    # Matching a game --------------------------------------------------------------
+
+    def match_game(self, results: list[Result], reference: Result, progress=None) -> tuple[list[Result], int]:
+        """Every photo's exposure and white balance evened out to the reference
+        photo's (see match.py), and its looks made again. Returns the results and
+        how many photos were corrected."""
+        ref = match.measure(reference.before)
+        by_photo: dict[tuple[str, str], dict | None] = {}
+        for r in results:
+            key = (str(r.source), r.crop)
+            if key not in by_photo:
+                same = key == (str(reference.source), reference.crop)
+                by_photo[key] = None if same else match.correction(ref, match.measure(r.before))
+        out = []
+        for i, r in enumerate(results):
+            m = by_photo[(str(r.source), r.crop)]
+            recipe = {k: v for k, v in r.recipe.items() if k != "match"}
+            if m:
+                recipe["match"] = m
+            out.append(r if recipe == r.recipe else self._one(r.source, r.crop, recipe, r.seed))
+            if progress:
+                progress(i + 1, len(results), r.title)
+        return out, sum(1 for m in by_photo.values() if m)
+
+    def clear_match(self, results: list[Result], progress=None) -> list[Result]:
+        out = []
+        for i, r in enumerate(results):
+            if "match" in r.recipe:
+                r = self._one(r.source, r.crop, {k: v for k, v in r.recipe.items() if k != "match"}, r.seed)
+            out.append(r)
+            if progress:
+                progress(i + 1, len(results), r.title)
+        return out
+
+    # Export ---------------------------------------------------------------------------
+
+    def export(self, results: list[Result], folder: Path, progress=None, kind: str = JPEG,
+               sizes: list[str] | None = None, credit: deliver.Credit | None = None,
+               mark: deliver.Watermark | None = None) -> tuple[list[Path], list[str]]:
+        """Each result in each size (full size, Instagram, prints), with its
+        recipe beside it as JSON. Returns the files saved and notes (such as a
+        print size enlarged past the photo's own pixels).
 
         The look is made from the photo's 16-bit copy when it has one (RAW,
         16-bit TIFF) and kept in floats to the end: a JPEG is rounded to 8 bits
         once, dithered (no bands in glows and skies); a TIFF keeps 16 bits.
-        Both carry the sRGB profile and the photo's date and camera."""
+        Every file carries the sRGB profile, the photo's date and camera, and
+        your name and copyright when given."""
         folder.mkdir(parents=True, exist_ok=True)
-        saved = []
+        sizes = sizes or [deliver.FULL]
+        credit = credit or deliver.Credit()
+        saved, notes_out = [], []
         for i, r in enumerate(results):
             p = self.prepared(r.source, r.crop)
             if pipeline.needs_cutout(r.recipe):
                 p.ensure_matte()
             full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
                                                self.library, p.scene, r.seed)
+            taken = images.taken_at(p.exif)
+            exif = deliver.credited_exif(p.exif, credit, taken.year if taken else None)
+            xmp = deliver.xmp(credit, taken.year if taken else None)
             stem = f"{r.source.stem}_{slug(r.recipe.get('name', 'look'))}" + (f"_{r.crop}" if r.crop != "none" else "")
-            dest = _unique(folder / f"{stem}.jpg")
-            if kind == TIFF:
-                dest = _unique(folder / f"{stem}.tif")
-            elif kind == BOTH:  # the JPEG and the TIFF share a name
-                while dest.with_suffix(".tif").exists():
-                    dest = _unique(dest.with_name(dest.stem + "-2.jpg"))
-            if kind in (JPEG, BOTH):
-                images.save_jpeg(pipeline.to_image(full), dest, p.exif)
-            if kind in (TIFF, BOTH):
-                images.save_tiff16(full, dest.with_suffix(".tif"), p.exif)
-            dest.with_suffix(".json").write_text(json.dumps(
-                {"source": str(r.source), "crop": r.crop, "seed": r.seed, "recipe": r.recipe, "notes": notes,
-                 "cutout_fixes": [[f.x, f.y, f.add] for f in self.fixes_for(r)]},
-                indent=1))
-            saved.append(dest)
+            for key in sizes:
+                arr, name = full, stem
+                if key != deliver.FULL:
+                    size = deliver.SIZES[key]
+                    arr, grow = deliver.sized(full, size, focus(p.scene), players_box(p.scene))
+                    name = f"{stem}_{deliver.SHORT[key]}"
+                    if grow > 1.05:
+                        notes_out.append(f"{r.source.name} {size.label.split(' (')[0]}: enlarged {grow:.1f}x "
+                                         "(the photo has fewer pixels than this print size)")
+                if mark is not None:
+                    arr = deliver.watermark(arr, mark)
+                dest = _unique(folder / f"{name}.jpg")
+                if kind == TIFF:
+                    dest = _unique(folder / f"{name}.tif")
+                elif kind == BOTH:  # the JPEG and the TIFF share a name
+                    while dest.with_suffix(".tif").exists():
+                        dest = _unique(dest.with_name(dest.stem + "-2.jpg"))
+                if kind in (JPEG, BOTH):
+                    images.save_jpeg(pipeline.to_image(arr), dest, exif, xmp)
+                if kind in (TIFF, BOTH):
+                    images.save_tiff16(arr, dest.with_suffix(".tif"), exif, xmp)
+                dest.with_suffix(".json").write_text(json.dumps(
+                    {"source": str(r.source), "crop": r.crop, "seed": r.seed, "size": key, "recipe": r.recipe,
+                     "notes": notes, "cutout_fixes": [[f.x, f.y, f.add] for f in self.fixes_for(r)]},
+                    indent=1))
+                saved.append(dest)
             if progress:
-                progress(i + 1, len(results), dest.name)
-        return saved
+                progress(i + 1, len(results), r.title)
+        return saved, notes_out
+
+def players_box(scene) -> tuple[float, float, float, float] | None:
+    """The box around the players in the play (shares of the image), to keep whole when cropping."""
+    m = scene.subject_mask
+    if m is None or not m.any():
+        return None
+    ys, xs = np.nonzero(m)
+    h, w = m.shape[:2]
+    return xs.min() / w, ys.min() / h, (xs.max() + 1) / w, (ys.max() + 1) / h
 
 
 def focus(scene) -> tuple[float, float]:

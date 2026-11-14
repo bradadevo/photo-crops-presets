@@ -204,6 +204,12 @@ def _dither(h: int, w: int) -> np.ndarray:
 _DITHER = None
 
 
+def matched(arr: np.ndarray, recipe: dict) -> np.ndarray:
+    """The photo with its game match applied (see match.py), before the look."""
+    from photo_presets import match
+    return match.apply(arr, recipe.get("match"))
+
+
 def to_image(arr: np.ndarray) -> Image.Image:
     """An 8-bit picture from floats 0-1, dithered: a smooth glow, sky or
     shadow gradient comes out smooth instead of in visible bands."""
@@ -302,7 +308,7 @@ def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int):
     """The photo before, after the recipe's steps (floats), its cut-out, and notes."""
     from photo_presets import effects  # noqa: F401  (registers the built-in operations)
     load_plugins()
-    arr = to_array(img)
+    arr = matched(to_array(img), recipe)  # evened out with the rest of its game, when matched
     before = arr
     h, w = arr.shape[:2]
     mask = face_mask(scene, h, w) if recipe.get("protect_faces", True) else None
