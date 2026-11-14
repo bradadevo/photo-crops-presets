@@ -82,8 +82,19 @@ results). It suits both ways of working:
      around them (backlit or in shade), up to +0.75 stops, photo by photo. It
      compares the player with their own background, so it corrects the light,
      not anyone's skin tone or kit.
-   - **Show the player cut-out**: tints in blue what the app treats as the
-     player (only the main players of the play; others count as background)
+   - **Show and fix the player cut-out**: shows in blue what the app treats
+     as the player (at first only the main players of the play; others count
+     as background). **Click to fix it**: with **Add what I click**, click a
+     teammate, the ball or a flag to make it part of the player; with **Take
+     out what I click**, click a pole or a sign to put it back in the
+     background. Each click is traced with SAM 2.1 (Meta's free Segment
+     Anything model, run on this Mac; about 1 s, 160 MB downloaded once to
+     `~/.cache/photo-crops`), first on the whole photo and then closer around
+     the object for sharp edges. **Undo last click**, **Back to automatic**,
+     and **Remake this photo's looks** (to see the fix in effects such as
+     Color Pop or the neon looks; the brightness sliders use it at once).
+     Fixes stay with the photo for all its looks and the full-size export,
+     and are listed in the export's `.json` (`cutout_fixes`).
    - **Reset**, and **Use these settings on every photo with this look**
 
    Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when

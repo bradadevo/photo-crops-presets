@@ -26,6 +26,7 @@ from photo_crops.ui import choose_folder
 from photo_presets import engine, pipeline, presets, presetform, reel
 from photo_presets.assets import Library, Sources
 from photo_presets.engine import CROPS, Engine
+from photo_presets.scene import Fix
 
 RANDOM, PRESET = "Random exploration", "Preset pipeline"
 ONE, ALL = "one", "all"
@@ -126,16 +127,14 @@ def _shown(results, trial, show_cut, index=0):
     use_all = gr.update(visible=bool(trial and results),
                         value=f"Use the selected look on all {photos} photos")
     return ((results, index, thumbs, thumbs, trial, use_all, gr.update(visible=bool(results)))
-            + _show(results, index, show_cut) + _controls(results, index))
+            + _show(results, index) + _controls(results, index) + (_fix_picture(results, index, show_cut),))
 
 
-def _pair(r, show_cut=False):
-    after = eng().cutout_view(r) if show_cut else r.after
-    return (_jpeg(r.before, f"{r.source.stem} · original", r.exif),
-            _jpeg(after, r.title + (" · cut-out" if show_cut else ""), r.exif))
+def _pair(r):
+    return (_jpeg(r.before, f"{r.source.stem} · original", r.exif), _jpeg(r.after, r.title, r.exif))
 
 
-def _show(results, index, show_cut=False):
+def _show(results, index):
     if not results:
         return None, "", "", ""
     r = results[index]
@@ -144,7 +143,7 @@ def _show(results, index, show_cut=False):
     notes = ("\n\n**Notes:** " + "; ".join(r.notes)) if r.notes else ""
     info = (f"**{r.title}**" + (f" — {about}" if about else "")
             + f"\n\n<span class='meta'>Seed {r.seed} · {CROPS[r.crop]}</span>{notes}")
-    return _pair(r, show_cut), info, json.dumps(r.recipe, indent=1), name
+    return _pair(r), info, json.dumps(r.recipe, indent=1), name
 
 
 def built_in(recipe: dict) -> str:
@@ -170,7 +169,8 @@ def _controls(results, index):
 
 
 def pick(results, show_cut, evt: gr.SelectData):
-    return (evt.index,) + _show(results, evt.index, show_cut) + _controls(results, evt.index)
+    return ((evt.index,) + _show(results, evt.index) + _controls(results, evt.index)
+            + (_fix_picture(results, evt.index, show_cut),))
 
 
 def _adj(strength, subject, background, warmth, auto_fill) -> dict:
@@ -178,7 +178,7 @@ def _adj(strength, subject, background, warmth, auto_fill) -> dict:
             "warmth": float(warmth), "auto_fill": bool(auto_fill)}
 
 
-def fine_tune(results, thumbs, index, strength, subject, background, warmth, auto_fill, show_cut):
+def fine_tune(results, thumbs, index, strength, subject, background, warmth, auto_fill):
     """The sliders on the selected look: instant, the look is not made again."""
     if not results:
         return (gr.skip(),) * 6
@@ -186,7 +186,7 @@ def fine_tune(results, thumbs, index, strength, subject, background, warmth, aut
     results, thumbs = list(results), list(thumbs)
     results[index] = r
     thumbs[index] = (_jpeg(r.after, r.title, r.exif), r.title)
-    pair, info, recipe, _ = _show(results, index, show_cut)
+    pair, info, recipe, _ = _show(results, index)
     return results, thumbs, thumbs, pair, info, recipe
 
 
@@ -221,10 +221,71 @@ def use_on_all(results, index, trial, show_cut, progress=gr.Progress()):
     return _shown(out, [], show_cut)
 
 
-def show_cutout(results, index, show_cut):
-    if not results:
+# Fixing the cut-out ------------------------------------------------------------------
+
+ADD, REMOVE = "add", "remove"
+FIX_MODES = [("Add what I click", ADD), ("Take out what I click", REMOVE)]
+
+
+def _fix_picture(results, index, show_cut):
+    """The cut-out to click on, when it is shown."""
+    if not show_cut or not results:
         return gr.skip()
-    return _pair(results[index], show_cut)
+    r = results[index]
+    return _jpeg(eng().fix_view(r), f"{r.source.stem} · cut-out", r.exif)
+
+
+def show_cutout(results, index, show_cut):
+    return gr.update(visible=bool(show_cut)), _fix_picture(results, index, show_cut)
+
+
+def _fix_note(r) -> str:
+    n = len(eng().fixes_for(r))
+    if not n:
+        return "Automatic cut-out. Click the photo to add or take out an object."
+    return (f"{n} fix(es) on {r.source.name}. Press **Remake this photo's looks** to see them in the looks "
+            "(the brightness sliders use them straight away).")
+
+
+def fix_click(results, index, mode, evt: gr.SelectData):
+    """A click on the cut-out picture: adds or takes out the object there."""
+    if not results:
+        raise gr.Error("Make some looks first.")
+    r = results[index]
+    x, y = evt.index[0] / r.before.width, evt.index[1] / r.before.height
+    eng().set_fixes(r, eng().fixes_for(r) + [Fix(round(x, 4), round(y, 4), mode == ADD)])
+    return _fix_picture(results, index, True), _fix_note(r)
+
+
+def fix_undo(results, index):
+    if not results:
+        return gr.skip(), ""
+    r = results[index]
+    eng().set_fixes(r, eng().fixes_for(r)[:-1])
+    return _fix_picture(results, index, True), _fix_note(r)
+
+
+def fix_reset(results, index):
+    if not results:
+        return gr.skip(), ""
+    r = results[index]
+    eng().set_fixes(r, [])
+    return _fix_picture(results, index, True), _fix_note(r)
+
+
+def remake_photo(results, thumbs, index, progress=gr.Progress()):
+    """Every look of the selected photo made again with its fixed cut-out."""
+    if not results:
+        raise gr.Error("Make some looks first.")
+    r = results[index]
+    same = [i for i, q in enumerate(results) if q.source == r.source and q.crop == r.crop]
+    results, thumbs = list(results), list(thumbs)
+    for k, i in enumerate(same):
+        progress(k / len(same), desc=f"Remaking {k + 1}/{len(same)} {results[i].title}")
+        results[i] = eng().remake(results[i])
+        thumbs[i] = (_jpeg(results[i].after, results[i].title, results[i].exif), results[i].title)
+    pair, info, recipe, _ = _show(results, index)
+    return results, thumbs, thumbs, pair, info, recipe
 
 
 def picker_choices() -> list[list[tuple[str, str]]]:
@@ -659,11 +720,25 @@ def build() -> gr.Blocks:
                                 t_auto = gr.Checkbox(False, label="Auto fill light on the player",
                                                      info="Lifts a player who is darker than the scene around "
                                                           "them (backlit or in shade), photo by photo.")
-                                show_cut = gr.Checkbox(False, label="Show the player cut-out",
-                                                       info="Tints in blue what the app treats as the player.")
+                                show_cut = gr.Checkbox(False, label="Show and fix the player cut-out",
+                                                       info="See in blue what the app treats as the player, and "
+                                                            "click to add what it missed or take out what it "
+                                                            "should not have.")
                             with gr.Row():
                                 t_reset = gr.Button("Reset", size="sm")
                                 t_copy = gr.Button("Use these settings on every photo with this look", size="sm")
+                        with gr.Group(visible=False) as fix_box:
+                            gr.Markdown("**Fix the cut-out.** Blue is the player: it gets the brightness sliders and "
+                                        "stays clear of effects. Click a teammate, the ball or a flag to add it; "
+                                        "click a pole or a sign to take it out. Each fix stays with this photo, "
+                                        "for all its looks and the full-size export.", elem_classes="hint")
+                            fix_mode = gr.Radio(FIX_MODES, value=ADD, show_label=False)
+                            fix_img = gr.Image(label="Click to fix", interactive=False, height=480, elem_id="fix-img")
+                            fix_msg = gr.Markdown(elem_classes="hint")
+                            with gr.Row():
+                                fix_undo_btn = gr.Button("Undo last click", size="sm")
+                                fix_reset_btn = gr.Button("Back to automatic", size="sm")
+                                fix_remake = gr.Button("Remake this photo's looks", variant="primary", size="sm")
                     with gr.Column(elem_classes="panel"):
                         step(5, "Save or export")
                         with gr.Row(equal_height=False, elem_classes="row-end"):
@@ -789,18 +864,23 @@ def build() -> gr.Blocks:
         export_choose.click(lambda f: choose_folder("Choose where to export", f) or f, export_dir, export_dir)
         tune = [t_strength, t_subject, t_background, t_warmth, t_auto]
         shown = ([results, selected, thumbs, gallery, trial, use_all, tune_box, compare, info, recipe_box, look_name]
-                 + tune + [tune_note])
+                 + tune + [tune_note, fix_img])
         go.click(make_looks, [files, folder, mode, count, seed, crop, run_on, try_photo, show_cut] + pickers, shown)
         use_all.click(use_on_all, [results, selected, trial, show_cut], shown)
-        gallery.select(pick, [results, show_cut], [selected, compare, info, recipe_box, look_name] + tune + [tune_note])
+        gallery.select(pick, [results, show_cut],
+                       [selected, compare, info, recipe_box, look_name] + tune + [tune_note, fix_img])
         tuned = [results, thumbs, gallery, compare, info, recipe_box]
-        tune_inputs = [results, thumbs, selected] + tune + [show_cut]
+        tune_inputs = [results, thumbs, selected] + tune
         for slider in (t_strength, t_subject, t_background, t_warmth):
             slider.release(fine_tune, tune_inputs, tuned, show_progress="minimal")
         t_auto.input(fine_tune, tune_inputs, tuned, show_progress="minimal")
         t_reset.click(lambda: (100, 0, 0, 0, False), None, tune).then(fine_tune, tune_inputs, tuned)
         t_copy.click(copy_to_look, [results, thumbs, selected] + tune, [results, thumbs, gallery])
-        show_cut.input(show_cutout, [results, selected, show_cut], compare)
+        show_cut.input(show_cutout, [results, selected, show_cut], [fix_box, fix_img])
+        fix_img.select(fix_click, [results, selected, fix_mode], [fix_img, fix_msg])
+        fix_undo_btn.click(fix_undo, [results, selected], [fix_img, fix_msg])
+        fix_reset_btn.click(fix_reset, [results, selected], [fix_img, fix_msg])
+        fix_remake.click(remake_photo, [results, thumbs, selected], tuned)
         save_btn.click(save_look, [results, selected, look_name, recipe_box], [pm_pick] + pickers)
         export_btn.click(export, [results, selected, export_dir, scope, file_kind], export_msg)
         open_btn.click(open_folder, export_dir, None)

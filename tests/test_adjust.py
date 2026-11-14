@@ -152,3 +152,52 @@ def _display_p3() -> bytes:
         return mac.read_bytes()
     import pytest
     pytest.skip("no Display P3 profile on this machine")
+
+
+# Fixing the cut-out ----------------------------------------------------------------------
+
+def test_clicks_add_and_take_out_objects(monkeypatch):
+    from photo_presets import scene
+    h, w = 60, 80
+
+    def fake_segment(img, x, y, size):  # the object under a click: a 10 px square around it
+        m = np.zeros(size, np.float32)
+        cy, cx = int(y * size[0]), int(x * size[1])
+        m[max(0, cy - 5):cy + 5, max(0, cx - 5):cx + 5] = 1
+        return m
+
+    monkeypatch.setattr(scene, "segment", fake_segment)
+    auto = np.zeros((h, w), np.float32)
+    auto[20:40, 30:50] = 1  # the automatic cut-out: one player
+    subject = (auto * 255).astype(np.uint8)
+    p = scene.Prepared(Path("x.jpg"), Image.new("RGB", (w, h)), scene.Scene(subject_mask=subject), None)
+    p._auto = (auto, subject)
+    p.ensure_matte()
+    assert p.scene.matte[30, 40] == 1 and p.scene.matte[10, 10] == 0
+    p.set_fixes([scene.Fix(10 / w, 10 / h, True), scene.Fix(40 / w, 30 / h, False)])
+    assert p.scene.matte[10, 10] == 1  # a teammate added
+    assert p.scene.matte[30, 40] == 0 and p.scene.matte[22, 32] == 1  # a piece taken out, the rest kept
+    assert p.scene.subject_mask[10, 10] == 255
+    p.set_fixes([])
+    assert np.array_equal(p.scene.matte, auto)  # back to automatic
+
+
+def test_fixes_stay_with_the_photo(monkeypatch, tmp_path):
+    from photo_presets import scene
+    calls = []
+
+    def fake_prepare(path, crop="none"):
+        calls.append(path)
+        return scene.Prepared(path, Image.new("RGB", (40, 30)), scene.Scene(), None)
+
+    monkeypatch.setattr(engine, "prepare", fake_prepare)
+    monkeypatch.setattr(scene, "segment", lambda img, x, y, size: np.ones(size, np.float32))
+    eng = engine.Engine(library(tmp_path))
+    r = engine.Result(Path("a.jpg"), "none", {"name": "T", "steps": []}, 0, Image.new("RGB", (40, 30)),
+                      Image.new("RGB", (40, 30)), [], None)
+    eng.set_fixes(r, [scene.Fix(0.5, 0.5)])
+    assert eng.cutout(r).min() > 0.9
+    for i in range(engine.PREPARED_CACHE + 1):  # push the photo out of the cache
+        eng.prepared(Path(f"other{i}.jpg"), "none")
+    p = eng.prepared(Path("a.jpg"), "none")  # prepared again: its fixes come back
+    assert p.fixes == [scene.Fix(0.5, 0.5)] and p.ensure_matte().min() > 0.9

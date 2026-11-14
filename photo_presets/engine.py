@@ -25,7 +25,7 @@ from PIL import Image
 from photo_crops import images
 from photo_presets import explore, pipeline, presets, reel
 from photo_presets.assets import Library
-from photo_presets.scene import Prepared, prepare, resized
+from photo_presets.scene import Fix, Prepared, prepare, resized
 
 # Export file types: JPEG (web, Instagram, clients), 16-bit TIFF (print and further editing), or both
 JPEG, TIFF, BOTH = "jpeg", "tiff", "both"
@@ -63,6 +63,8 @@ class Engine:
         self._prepared: OrderedDict[tuple[str, str], Prepared] = OrderedDict()
         # each photo's player cut-out at preview size (small, so all of a game's fit)
         self._cutouts: dict[tuple[str, str], np.ndarray | None] = {}
+        # your clicks fixing each photo's cut-out, kept for every look and export of it
+        self.fixes: dict[tuple[str, str], list[Fix]] = {}
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -70,6 +72,8 @@ class Engine:
             self._prepared.move_to_end(key)
             return self._prepared[key]
         p = prepare(path, crop)
+        if self.fixes.get(key):
+            p.set_fixes(self.fixes[key])
         self._prepared[key] = p
         while len(self._prepared) > PREPARED_CACHE:
             self._prepared.popitem(last=False)
@@ -108,6 +112,49 @@ class Engine:
         done, notes = pipeline.finish(pipeline.to_array(r.before), pipeline.to_array(look), recipe, alpha)
         kept = [n for n in r.notes if not n.startswith(("fill light", "no player cut-out here, so the player/"))]
         return dataclasses.replace(r, recipe=recipe, after=pipeline.to_image(done), notes=kept + notes, look=look)
+
+    # Fixing the cut-out ------------------------------------------------------------
+
+    def set_fixes(self, r: Result, fixes: list[Fix]) -> None:
+        """Uses these clicks on the result's photo (all its looks)."""
+        key = (str(r.source), r.crop)
+        self.fixes[key] = list(fixes)
+        p = self.prepared(r.source, r.crop)
+        p.set_fixes(self.fixes[key])
+        p.ensure_matte()
+        self._keep_cutout(r.source, r.crop, p, r.before.size)
+
+    def fixes_for(self, r: Result) -> list[Fix]:
+        return list(self.fixes.get((str(r.source), r.crop), []))
+
+    def fix_view(self, r: Result) -> Image.Image:
+        """The original photo with the cut-out tinted blue and your clicks
+        marked (green: added, red: taken out), for fixing it."""
+        before = pipeline.to_array(r.before)
+        m = self.cutout(r)
+        out = before.copy()
+        if m is not None:
+            a = m[..., None]
+            out = before * (1 - 0.5 * a) + CUTOUT_TINT * 0.5 * a
+            edge = cv2.morphologyEx((m > 0.5).astype(np.uint8), cv2.MORPH_GRADIENT,
+                                    np.ones((3, 3), np.uint8)).astype(bool)
+            out[edge] = CUTOUT_TINT
+        img = (np.clip(out, 0, 1) * 255).astype(np.uint8)
+        h, w = img.shape[:2]
+        size = max(6, int(max(h, w) * 0.007))
+        for f in self.fixes_for(r):
+            c = (int(f.x * w), int(f.y * h))
+            color = (40, 220, 90) if f.add else (240, 50, 60)
+            cv2.circle(img, c, size + 2, (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(img, c, size, color, -1, cv2.LINE_AA)
+            cv2.line(img, (c[0] - size // 2, c[1]), (c[0] + size // 2, c[1]), (255, 255, 255), 2, cv2.LINE_AA)
+            if f.add:
+                cv2.line(img, (c[0], c[1] - size // 2), (c[0], c[1] + size // 2), (255, 255, 255), 2, cv2.LINE_AA)
+        return Image.fromarray(img)
+
+    def remake(self, r: Result) -> Result:
+        """The look made again (after its photo's cut-out was fixed), keeping its fine-tuning."""
+        return self._one(r.source, r.crop, r.recipe, r.seed)
 
     def cutout_view(self, r: Result) -> Image.Image:
         """The result with the player tinted blue and outlined: what the app
@@ -202,7 +249,8 @@ class Engine:
             if kind in (TIFF, BOTH):
                 images.save_tiff16(full, dest.with_suffix(".tif"), p.exif)
             dest.with_suffix(".json").write_text(json.dumps(
-                {"source": str(r.source), "crop": r.crop, "seed": r.seed, "recipe": r.recipe, "notes": notes},
+                {"source": str(r.source), "crop": r.crop, "seed": r.seed, "recipe": r.recipe, "notes": notes,
+                 "cutout_fixes": [[f.x, f.y, f.add] for f in self.fixes_for(r)]},
                 indent=1))
             saved.append(dest)
             if progress:

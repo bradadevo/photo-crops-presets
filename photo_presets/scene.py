@@ -11,6 +11,11 @@ The cut-out comes from BiRefNet (an open-source subject segmentation model,
 run with rembg on this Mac): it traces hair and limbs far more precisely than
 YOLO's outlines. YOLO only decides which traced pieces are the players in the
 play, so background people, poles and signs stay in the background layer.
+
+Fixes: you can click what the automatic cut-out missed (a teammate, the ball,
+a flag) or should not have (a pole). Each click is traced with SAM 2.1 (Meta's
+Segment Anything, free, run on this Mac) and added to or taken out of the
+cut-out. A photo's fixes stay with it, for every look and the full-size export.
 """
 
 from dataclasses import dataclass, field
@@ -35,6 +40,18 @@ MATTE_EDGE = 2048
 # Pieces of the traced outline count as the players when this much of them is
 # inside YOLO's outlines of the players in the play
 ATTACHED = 0.5
+SAM_WEIGHTS = "sam2.1_b.pt"
+SAM_EDGE = 1600  # a click is traced on the photo at this size, then again closer around what it found
+SAM_PAD = 0.2  # the closer look reaches this share of the object's size around it
+
+
+@dataclass(frozen=True)
+class Fix:
+    """A click on the photo: x, y (shares of its width and height); add (True)
+    or take out (False) what is there."""
+    x: float
+    y: float
+    add: bool = True
 
 
 @dataclass
@@ -96,12 +113,56 @@ class Prepared:
     scene: Scene
     exif: bytes | None
     fine: np.ndarray | None = None  # the image in 16 bits (uint16), from RAW and 16-bit TIFF photos
+    fixes: list[Fix] = field(default_factory=list)
+    _auto: tuple | None = field(default=None, repr=False)  # the cut-out and players' outline before fixes
+    _pieces: dict = field(default_factory=dict, repr=False)  # each click's traced object
 
     def ensure_matte(self) -> np.ndarray | None:
-        if self.scene.matte is None and self.scene.subject_mask is not None:
-            matte = cutout(self.image, self.scene.subject_mask)
-            self.scene.matte = with_balls(matte, self.scene.balls) if matte is not None else None
+        if self.scene.matte is None:
+            if self._auto is None:
+                matte = None
+                if self.scene.subject_mask is not None:
+                    matte = cutout(self.image, self.scene.subject_mask)
+                    matte = with_balls(matte, self.scene.balls) if matte is not None else None
+                self._auto = (matte, self.scene.subject_mask)
+            self.scene.matte, self.scene.subject_mask = self._fixed()
         return self.scene.matte
+
+    def set_fixes(self, fixes: list[Fix]) -> None:
+        """Uses these clicks (all of them, in order) on the cut-out."""
+        if list(fixes) == self.fixes:
+            return
+        self.fixes = list(fixes)
+        if self._auto is not None:
+            self.scene.matte, self.scene.subject_mask = self._fixed()
+        elif self.fixes:
+            self.ensure_matte()
+
+    def _fixed(self) -> tuple[np.ndarray | None, np.ndarray | None]:
+        auto, subject = self._auto
+        if not self.fixes:
+            return auto, subject
+        if auto is not None:
+            h, w = auto.shape
+        else:
+            scale = min(1.0, MATTE_EDGE / max(self.image.size))
+            w, h = max(1, round(self.image.width * scale)), max(1, round(self.image.height * scale))
+        matte = auto.copy() if auto is not None else np.zeros((h, w), np.float32)
+        ih, iw = (subject.shape if subject is not None else (self.image.height, self.image.width))
+        outline = (subject > 127) if subject is not None else np.zeros((ih, iw), bool)
+        for f in self.fixes:
+            key = (f.x, f.y, h, w)
+            if key not in self._pieces:
+                self._pieces[key] = segment(self.image, f.x, f.y, (h, w))
+            piece = self._pieces[key]
+            part = cv2.resize(piece, (iw, ih), interpolation=cv2.INTER_LINEAR) > 0.5
+            if f.add:
+                matte = np.maximum(matte, piece)
+                outline |= part
+            else:
+                matte = matte * (1 - piece)
+                outline &= ~part
+        return matte.astype(np.float32), (outline.astype(np.uint8) * 255 if outline.any() else None)
 
 
 def with_balls(matte: np.ndarray, balls: list[tuple[float, float, float]]) -> np.ndarray:
@@ -116,6 +177,66 @@ def with_balls(matte: np.ndarray, balls: list[tuple[float, float, float]]) -> np
 
 _detector: Detector | None = None
 _matte_session = None
+_sam = None
+
+
+def _sam_model():
+    global _sam
+    if _sam is None:
+        from ultralytics import SAM
+        from photo_crops.people import _download
+        _sam = SAM(_download(SAM_WEIGHTS))
+    return _sam
+
+
+def _sam_mask(img: Image.Image, x: float, y: float) -> np.ndarray | None:
+    """SAM's outline (bool, at the image's size) of the object at x, y (pixels)."""
+    import torch
+    rgb = np.ascontiguousarray(np.asarray(img.convert("RGB"))[..., ::-1])
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    try:
+        r = _sam_model()(rgb, points=[[x, y]], labels=[1], device=device, verbose=False)
+    except RuntimeError:  # a GPU hiccup: the processor does it too
+        r = _sam_model()(rgb, points=[[x, y]], labels=[1], device="cpu", verbose=False)
+    if not r or r[0].masks is None or not len(r[0].masks.data):
+        return None
+    m = r[0].masks.data[0].cpu().numpy() > 0.5
+    if m.shape != (img.height, img.width):
+        m = cv2.resize(m.astype(np.uint8), img.size, interpolation=cv2.INTER_NEAREST).astype(bool)
+    return m
+
+
+def segment(img: Image.Image, x: float, y: float, size: tuple[int, int]) -> np.ndarray:
+    """The object at x, y (shares of the image) as a soft mask (0-1) of size
+    (h, w): found on the whole photo, then traced again closer around it, so
+    small things (a ball, a hand) get sharp edges too."""
+    h, w = size
+    out = np.zeros((h, w), np.float32)
+    small = img.copy()
+    small.thumbnail((SAM_EDGE, SAM_EDGE))
+    first = _sam_mask(small, x * small.width, y * small.height)
+    if first is None or not first.any():
+        return out
+    ys, xs = np.nonzero(first)
+    bx0, bx1 = xs.min() / small.width, (xs.max() + 1) / small.width
+    by0, by1 = ys.min() / small.height, (ys.max() + 1) / small.height
+    pad = SAM_PAD * max(bx1 - bx0, (by1 - by0) * img.height / img.width)
+    x0, x1 = max(0.0, bx0 - pad), min(1.0, bx1 + pad)
+    y0, y1 = max(0.0, by0 - pad * img.width / img.height), min(1.0, by1 + pad * img.width / img.height)
+    box = (int(x0 * img.width), int(y0 * img.height), int(np.ceil(x1 * img.width)), int(np.ceil(y1 * img.height)))
+    crop = img.crop(box)
+    crop.thumbnail((SAM_EDGE, SAM_EDGE))
+    second = _sam_mask(crop, (x * img.width - box[0]) / (box[2] - box[0]) * crop.width,
+                       (y * img.height - box[1]) / (box[3] - box[1]) * crop.height)
+    if second is None or not second.any():  # keep the first look
+        piece = cv2.resize(first.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+    else:
+        X0, Y0 = int(round(x0 * w)), int(round(y0 * h))
+        X1, Y1 = max(X0 + 1, int(round(x1 * w))), max(Y0 + 1, int(round(y1 * h)))
+        piece = out.copy()
+        piece[Y0:Y1, X0:X1] = cv2.resize(second.astype(np.float32), (X1 - X0, Y1 - Y0),
+                                         interpolation=cv2.INTER_LINEAR)
+    return np.clip(cv2.GaussianBlur(piece, (0, 0), 0.7), 0, 1).astype(np.float32)
 
 
 def detector() -> Detector:
