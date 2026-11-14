@@ -190,6 +190,25 @@ once you turn it on. The form covers:
 The recipe underneath can be edited directly for anything the form does not
 show; it is what gets saved.
 
+**Lightroom presets**: turn presets you own (Lightroom, or any app's look)
+into looks here, with the HALD color-chart method:
+1. **Download the color chart** (a 512 x 512 16-bit TIFF holding a 64 x 64 x
+   64 cube of colors).
+2. In Lightroom (Classic, desktop or mobile; or darktable, Photoshop,
+   Affinity, Capture One), apply your preset to the chart and export it full
+   size as a 16-bit TIFF in sRGB, with no resizing, sharpening or watermark,
+   named after the preset.
+3. **Add the exported charts** and press **Make LUTs**: each becomes a `.cube`
+   in `~/.config/photo-crops-presets/luts` (added to your LUT folders), and
+   optionally a preset under My presets, previewed on your first photo.
+
+It captures what a preset does to color and tone (white balance, exposure,
+contrast, curves, color mixer, color grading, profiles, B&W), not what depends
+on where a pixel is (masks, vignette, grain, texture, clarity, dehaze,
+sharpening): the app warns when a chart looks like those were on, when the
+preset was not applied, or when the chart was resized. LUT steps run in full
+precision (floats), so LUT looks keep 16-bit photos smooth.
+
 **Assets**: what was found, and where to look (folders and zip packs).
 
 ### Command line

@@ -2,7 +2,8 @@
 
 Copied from match-cull (fc-sport-culling); the two apps change separately.
 Applied with Pillow's built-in 3D LUT filter (trilinear, in C), with a numpy
-fallback for the rare LUT whose domain is not 0-1.
+fallback for the rare LUT whose domain is not 0-1. apply_float keeps full
+precision (floats in and out) for 16-bit work.
 """
 
 from dataclasses import dataclass
@@ -96,3 +97,27 @@ def _apply_lut_any_domain(img: Image.Image, lut: Lut) -> Image.Image:
         res = c0 + (c1 - c0) * fb
         out[start:start + _CHUNK_PIXELS] = np.clip(res * 255.0 + 0.5, 0, 255).astype(np.uint8)
     return Image.fromarray(out.reshape(h, w, 3))
+
+
+def apply_float(a: np.ndarray, lut: Lut) -> np.ndarray:
+    """The LUT on floats 0-1 (H x W x 3), trilinear, without rounding to 8 bits
+    (so a 16-bit photo keeps its smooth gradients)."""
+    h, w, _ = a.shape
+    flat = a.reshape(-1, 3)
+    out = np.empty_like(flat, dtype=np.float32)
+    n = lut.size
+    scale = (n - 1) / (lut.domain_max - lut.domain_min)
+    t = lut.table.reshape(-1, 3)
+    for start in range(0, flat.shape[0], _CHUNK_PIXELS):
+        idx = np.clip((flat[start:start + _CHUNK_PIXELS] - lut.domain_min) * scale, 0, n - 1).astype(np.float32)
+        i0 = np.minimum(idx.astype(np.int32), n - 2)
+        f = idx - i0
+        base = (i0[:, 2] * n + i0[:, 1]) * n + i0[:, 0]  # table rows: [blue][green][red]
+        fr, fg, fb = f[:, 0:1], f[:, 1:2], f[:, 2:3]
+        res = np.zeros((len(idx), 3), np.float32)
+        for db, wb in ((0, 1 - fb), (1, fb)):
+            for dg, wg in ((0, 1 - fg), (1, fg)):
+                row = base + (db * n + dg) * n
+                res += (t[row] * (1 - fr) + t[row + 1] * fr) * (wb * wg)
+        out[start:start + _CHUNK_PIXELS] = res
+    return out.reshape(h, w, 3)

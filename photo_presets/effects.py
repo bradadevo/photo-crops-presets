@@ -41,7 +41,7 @@ def lut(a, p, ctx: Context):
     name = _name(p["asset"], "lut")
     if name not in ctx.library.luts:
         raise MissingAsset(f"LUT {name!r} not found")
-    looked = np.asarray(luts.apply_lut(_u8(a), luts.load(ctx.library.lut_path(name))), np.float32) / 255.0
+    looked = luts.apply_float(np.clip(a, 0, 1), luts.load(ctx.library.lut_path(name)))
     out = a + (looked - a) * float(p["strength"])
     if p["guard_shadows"]:
         lum_in, lum_out = _luma(a), _luma(out)

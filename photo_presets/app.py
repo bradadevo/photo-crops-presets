@@ -23,7 +23,7 @@ from pathlib import Path
 import gradio as gr
 
 from photo_crops.ui import choose_folder
-from photo_presets import deliver, engine, pipeline, presets, presetform, reel
+from photo_presets import deliver, engine, lightroom, pipeline, presets, presetform, reel
 from photo_presets.assets import Library, Sources
 from photo_presets.engine import CROPS, Engine
 from photo_presets.scene import Fix
@@ -601,6 +601,83 @@ def choices_updates():
             gr.update(choices=[NONE] + ids["texture"]), gr.update(choices=[NONE] + ids["overlay"]))
 
 
+# Lightroom presets ----------------------------------------------------------------------
+
+CHART_FILE = PREVIEWS / "chart" / "AllProPhoto color chart.tif"
+
+LR_STEPS = """
+**In Lightroom Classic**
+1. **File → Import** the chart (no other edits, no import preset).
+2. In **Develop**, click your preset (one per copy of the chart: right-click → **Create Virtual Copy** to do
+   several).
+3. **File → Export**: *File Settings* **TIFF**, *Bit Depth* **16 bits/component**, *Color Space* **sRGB**;
+   *Image Sizing* **off**; *Output Sharpening* **off**; *Watermark* **off**. Name each file after its preset,
+   e.g. `Moody Film.tif`.
+
+**In Lightroom (desktop or mobile)**: open the chart, apply the preset, then **Export** as **TIFF**, *Dimensions*
+**Full size**, no watermark.
+
+**No Lightroom on this Mac?** Any app that applies a look and exports full size works the same way: Lightroom
+mobile on your phone (AirDrop the chart over and back), darktable (free), Photoshop or Affinity (adjustment layers
+only), Capture One. Export as **TIFF** (or PNG), full size, sRGB. Many preset packs also include `.cube` LUTs:
+add their folder on the Assets tab instead.
+
+What comes across: white balance, exposure, contrast, curves, color mixer, color grading, profiles, B&W.
+What cannot (it depends on where a pixel is): masks, vignette, grain, texture, clarity, dehaze, sharpening. Turn
+those off on the chart; the app's own grain, vignette and clarity can add them back.
+"""
+
+
+def make_luts(charts, name, as_presets, files, folder, progress=gr.Progress()):
+    """Exported charts to LUTs in your LUT folder, each optionally a preset,
+    previewed on your first photo."""
+    paths = [Path(c if isinstance(c, str) else c.name) for c in (charts or [])]
+    if not paths:
+        raise gr.Error("Add the chart(s) you exported from Lightroom.")
+    sources = eng().library.sources
+    home = str(lightroom.LUT_FOLDER).replace(str(Path.home()), "~", 1)
+    if not any(Path(f).expanduser() == lightroom.LUT_FOLDER for f in sources.lut_folders):
+        sources.lut_folders.append(home)
+        sources.save()
+    lines, made = [], []
+    for i, path in enumerate(paths):
+        progress(i / len(paths), desc=f"Converting {path.name}")
+        given = name.strip() if name and len(paths) == 1 else None
+        try:
+            lut_name, dest, notes = lightroom.convert(path, given)
+        except (ValueError, OSError) as e:
+            lines.append(f"- **{path.name}**: not converted: {e}")
+            continue
+        if path.suffix.lower() in {".jpg", ".jpeg"}:
+            notes.append("JPEG compression blurs the chart's colors together; export it as TIFF for an exact LUT")
+        made.append((lut_name, dest))
+        line = f"- **{lut_name}** → `{dest}`"
+        if notes:
+            line += "  \n  ⚠ " + "; ".join(notes)
+        lines.append(line)
+    eng().library = Library(sources)
+    preview = []
+    sample = _inputs(files, folder)[:1]
+    for lut_name, dest in made:
+        recipe = {"description": "From your Lightroom preset", "protect_faces": False, "skin_protect": 0.0,
+                  "steps": [{"op": "lut", "asset": f"lut:{dest.stem}", "strength": 1.0, "guard_shadows": False}]}
+        if as_presets:
+            presets.save(lut_name, recipe)
+        if sample:
+            r = eng().preset(sample, lut_name, recipe=recipe)[0]
+            preview.append((_jpeg(r.after, r.title, r.exif), lut_name))
+    if sample and made:
+        preview.insert(0, (_jpeg(r.before, f"{sample[0].stem} · original", r.exif), "Original"))
+    done = f"Made {len(made)} of {len(paths)} LUT(s)"
+    if as_presets and made:
+        done += ", each also a preset under **My presets** on Make looks"
+    text = done + ":\n\n" + "\n".join(lines)
+    if made and not sample:
+        text += "\n\nAdd a photo on Make looks (step 1) to preview them here."
+    return ([text, preview] + [gr.update(choices=list(presets.load_all()))] + picker_updates()
+            + [assets_summary()] + list(choices_updates()))
+
+
 # Pasting ------------------------------------------------------------------------------
 
 # ⌘V anywhere puts copied images (a screenshot, a photo copied from Photos, a
@@ -909,6 +986,29 @@ def build() -> gr.Blocks:
                     with gr.Accordion("Advanced: recipe (this is what is saved)", open=False):
                         pm_recipe = gr.Code(language="json", label="Recipe")
 
+        with gr.Tab("Lightroom presets"):
+            gr.Markdown("Turn the Lightroom presets you own (or any app's look) into looks here. The app makes a color "
+                        "chart; you apply your preset to it in Lightroom and export it; the app reads back what the "
+                        "preset does to every color, saved as a LUT (and a preset).", elem_classes="hint")
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=3, elem_classes="panel"):
+                    step(1, "Download the color chart", "A 512 x 512 picture of every color, as a 16-bit TIFF.")
+                    lightroom.save_chart(CHART_FILE)
+                    gr.DownloadButton("Download the color chart", value=str(CHART_FILE), variant="primary")
+                    step(2, "Apply your preset in Lightroom and export")
+                    gr.Markdown(LR_STEPS)
+                with gr.Column(scale=3, elem_classes="panel"):
+                    step(3, "Add the exported charts")
+                    lr_charts = gr.File(label="Exported charts (TIFF, or PNG)", file_count="multiple",
+                                        type="filepath", height=140)
+                    lr_name = gr.Textbox(label="Name (one chart)", placeholder="Empty: the file's name",
+                                         info="With several charts, each is named after its file.")
+                    lr_presets = gr.Checkbox(True, label="Also add each as a preset",
+                                             info="Listed under My presets on Make looks, ready to tick.")
+                    lr_go = gr.Button("Make LUTs", variant="primary")
+                    lr_msg = gr.Markdown(elem_classes="hint")
+                    lr_preview = gr.Gallery(label="On your first photo", columns=3, height=260, allow_preview=True)
+
         with gr.Tab("Assets"):
             gr.Markdown("Your LUTs, textures and overlays. Add one folder or zip per line, then press Save and "
                         "rescan. Zips are never unpacked whole; only the files a look uses are taken out and "
@@ -991,6 +1091,9 @@ def build() -> gr.Blocks:
         pm_save.click(save_preset, [pm_name, pm_desc, pm_recipe], [pm_pick] + pickers)
         pm_delete.click(delete_preset, pm_pick, [pm_pick] + pickers)
         pm_preview.click(preview_preset, [sample, files, folder, pm_recipe, pm_crop], [pm_compare, pm_notes])
+        lr_go.click(make_luts, [lr_charts, lr_name, lr_presets, files, folder],
+                    [lr_msg, lr_preview, pm_pick] + pickers + [summary, fields["lut"], fields["t1"], fields["t2"],
+                                                                fields["ov"]])
         rescan.click(save_sources, [lut_folders, lut_zips, texture_folders, texture_zips, overlay_folders, overlay_zips],
                      [summary, fields["lut"], fields["t1"], fields["t2"], fields["ov"]])
         demo.load(build_recipe, form, pm_recipe)
