@@ -110,15 +110,57 @@ def collect(folder: Path) -> tuple[list[Path], list[Path]]:
     return sorted(photos.values()), shots
 
 
-def match_tones(raw16: np.ndarray, reference: np.ndarray, fine: bool = False) -> np.ndarray:
+VIEW_MATCH = 0.55  # how alike (0-1) the preview and its place in the RAW must look to match tones
+
+
+def same_view(raw16: np.ndarray, preview: np.ndarray) -> np.ndarray | None:
+    """The part of the RAW the camera's preview shows, or None when it cannot
+    be found. The preview can be a crop: an aspect setting (16:9 is a center
+    crop of the 3:2 sensor), or a crop made after shooting. It is found by
+    matching the preview's shapes against the RAW at a range of zooms."""
+    h, w = raw16.shape[:2]
+    ph, pw = preview.shape[:2]
+
+    def gray(a, width):
+        a = cv2.resize(a, (width, max(8, int(a.shape[0] * width / a.shape[1]))), interpolation=cv2.INTER_AREA)
+        g = cv2.cvtColor(a.astype(np.float32), cv2.COLOR_RGB2GRAY)
+        g = np.log1p(g / max(float(g.max()), 1e-6) * 50)  # tones compared by shape, not exact brightness
+        g = cv2.GaussianBlur(g, (0, 0), 1.0)
+        return (g - g.mean()) / max(float(g.std()), 1e-6)
+
+    best = (-1.0, None)
+    base = 480
+    big = gray(raw16, base)
+    for share in np.linspace(1.0, 0.3, 15):  # the preview's width as a share of the RAW's
+        tw = int(base * share)
+        if tw < 40:
+            break
+        tmpl = gray(preview, tw)
+        if tmpl.shape[0] > big.shape[0] or tmpl.shape[1] > big.shape[1]:
+            continue
+        r = cv2.matchTemplate(big.astype(np.float32), tmpl.astype(np.float32), cv2.TM_CCOEFF_NORMED)
+        _, score, _, at = cv2.minMaxLoc(r)
+        if score > best[0]:
+            k = w / base
+            best = (score, (int(at[0] * k), int(at[1] * k), int((at[0] + tmpl.shape[1]) * k),
+                            int((at[1] + tmpl.shape[0]) * k)))
+    if best[0] < VIEW_MATCH or best[1] is None:
+        return None
+    x0, y0, x1, y1 = best[1]
+    return raw16[max(0, y0):min(h, y1), max(0, x0):min(w, x1)]
+
+
+def match_tones(raw16: np.ndarray, reference: np.ndarray, fine: bool = False,
+                sample: np.ndarray | None = None) -> np.ndarray:
     """Maps each channel of a 16-bit image so its tones follow the reference
     8-bit image of the same scene (any size): a smooth curve per channel from
     their histograms, so it needs no exact alignment. fine: a 16-bit result
-    (uint16) instead of 8-bit, keeping the RAW's smooth gradients."""
+    (uint16) instead of 8-bit, keeping the RAW's smooth gradients. sample: the
+    part of the RAW the reference shows (see same_view), when it is a crop."""
     h, w = reference.shape[:2]
     scale = min(1.0, 1500 / max(h, w))
     size = (max(1, int(w * scale)), max(1, int(h * scale)))
-    small_raw = cv2.resize(raw16, size, interpolation=cv2.INTER_AREA)
+    small_raw = cv2.resize(raw16 if sample is None else sample, size, interpolation=cv2.INTER_AREA)
     small_ref = cv2.resize(reference, size, interpolation=cv2.INTER_AREA)
     q = np.linspace(0, 100, MATCH_POINTS)
     out = np.empty(raw16.shape, np.uint16 if fine else np.uint8)
@@ -157,7 +199,11 @@ def develop_raw_fine(path: Path) -> tuple[Image.Image, np.ndarray]:
             fine = raw.postprocess(use_camera_wb=True, output_bps=16)
         else:
             raw16 = raw.postprocess(use_camera_wb=True, output_bps=16, no_auto_bright=True)
-            fine = match_tones(raw16, preview, fine=True)
+            view = same_view(raw16, preview)
+            if view is None:  # the preview shows something else: a standard development instead
+                fine = raw.postprocess(use_camera_wb=True, output_bps=16)
+            else:
+                fine = match_tones(raw16, preview, fine=True, sample=view)
     return Image.fromarray(to_8bit(fine)), fine
 
 

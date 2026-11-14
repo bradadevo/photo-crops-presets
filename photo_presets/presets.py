@@ -205,6 +205,14 @@ STARTERS: dict[str, dict] = {
         {"op": "neon_drip2", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "amount": 0.8,
          "length": 0.8, "width": 0.7, "inner": 0.25, "gloss": 1.0, "glow": 0.3, "rain": 0.9, "grid": 0.4,
          "coat": 0.5, "outline": 1.0}]},
+    "Ice Cream Drip Attempt 3": {"protect_faces": False, "skin_protect": 0.0, "steps": [
+        {"op": "pop_art", "crisp": 1.0, "smooth": 1.0, "levels": 8, "mottle": 0.1, "lines": 0.9, "glow": 0.9,
+         "palette": "#03040a,#0d2747,#1fb8d6,#ff2d95,#ff6a2a,#ffd23f", "outline": "#22e6ff", "ink": "#000000",
+         "background": "#000000", "background_amount": 1.0, "lift": "#000000"},
+        {"op": "comic_redraw", "strength": 0.75, "lines": 0.9},
+        {"op": "neon_drip2", "colors": "#22e6ff,#ff2d95,#ff6a2a,#ffd23f,#22e6ff,#ff2d95", "amount": 0.8,
+         "length": 0.8, "width": 0.7, "inner": 0.25, "gloss": 1.0, "glow": 0.3, "rain": 0.9, "grid": 0.4,
+         "coat": 0.5, "outline": 1.0}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
@@ -283,6 +291,8 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Neon Streaks": (BOLD, "Neon line art on black with fine paint streaks, drops and specks flying out behind the player"),
     "Ice Cream Drip Attempt 1": (BOLD, "Melting neon paint: the player in vivid neon with glossy, outlined drips (first attempt)"),
     "Ice Cream Drip Attempt 2": (BOLD, "Melting neon paint with distinct, smooth drips: each drip its own outlined, glossy shape"),
+    "Ice Cream Drip Attempt 3": (BOLD, "The player redrawn as a neon comic illustration by AI on this Mac, "
+                                       "with attempt 2's drips (about 15 s a photo)"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
 

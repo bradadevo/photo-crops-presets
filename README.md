@@ -67,9 +67,17 @@ results). It suits both ways of working:
    takes. **Explore random looks** invents new looks instead (how many per
    photo, and an optional seed to repeat a run).
 3. **Make looks on** (with more than one photo): **Try looks on one photo
-   first** (pick which) or **All photos**. **Crop first** (the whole photo, a
-   photo-crops pro crop, or a face close-up), then **Make looks**. With many
-   photos, results are grouped look by look.
+   first** (pick which) or **All photos**. **Crop first**, then **Make looks**:
+   - **Whole photo**: as shot.
+   - **Pro crop: no zoom (keeps the scene)**: the photo's own shape, at
+     least 90% of its width and height, moved so the players sit on a
+     rule-of-thirds point (their upper body toward the upper third), never
+     cutting them; a photo already well composed stays whole.
+   - **Pro crop: zoomed in on the action**: the photo-crops pro crop, framed
+     tightly around the players in the play (often a third of the photo).
+   - **Face close-up**: head and shoulders.
+
+   With many photos, results are grouped look by look.
 4. **Compare and fine-tune**: click any result to see it against the original
    on the before/after slider, with its description. After a one-photo trial,
    **Use the selected look on all N photos** makes it (with its fine-tuning) on

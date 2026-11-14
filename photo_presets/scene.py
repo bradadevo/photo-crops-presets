@@ -65,6 +65,7 @@ class Scene:
     subject_mask: np.ndarray | None = field(default=None, repr=False)
     # The players' precise cut-out (alpha 0-1), set when a look needs layers
     matte: np.ndarray | None = field(default=None, repr=False)
+    hands: list[tuple[float, float, float]] = field(default_factory=list)  # the players in the play: x, y, radius
 
     def in_crop(self, box: Box, size: tuple[int, int]) -> "Scene":
         """The same scene inside a crop of the image it was found in."""
@@ -92,7 +93,7 @@ class Scene:
 
         feet = move(*self.feet) if self.feet else None
         return Scene(keep(self.faces), keep(self.balls), feet, min(1.0, self.subject_height * h / ch),
-                     cut(self.people_mask), cut(self.subject_mask), cut(self.matte))
+                     cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands))
 
 
 def resized(mask: np.ndarray | None, h: int, w: int) -> np.ndarray | None:
@@ -114,6 +115,7 @@ class Prepared:
     exif: bytes | None
     fine: np.ndarray | None = None  # the image in 16 bits (uint16), from RAW and 16-bit TIFF photos
     fixes: list[Fix] = field(default_factory=list)
+    frame: tuple[float, float, float, float] | None = None  # framed for a look: its box in the photo (shares)
     _auto: tuple | None = field(default=None, repr=False)  # the cut-out and players' outline before fixes
     _pieces: dict = field(default_factory=dict, repr=False)  # each click's traced object
 
@@ -309,16 +311,18 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
             radius = max(spread * 1.4, p.height * 0.12) * FACE_REACH / 2
             faces.append((x / w, y / h, radius / w))
     ball_list = [((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, (b[2] - b[0]) / 2 / w) for b in balls]
+    hands = [(x / w, y / h, p.height * 0.065 / w) for p in in_play for x, y in p.hands if p.height > 0.08 * h]
     subject = plan.subject
     feet = ((subject.box[0] + subject.box[2]) / 2 / w, subject.box[3] / h) if subject else None
     height = (subject.height / h) if subject else 0.5
-    return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size))
+    return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size), hands=hands)
 
 
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,
             goalie_first: bool = True, shape: str = "best") -> Prepared:
     """Loads a photo (RAW in the camera's look), finds its scene and, if
-    asked, crops it the photo-crops way: "crop" (pro crop) or "face"."""
+    asked, crops it the photo-crops way: "crop" (pro crop, zoomed in on the
+    action), "wide" (pro crop without zooming) or "face"."""
     colors = colors or {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}
     photo = images.load(path)
     img = photo.image
@@ -328,6 +332,9 @@ def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None
     box = None
     if crop == "crop":
         box = framing.crop_box(plan, img.size, shape)
+    elif crop == "wide":
+        box = framing.wide_box(plan, img.size)
+        box = None if box == (0, 0, img.width, img.height) else box
     elif crop == "face" and plan.face_person:
         box = framing.face_box(plan.face_person, img.size, "sharp", framing.crop_box(plan, img.size, shape))
     if box:

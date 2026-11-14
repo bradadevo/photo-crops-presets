@@ -57,6 +57,7 @@ class Context:
     seed: int = 0
     notes: list[str] = field(default_factory=list)
     alpha: np.ndarray | None = None  # the players' cut-out at this image's size, when there is one
+    original: np.ndarray | None = None  # the photo before any step (floats), for steps that trace it
 
 
 @dataclass
@@ -324,7 +325,7 @@ def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int):
                                for s in recipe.get("steps", [])):
         people = resized(scene.people_mask, h, w)
         skin = skin_mask(arr, None if people is None else (people > 0.5).astype(np.float32))
-    ctx = Context(library, scene, seed, alpha=alpha)
+    ctx = Context(library, scene, seed, alpha=alpha, original=before)
     warned = False
     for i, step in enumerate(recipe.get("steps", [])):
         operation = OPS.get(step.get("op", ""))

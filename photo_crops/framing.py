@@ -12,6 +12,8 @@ same-size people, mostly the team, is a team photo and is framed as one.
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from photo_crops.people import GOALIE, TEAM, Person
 
 Box = tuple[int, int, int, int]
@@ -169,6 +171,44 @@ def crop_box(plan: Plan, size: tuple[int, int], shape: str) -> Box:
         target = plan.subject.box if plan.subject else plan.group
         return fit(target, size, 4 / 5, (1.0, 1.0), MIN_CROP_SHORT)
     return box
+
+
+# The no-zoom pro crop keeps the photo's shape and at least this share of its width and height
+WIDE_KEEP = 0.9
+WIDE_STEPS = 9  # positions tried along each side
+WIDE_BETTER = 0.02  # a smaller crop must place the players this much closer to a thirds point
+
+
+def wide_box(plan: Plan, size: tuple[int, int]) -> Box:
+    """A pro crop that does not zoom: the photo's own shape, at least
+    WIDE_KEEP of its width and height, moved so the players sit on a
+    rule-of-thirds point (their head toward the upper third), never cutting
+    them. A photo already well composed stays whole."""
+    w, h = size
+    target = plan.subject.box if plan.subject else plan.group
+    gx0, gy0, gx1, gy1 = plan.group
+    tx = (target[0] + target[2]) / 2
+    ty = target[1] + 0.3 * (target[3] - target[1])  # the upper body, where the eye goes
+
+    def miss(box):
+        x0, y0, x1, y1 = box
+        cw, ch = x1 - x0, y1 - y0
+        fx, fy = (tx - x0) / cw, (ty - y0) / ch
+        return min(abs(fx - 1 / 3), abs(fx - 2 / 3)) + 0.5 * min(abs(fy - 1 / 3), abs(fy - 2 / 3))
+
+    best, best_miss = (0, 0, w, h), miss((0, 0, w, h))
+    for scale in np.linspace(1.0, WIDE_KEEP, 5)[1:]:
+        cw, ch = w * scale, h * scale
+        for i in range(WIDE_STEPS):
+            for j in range(WIDE_STEPS):
+                x0, y0 = (w - cw) * i / (WIDE_STEPS - 1), (h - ch) * j / (WIDE_STEPS - 1)
+                box = (x0, y0, x0 + cw, y0 + ch)
+                if gx0 < x0 or gy0 < y0 or gx1 > x0 + cw or gy1 > y0 + ch:
+                    continue  # never cut the players
+                m = miss(box)
+                if m < best_miss - WIDE_BETTER:
+                    best, best_miss = box, m
+    return tuple(round(v) for v in best)
 
 
 def face_box(person: Person, size: tuple[int, int], mode: str, crop: Box | None = None) -> Box | None:

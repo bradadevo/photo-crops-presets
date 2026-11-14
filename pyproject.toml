@@ -5,6 +5,8 @@ description = "photo-crops plus a creative looks engine: saved presets and rando
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "accelerate>=1.15.0",
+    "diffusers>=0.43.0",
     "exifread>=3.5.1",
     "gradio>=6.31.0",
     "librosa>=1.0.0",
@@ -14,7 +16,9 @@ dependencies = [
     "pillow-heif>=1.8.1",
     "rawpy",
     "rembg[cpu]>=2.0.87",
+    "spandrel>=0.4.2",
     "tifffile>=2026.10.15",
+    "transformers>=5.23.0",
     "ultralytics",
 ]
 

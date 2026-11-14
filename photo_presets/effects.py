@@ -1219,3 +1219,6 @@ def neon_drip2(a, p, ctx):
         bloom = cv2.GaussianBlur(paint, (0, 0), max(2.0, 0.006 * max(h, w)))
         out = blend(np.clip(out, 0, 1), np.clip(bloom * 1.3, 0, 1) * (1 - cov)[..., None], "screen", float(p["glow"]))
     return out
+
+
+from photo_presets import art, comic, watercolor  # noqa: E402,F401  (registers their steps)

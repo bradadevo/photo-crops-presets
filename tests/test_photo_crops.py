@@ -178,3 +178,37 @@ def test_goalie_hidden_behind_a_player_does_not_lead():
     player = person(2693, 1560, 3653, 4235, TEAM, 1982)
     peeking_goalie = person(2675, 1736, 2963, 3635, GOALIE, 900, focus_hit=True)
     assert framing.choose([player, peeking_goalie], [], SIZE).subject is player
+
+
+def test_the_no_zoom_crop_keeps_the_scene_and_composes():
+    from photo_crops import framing
+    from photo_crops.people import Person
+    w, h = 6000, 4000
+    centered = Person((2850, 1500, 3150, 2600), "team", 3000.0)  # a player dead center
+    plan = framing.Plan(centered, centered.box, "test")
+    x0, y0, x1, y1 = framing.wide_box(plan, (w, h))
+    assert (x1 - x0) / w >= framing.WIDE_KEEP - 1e-6 and (y1 - y0) / h >= framing.WIDE_KEEP - 1e-6
+    assert abs((x1 - x0) / (y1 - y0) - w / h) < 0.01  # the photo's own shape
+    assert x0 <= 2850 and x1 >= 3150 and y0 <= 1500 and y1 >= 2600  # the player whole
+    fx = (3000 - x0) / (x1 - x0)
+    assert abs(fx - 0.5) > 0.03  # moved toward a thirds line
+    thirds = Person((1900, 1000, 2100, 2200), "team", 3000.0)  # already on the left third
+    plan = framing.Plan(thirds, thirds.box, "test")
+    assert framing.wide_box(plan, (w, h)) == (0, 0, w, h)  # well composed: left whole
+
+
+def test_tones_match_the_previews_own_view_of_the_raw():
+    """A preview cropped after shooting (or by a 16:9 setting) is found inside the
+    RAW, so tones are matched against the same scene; a stranger is not matched."""
+    import numpy as np
+    from photo_crops import images
+    rng = np.random.default_rng(0)
+    import cv2
+    raw16 = (cv2.resize(rng.random((40, 60, 3)).astype(np.float32), (1200, 800), interpolation=cv2.INTER_CUBIC)
+             * 60000).astype(np.uint16)
+    crop = raw16[200:500, 300:850]
+    preview = (cv2.resize(crop.astype(np.float32) / 65535, (275, 150)) * 255).astype(np.uint8)
+    view = images.same_view(raw16, preview)
+    assert view is not None and abs(view.shape[1] - 550) < 60 and abs(view.shape[0] - 300) < 40
+    other = (rng.random((150, 275, 3)) * 255).astype(np.uint8)  # something else entirely
+    assert images.same_view(raw16, other) is None

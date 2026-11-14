@@ -63,6 +63,9 @@ DEFAULTS = {
     "nd_rain": 0.5, "nd_grid": 0.3, "nd_outline": 0.0, "nd_density": 1.0, "nd_width": 1.0, "nd_coat": 0.8,
     "nd_v2": False, "pa_smooth": False,
     # quick adjustments, over the finished look (the Fine-tune sliders on Make looks)
+    # drawn by AI (comic_redraw), and framing the players for illustration looks
+    "cr_on": False, "cr_strength": 0.7, "cr_lines": 0.9, "cr_spill": 0.0, "cr_seed": 7, "cr_prompt": "",
+    "fr_on": False, "fr_fill": 0.8,
     "adj_strength": 100, "adj_subject": 0.0, "adj_background": 0.0, "adj_warmth": 0.0, "adj_auto": False,
 }
 FIELDS = list(DEFAULTS)
@@ -120,6 +123,9 @@ def to_recipe(v: dict) -> dict:
                   "shading": v["pa_shading"], "glow": v["pa_glow"], "outline": v["pa_outline"],
                   "background": v["pa_bg"], "background_amount": v["pa_bg_amount"],
                   "crisp": 1.0 if v["pa_crisp"] else 0.0, "smooth": 1.0 if v["pa_smooth"] else 0.0})
+    if v["cr_on"]:
+        s.append({"op": "comic_redraw", "strength": v["cr_strength"], "lines": v["cr_lines"], "spill": v["cr_spill"],
+                  "seed": int(v["cr_seed"]), "prompt": (v["cr_prompt"] or "").strip()})
     if v["nl_on"]:
         s.append({"op": "neon_lineart", "darkness": v["nl_darkness"], "lines": v["nl_lines"], "detail": v["nl_detail"],
                   "rim": v["nl_rim"], "glow": v["nl_glow"]})
@@ -175,6 +181,8 @@ def to_recipe(v: dict) -> dict:
     if v["sv_on"]:
         s.append({"op": "subject_vignette", "amount": v["sv_amount"], "spread": v["sv_spread"]})
     recipe = {"protect_faces": bool(v["protect"]), "skin_protect": v["skin_protect"], "steps": s}
+    if v["fr_on"]:
+        recipe["frame"] = {"aspect": 0.8, "fill": v["fr_fill"]}
     return pipeline.with_adjust(recipe, {"strength": v["adj_strength"] / 100, "subject": v["adj_subject"],
                                          "background": v["adj_background"], "warmth": v["adj_warmth"],
                                          "auto_fill": bool(v["adj_auto"])})
@@ -185,6 +193,8 @@ def from_recipe(recipe: dict) -> dict:
     v = dict(DEFAULTS)
     v.update(protect=recipe.get("protect_faces", True), skin_protect=recipe.get("skin_protect", 0.7),
              color_kind=NONE, vig_on=False)
+    if recipe.get("frame"):
+        v.update(fr_on=True, fr_fill=float(recipe["frame"].get("fill", 0.8)))
     adj = pipeline.adjustments(recipe)
     v.update(adj_strength=round(adj["strength"] * 100), adj_subject=adj["subject"],
              adj_background=adj["background"], adj_warmth=adj["warmth"], adj_auto=adj["auto_fill"])
@@ -262,6 +272,9 @@ def from_recipe(recipe: dict) -> dict:
                      pa_shading=g("shading", 0.45), pa_glow=g("glow", 0.7), pa_outline=g("outline", "#ff6f7d"),
                      pa_bg=g("background", "#9a6a44"), pa_bg_amount=g("background_amount", 0.85),
                      pa_crisp=float(g("crisp", 0.0)) >= 0.5, pa_smooth=float(g("smooth", 0.0)) >= 0.5)
+        elif op == "comic_redraw":
+            v.update(cr_on=True, cr_strength=g("strength", 0.7), cr_lines=g("lines", 0.9), cr_spill=g("spill", 0.0),
+                     cr_seed=g("seed", 7), cr_prompt=g("prompt", ""))
         elif op == "neon_lineart":
             v.update(nl_on=True, nl_darkness=g("darkness", 0.6), nl_lines=g("lines", 1.0), nl_detail=g("detail", 0.6),
                      nl_rim=g("rim", 1.0), nl_glow=g("glow", 0.5))
@@ -507,6 +520,23 @@ def components(ids: dict) -> dict:
                 with gr.Row():
                     color("pa_bg", "Background tone", "The background turns a dark shade of this.")
                     slider("pa_bg_amount", 0, 1, "Background tone amount")
+            check("cr_on", "Drawn by AI (illustration)", "Redraws the players in the style you describe, by a free AI "
+                  "model on this Mac (about 15 s a photo; 3 GB downloaded once). It follows the photo's outlines and "
+                  "starts from the look so far.")
+            with when("cr_on"):
+                c["cr_prompt"] = gr.Textbox(d["cr_prompt"], label="Style", lines=2,
+                                            placeholder="Empty: a neon comic illustration. E.g. loose watercolor "
+                                                        "painting of a young athlete, white paper")
+                with gr.Row():
+                    slider("cr_strength", 0.3, 0.95, "Redraw strength", info="Higher: more drawn, less photo.")
+                    slider("cr_lines", 0.3, 1.2, "Follow the photo's lines", info="Higher keeps the pose and kit.")
+                    slider("cr_spill", 0, 0.08, "Paint past the outline", step=0.005,
+                           info="Painted or sketched edges on a plain background.")
+                    slider("cr_seed", 1, 99, "Drawing number", step=1, info="Try another drawing of the same photo.")
+            check("fr_on", "Frame the players like an illustration", "Crops to a 4:5 portrait around the players "
+                  "before the look, so they fill the picture.")
+            with when("fr_on"):
+                slider("fr_fill", 0.4, 0.95, "How much of the height they fill")
             check("nl_on", "Neon line art", "The player as glowing neon lines on a dark body, on black.")
             with when("nl_on"):
                 with gr.Row():

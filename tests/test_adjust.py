@@ -75,7 +75,7 @@ def test_engine_adjust_matches_a_full_render(tmp_path):
     after, look, _ = pipeline.render_parts(img, recipe, lib, scene)
     eng = engine.Engine(lib)
     r = engine.Result(Path("x.jpg"), "none", recipe, 0, img, after, [], None, look)
-    eng._cutouts[("x.jpg", "none")] = (matte * 255).astype(np.uint8)
+    eng._cutouts[("x.jpg", "none", None)] = (matte * 255).astype(np.uint8)
     adj = {"strength": 0.6, "subject": 0.4, "background": -0.5, "warmth": 0.3}
     quick = eng.adjust(r, adj)
     full, _ = pipeline.render(img, pipeline.with_adjust(recipe, adj), lib, scene)

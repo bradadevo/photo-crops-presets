@@ -58,6 +58,7 @@ class Person:
     focus_hit: bool = False
     # The person's outline at detection size (the long edge DETECT_EDGE), for cut-outs
     mask: np.ndarray | None = field(default=None, repr=False)
+    hands: list[tuple[float, float]] = field(default_factory=list)  # x, y (pixels): just past each wrist
 
     @property
     def height(self) -> int:
@@ -156,6 +157,7 @@ class Detector:
             upper = gray[int(y0):int(y0 + h / 2), int(x0):int(x1)]
             person.sharp = float(cv2.Laplacian(upper, cv2.CV_32F).var()) if upper.size else 0.0
             person.head = _head(box, pose_boxes, keypoints, s)
+            person.hands = _hands(box, pose_boxes, keypoints, s)
             person.mask = mask
             people.append(person)
             person_masks.append(mask)
@@ -189,8 +191,8 @@ def focused_person(point: tuple[float, float], masks: list[np.ndarray], reach: i
     return best
 
 
-def _head(box, pose_boxes, keypoints, s) -> tuple[float, float, float] | None:
-    """The head (x, y, spread) from the pose model's person that best overlaps box."""
+def _pose_match(box, pose_boxes) -> int | None:
+    """The pose model's person that best overlaps box."""
     if not len(pose_boxes):
         return None
     x0, y0, x1, y1 = box
@@ -198,7 +200,29 @@ def _head(box, pose_boxes, keypoints, s) -> tuple[float, float, float] | None:
     overlap = [max(0, min(x1, q[2]) - max(x0, q[0])) * max(0, min(y1, q[3]) - max(y0, q[1])) / area
                for q in pose_boxes]
     j = int(np.argmax(overlap))
-    if overlap[j] < 0.5:
+    return j if overlap[j] >= 0.5 else None
+
+
+def _hands(box, pose_boxes, keypoints, s) -> list[tuple[float, float]]:
+    """Where the hands are: a third of a forearm past each wrist the pose model sees."""
+    j = _pose_match(box, pose_boxes)
+    if j is None:
+        return []
+    out = []
+    for elbow, wrist in ((7, 9), (8, 10)):  # COCO keypoints: left and right
+        e, w = keypoints[j][elbow], keypoints[j][wrist]
+        if w[2] > HEAD_CONFIDENCE:
+            x, y = w[0], w[1]
+            if e[2] > HEAD_CONFIDENCE:
+                x, y = x + (w[0] - e[0]) * 0.35, y + (w[1] - e[1]) * 0.35
+            out.append((float(x * s), float(y * s)))
+    return out
+
+
+def _head(box, pose_boxes, keypoints, s) -> tuple[float, float, float] | None:
+    """The head (x, y, spread) from the pose model's person that best overlaps box."""
+    j = _pose_match(box, pose_boxes)
+    if j is None:
         return None
     pts = keypoints[j][:5]
     seen = pts[pts[:, 2] > HEAD_CONFIDENCE]

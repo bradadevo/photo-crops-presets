@@ -87,8 +87,27 @@ def photo_status(files, folder):
         text = (f"**{n} photos.** Tip: try looks on one photo first (step 3), pick your favorite, then use it "
                 f"on all {n} with one click.")
     choices = [(q.name, str(q)) for q in paths]
+    preview = gr.update(value=_single_preview(paths[0]) if n == 1 else None, visible=n == 1)
     return (text, gr.update(visible=n > 1, value=ONE if n > 1 else ALL),
-            gr.update(choices=choices, value=choices[0][1] if choices else None, visible=n > 1))
+            gr.update(choices=choices, value=choices[0][1] if choices else None, visible=n > 1), preview)
+
+
+_PREVIEWED: dict[str, str] = {}
+
+
+def _single_preview(path: Path) -> str | None:
+    """The one photo in step 1, shown (RAW included), with its date and camera kept."""
+    key = f"{path}:{path.stat().st_mtime if path.exists() else 0}"
+    if key not in _PREVIEWED:
+        from photo_crops import images
+        try:
+            photo = images.load(path)
+        except Exception:
+            return None
+        img = photo.image.copy()
+        img.thumbnail((1400, 1400))
+        _PREVIEWED[key] = _jpeg(img, path.stem, photo.exif)
+    return _PREVIEWED[key]
 
 
 def make_looks(files, folder, mode, count, seed, crop_label, run_on, try_photo, show_cut, *groups,
@@ -254,7 +273,7 @@ def fix_click(results, index, mode, evt: gr.SelectData):
     if not results:
         raise gr.Error("Make some looks first.")
     r = results[index]
-    x, y = evt.index[0] / r.before.width, evt.index[1] / r.before.height
+    x, y = engine.from_frame(r.frame, evt.index[0] / r.before.width, evt.index[1] / r.before.height)
     eng().set_fixes(r, eng().fixes_for(r) + [Fix(round(x, 4), round(y, 4), mode == ADD)])
     return _fix_picture(results, index, True), _fix_note(r)
 
@@ -795,6 +814,7 @@ def build() -> gr.Blocks:
                                             scale=4)
                         choose = gr.Button("Browse…", scale=1, min_width=90)
                     photo_count = gr.Markdown("No photos yet.", elem_classes="hint")
+                    one_photo = gr.Image(label="Your photo", interactive=False, visible=False, height=300)
 
                     step(2, "Choose looks")
                     mode = gr.Radio(MODES, value=PRESET, show_label=False,
@@ -823,7 +843,9 @@ def build() -> gr.Blocks:
                                            "and then one click uses your favorite on all of them.")
                     try_photo = gr.Dropdown([], label="Photo to try looks on", visible=False)
                     crop = gr.Radio(list(CROPS.values()), value=CROPS["none"], label="Crop first",
-                                    info="Optionally crop around the action or a face before styling.")
+                                    info="No zoom: trims at most 10% to place the players on a rule-of-thirds "
+                                         "point, keeping the scene. Zoomed in: frames the action tightly. Face: "
+                                         "head and shoulders.")
                     go = gr.Button("Make looks", variant="primary", size="lg", elem_classes="go-button")
 
                 # Right: the results, then what to do with them
@@ -1048,7 +1070,8 @@ def build() -> gr.Blocks:
         for p in pickers + [run_on]:
             p.change(preset_estimate, estimate_inputs, estimate, show_progress="hidden")
         for source in (files.change, folder.change):
-            source(photo_status, [files, folder], [photo_count, run_on, try_photo], show_progress="hidden").then(
+            source(photo_status, [files, folder], [photo_count, run_on, try_photo, one_photo],
+                   show_progress="hidden").then(
                 preset_estimate, estimate_inputs, estimate, show_progress="hidden")
         run_on.change(lambda v, f, d: gr.update(visible=v == ONE and len(_inputs(f, d)) > 1),
                       [run_on, files, folder], try_photo, show_progress="hidden")

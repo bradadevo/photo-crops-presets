@@ -33,7 +33,8 @@ PREVIEW_EDGE = 1600
 REEL_EDGE = 2400  # a landscape photo shows half its width across the reel's 1080 px
 PREPARED_CACHE = 4
 CUTOUT_TINT = np.array([0.18, 0.55, 1.0], np.float32)  # how the cut-out view marks the player
-CROPS = {"none": "Whole photo", "crop": "Pro crop (photo-crops)", "face": "Face close-up (photo-crops)"}
+CROPS = {"none": "Whole photo", "wide": "Pro crop: no zoom (keeps the scene)",
+         "crop": "Pro crop: zoomed in on the action", "face": "Face close-up"}
 
 
 @dataclass
@@ -47,6 +48,7 @@ class Result:
     notes: list[str] = field(default_factory=list)
     exif: bytes | None = None  # the photo's camera data (date taken, camera, lens), for saved copies
     look: Image.Image | None = None  # the look before its quick adjustments
+    frame: tuple[float, float, float, float] | None = None  # framed by its look: the box in the photo (shares)
 
     @property
     def name(self) -> str:
@@ -62,7 +64,7 @@ class Engine:
         self.library = library or Library()
         self._prepared: OrderedDict[tuple[str, str], Prepared] = OrderedDict()
         # each photo's player cut-out at preview size (small, so all of a game's fit)
-        self._cutouts: dict[tuple[str, str], np.ndarray | None] = {}
+        self._cutouts: dict[tuple, np.ndarray | None] = {}
         # your clicks fixing each photo's cut-out, kept for every look and export of it
         self.fixes: dict[tuple[str, str], list[Fix]] = {}
 
@@ -79,28 +81,45 @@ class Engine:
             self._prepared.popitem(last=False)
         return p
 
-    def _one(self, path: Path, crop: str, recipe: dict, seed: int) -> Result:
+    def ready(self, path: Path, crop: str, recipe: dict) -> Prepared:
+        """The photo ready for this look: cut out if the look needs it, and
+        framed around the players if the look frames itself ("frame")."""
         p = self.prepared(path, crop)
         if pipeline.needs_cutout(recipe):
             p.ensure_matte()
+        spec = recipe.get("frame")
+        if not spec:
+            return p
+        box = frame_box(p.scene, p.image.width, p.image.height, float(spec.get("aspect", 0.8)),
+                        float(spec.get("fill", 0.8)))
+        if box is None:
+            return p
+        w, h = p.image.size
+        fine = None if p.fine is None else p.fine[box[1]:box[3], box[0]:box[2]]
+        q = Prepared(p.path, p.image.crop(box), p.scene.in_crop(box, (w, h)), p.exif, fine)
+        q._auto = (q.scene.matte, q.scene.subject_mask)  # already traced (and fixed) on the whole photo
+        q.frame = (box[0] / w, box[1] / h, box[2] / w, box[3] / h)
+        return q
+
+    def _one(self, path: Path, crop: str, recipe: dict, seed: int) -> Result:
+        p = self.ready(path, crop, recipe)
         small = p.image.copy()
         small.thumbnail((PREVIEW_EDGE, PREVIEW_EDGE))
         after, look, notes = pipeline.render_parts(small, recipe, self.library, p.scene, seed)
         if p.scene.matte is not None:
-            self._keep_cutout(path, crop, p, small.size)
-        return Result(path, crop, recipe, seed, small, after, notes, p.exif, look)
+            self._keep_cutout((str(path), crop, p.frame), p, small.size)
+        return Result(path, crop, recipe, seed, small, after, notes, p.exif, look, p.frame)
 
-    def _keep_cutout(self, path: Path, crop: str, p: Prepared, size: tuple[int, int]) -> None:
+    def _keep_cutout(self, key: tuple, p: Prepared, size: tuple[int, int]) -> None:
         m = resized(p.scene.matte, size[1], size[0])
-        self._cutouts[(str(path), crop)] = None if m is None else (np.clip(m, 0, 1) * 255).astype(np.uint8)
+        self._cutouts[key] = None if m is None else (np.clip(m, 0, 1) * 255).astype(np.uint8)
 
     def cutout(self, r: Result) -> np.ndarray | None:
         """The result's player cut-out (0-1) at its size, traced if needed."""
-        key = (str(r.source), r.crop)
+        key = (str(r.source), r.crop, r.frame)
         if key not in self._cutouts:
-            p = self.prepared(r.source, r.crop)
-            p.ensure_matte()
-            self._keep_cutout(r.source, r.crop, p, r.before.size)
+            p = self.ready(r.source, r.crop, dict(r.recipe, adjust={"subject": 1}))  # (so it is traced)
+            self._keep_cutout(key, p, r.before.size)
         m = self._cutouts[key]
         return None if m is None else m.astype(np.float32) / 255
 
@@ -123,7 +142,9 @@ class Engine:
         p = self.prepared(r.source, r.crop)
         p.set_fixes(self.fixes[key])
         p.ensure_matte()
-        self._keep_cutout(r.source, r.crop, p, r.before.size)
+        for k in [k for k in self._cutouts if k[:2] == key]:  # every framing of this photo
+            del self._cutouts[k]
+        self.cutout(r)
 
     def fixes_for(self, r: Result) -> list[Fix]:
         return list(self.fixes.get((str(r.source), r.crop), []))
@@ -144,7 +165,10 @@ class Engine:
         h, w = img.shape[:2]
         size = max(6, int(max(h, w) * 0.007))
         for f in self.fixes_for(r):
-            c = (int(f.x * w), int(f.y * h))
+            x, y = to_frame(r.frame, f.x, f.y)
+            if not (0 <= x <= 1 and 0 <= y <= 1):
+                continue
+            c = (int(x * w), int(y * h))
             color = (40, 220, 90) if f.add else (240, 50, 60)
             cv2.circle(img, c, size + 2, (255, 255, 255), -1, cv2.LINE_AA)
             cv2.circle(img, c, size, color, -1, cv2.LINE_AA)
@@ -212,9 +236,7 @@ class Engine:
         phone screen), each with where its player is."""
         shots = []
         for i, r in enumerate(results):
-            p = self.prepared(r.source, r.crop)
-            if pipeline.needs_cutout(r.recipe):
-                p.ensure_matte()
+            p = self.ready(r.source, r.crop, r.recipe)
             img = p.image.copy()
             img.thumbnail((REEL_EDGE, REEL_EDGE))
             look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed)
@@ -276,9 +298,7 @@ class Engine:
         credit = credit or deliver.Credit()
         saved, notes_out = [], []
         for i, r in enumerate(results):
-            p = self.prepared(r.source, r.crop)
-            if pipeline.needs_cutout(r.recipe):
-                p.ensure_matte()
+            p = self.ready(r.source, r.crop, r.recipe)
             full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
                                                self.library, p.scene, r.seed)
             taken = images.taken_at(p.exif)
@@ -314,6 +334,46 @@ class Engine:
             if progress:
                 progress(i + 1, len(results), r.title)
         return saved, notes_out
+
+def frame_box(scene, w: int, h: int, aspect: float, fill: float) -> tuple[int, int, int, int] | None:
+    """A box of this shape (width / height) around the players in the play,
+    sized so they fill `fill` of its height (and fit its width), inside the
+    photo: how an illustrator would frame them."""
+    pb = players_box(scene)
+    if pb is None:
+        return None
+    bx0, by0, bx1, by1 = pb[0] * w, pb[1] * h, pb[2] * w, pb[3] * h
+    for x, y, r in scene.balls:  # the ball in play stays in the picture
+        if bx0 - (bx1 - bx0) < x * w < bx1 + (bx1 - bx0) and by0 - (by1 - by0) / 2 < y * h < by1 + (by1 - by0) / 2:
+            bx0, bx1 = min(bx0, (x - r * 1.3) * w), max(bx1, (x + r * 1.3) * w)
+            by0, by1 = min(by0, y * h - r * 1.3 * w), max(by1, y * h + r * 1.3 * w)
+    ch = (by1 - by0) / fill
+    cw = ch * aspect
+    if cw < (bx1 - bx0) / 0.92:
+        cw = (bx1 - bx0) / 0.92
+        ch = cw / aspect
+    if cw > w:
+        cw, ch = w, w / aspect
+    if ch > h:
+        cw, ch = h * aspect, h
+    x0 = min(max((bx0 + bx1) / 2 - cw / 2, 0), w - cw)
+    y0 = min(max((by0 + by1) / 2 - ch * 0.53, 0), h - ch)  # a little more room above the head
+    return int(x0), int(y0), int(x0 + cw), int(y0 + ch)
+
+
+def to_frame(frame, x: float, y: float) -> tuple[float, float]:
+    """A point on the photo (shares) as shares of a framed look's picture."""
+    if not frame:
+        return x, y
+    return (x - frame[0]) / (frame[2] - frame[0]), (y - frame[1]) / (frame[3] - frame[1])
+
+
+def from_frame(frame, x: float, y: float) -> tuple[float, float]:
+    """A point on a framed look's picture as shares of the whole photo."""
+    if not frame:
+        return x, y
+    return frame[0] + x * (frame[2] - frame[0]), frame[1] + y * (frame[3] - frame[1])
+
 
 def players_box(scene) -> tuple[float, float, float, float] | None:
     """The box around the players in the play (shares of the image), to keep whole when cropping."""
