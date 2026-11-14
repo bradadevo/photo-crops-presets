@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 import gradio as gr
 
-from photo_presets import blend
+from photo_presets import blend, pipeline
 from photo_presets.effects import SMOKE_PLACES
 
 NONE = "None"
@@ -62,6 +62,8 @@ DEFAULTS = {
     "nd_on": False, "nd_amount": 0.8, "nd_length": 1.0, "nd_inner": 0.5, "nd_gloss": 0.7, "nd_glow": 0.5,
     "nd_rain": 0.5, "nd_grid": 0.3, "nd_outline": 0.0, "nd_density": 1.0, "nd_width": 1.0, "nd_coat": 0.8,
     "nd_v2": False, "pa_smooth": False,
+    # quick adjustments, over the finished look (the Fine-tune sliders on Make looks)
+    "adj_strength": 100, "adj_subject": 0.0, "adj_background": 0.0, "adj_warmth": 0.0, "adj_auto": False,
 }
 FIELDS = list(DEFAULTS)
 
@@ -172,7 +174,10 @@ def to_recipe(v: dict) -> dict:
         s.append({"op": "vignette", "amount": v["vig_amount"]})
     if v["sv_on"]:
         s.append({"op": "subject_vignette", "amount": v["sv_amount"], "spread": v["sv_spread"]})
-    return {"protect_faces": bool(v["protect"]), "skin_protect": v["skin_protect"], "steps": s}
+    recipe = {"protect_faces": bool(v["protect"]), "skin_protect": v["skin_protect"], "steps": s}
+    return pipeline.with_adjust(recipe, {"strength": v["adj_strength"] / 100, "subject": v["adj_subject"],
+                                         "background": v["adj_background"], "warmth": v["adj_warmth"],
+                                         "auto_fill": bool(v["adj_auto"])})
 
 
 def from_recipe(recipe: dict) -> dict:
@@ -180,6 +185,9 @@ def from_recipe(recipe: dict) -> dict:
     v = dict(DEFAULTS)
     v.update(protect=recipe.get("protect_faces", True), skin_protect=recipe.get("skin_protect", 0.7),
              color_kind=NONE, vig_on=False)
+    adj = pipeline.adjustments(recipe)
+    v.update(adj_strength=round(adj["strength"] * 100), adj_subject=adj["subject"],
+             adj_background=adj["background"], adj_warmth=adj["warmth"], adj_auto=adj["auto_fill"])
     textures = []
     sep = {"subj_exposure": 0.0, "subj_clarity": 0.0, "bg_exposure": 0.0, "bg_blur": 0.0, "bg_saturation": 1.0,
            "subj_saturation": 1.0, "bg_high_key": 0.0}
@@ -386,7 +394,22 @@ def components(ids: dict) -> dict:
         with gr.Tab("Player & background"):
             hint("Edit the player and the background separately, like a pro retoucher. The player is cut "
                  "out automatically (hair, limbs and the ball included).")
-            check("sep_on", "Edit the player and the background separately")
+            gr.Markdown("**Final brightness and strength** (applied over the finished look; the same as "
+                        "Fine-tune on Make looks)")
+            with gr.Row():
+                slider("adj_subject", -1, 1, "Player brightness (stops)", info="+1 doubles the light on the player.")
+                slider("adj_background", -2, 1, "Background brightness (stops)",
+                       info="Negative darkens everything behind the player.")
+            with gr.Row():
+                slider("adj_strength", 0, 100, "Look strength (%)", step=5,
+                       info="Tone the look down; 0 shows the photo as it was.")
+                slider("adj_warmth", -1, 1, "Warmth", info="Left cooler (blue), right warmer (amber).")
+            check("adj_auto", "Auto fill light on the player",
+                  "Lifts a player who is darker than the scene around them (backlit or in shade), photo by photo.")
+            gr.Markdown("**Inside the look**")
+            check("sep_on", "Edit the player and the background separately",
+                  "Brightness, clarity and color for each, applied while the look is made (before its color "
+                  "and effects).")
             with when("sep_on"):
                 gr.Markdown("**Player**")
                 with gr.Row():

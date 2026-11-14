@@ -45,26 +45,52 @@ uv run photo-presets
 
 It opens in your browser on this Mac.
 
-**Make looks** walks you through five numbered steps (left: set up, right:
-results):
+**Make looks** walks you through six numbered steps (left: set up, right:
+results). It suits both ways of working:
+
+- **One photo**: tick as many looks as you like, compare them, fine-tune the
+  best one, export it.
+- **A batch (a whole game)**: try looks on one good photo first, then press
+  **Use the selected look on all N photos**; fine-tune once and use the
+  settings on every photo with that look; export them all and make a reel.
 
 1. **Add photos** (any mix, including RAW and HEIC): paste a copied image with
    **⌘V** (a screenshot, or a photo copied from Photos, a browser or Finder;
    each paste adds to the list), drag photos in, click to browse, or type a
    folder or press **Browse…**. On Preset manager, ⌘V puts the image in the
-   sample photo box.
+   sample photo box. It says how many photos you added, and with more than one
+   suggests trying looks on one photo first.
 2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
    dramatic, Clean editorial, Studio smoke and lights, My presets), each with a
    one-line description. Tick any, or **Select all**; every photo goes through
    each one, and it shows how many looks that makes and about how long it
    takes. **Explore random looks** invents new looks instead (how many per
    photo, and an optional seed to repeat a run).
-3. **Crop first** (the whole photo, a photo-crops pro crop, or a face
-   close-up), then **Make looks**.
-4. **Compare**: click any result to see it against the original on the
-   before/after slider, with its description.
+3. **Make looks on** (with more than one photo): **Try looks on one photo
+   first** (pick which) or **All photos**. **Crop first** (the whole photo, a
+   photo-crops pro crop, or a face close-up), then **Make looks**. With many
+   photos, results are grouped look by look.
+4. **Compare and fine-tune**: click any result to see it against the original
+   on the before/after slider, with its description. After a one-photo trial,
+   **Use the selected look on all N photos** makes it (with its fine-tuning) on
+   every photo. **Fine-tune the selected look** changes it instantly, without
+   making the look again:
+   - **Look strength** (0-100 %), **Warmth**
+   - **Player brightness** and **Background brightness** (stops), using the
+     player's cut-out; it says what the look itself already does to them
+   - **Auto fill light on the player**: lifts a player darker than the scene
+     around them (backlit or in shade), up to +0.75 stops, photo by photo. It
+     compares the player with their own background, so it corrects the light,
+     not anyone's skin tone or kit.
+   - **Show the player cut-out**: tints in blue what the app treats as the
+     player (only the main players of the play; others count as background)
+   - **Reset**, and **Use these settings on every photo with this look**
+
+   Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when
+   you export, make a reel, or save the look as a preset.
 5. **Save or export**: name a look and **Save preset** to keep it, or
-   **Export full size** to save every result (or just the selected one) at full
+   **Export full size** to save every result (or every photo with the selected
+   look, or just the selected one) at full
    resolution to your export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
 
@@ -92,7 +118,9 @@ once you turn it on. The form covers:
 - **Color**: LUT and strength, neon, B&W channel mix, duotone, the clean pro
   edit, skin tone protection, saturation, high key, and **split toning** (shadow and highlight
   tones, amount, balance, compressed blacks), extra contrast
-- **Player and background**: edit them separately: player brightness,
+- **Player and background**: the final player and background brightness,
+  look strength, warmth and auto fill light (the same as Fine-tune), and
+  inside the look, edit them separately: player brightness,
   clarity and color; background brightness, blur (depth of field), color,
   black and white (color pop), high key, or a studio backdrop instead
 - **Athletic clarity and bloom**: micro-contrast amount and size, high-pass
@@ -185,7 +213,9 @@ frame (the most visible effect).
 
 ## How a look works
 
-A look is a recipe: a list of steps, run in order.
+A look is a recipe: a list of steps, run in order, then its quick
+adjustments (`"adjust"`: `strength` 0-1, `subject` and `background` stops,
+`warmth` -1 to 1, `auto_fill` true/false), applied over the finished look.
 
 ```json
 {"protect_faces": true,

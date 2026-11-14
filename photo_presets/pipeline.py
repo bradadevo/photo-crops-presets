@@ -20,6 +20,12 @@ players' cut-out (see scene.py). Depth effects (overlays, fog, rain) default
 to the background layer: they sit behind the players and in front of the
 field, a 3D sandwich in a 2D photo. Without a cut-out, they cover the photo.
 
+Quick adjustments: a recipe's "adjust" (see ADJUST) is applied last, over
+the finished look: how strongly the look shows, the player's and the
+background's brightness, warmth, and an automatic fill light for a player
+darker than the scene around them. They are kept apart from the look (see
+finish), so the app can change them instantly.
+
 Skin: color-shifting steps (LUTs, neon, duotone, split-toning) leave skin
 tones their own color when the recipe protects skin ("skin_protect", 0-1):
 skin takes the look's brightness but keeps its hue.
@@ -95,8 +101,96 @@ def step_layer(step: dict) -> str:
 
 def needs_cutout(recipe: dict) -> bool:
     from photo_presets import effects  # noqa: F401
-    return any(step_layer(s) != "all" or getattr(OPS.get(s.get("op", "")), "cutout", False)
-               for s in recipe.get("steps", []))
+    adj = adjustments(recipe)
+    return (bool(adj["subject"] or adj["background"] or adj["auto_fill"])
+            or any(step_layer(s) != "all" or getattr(OPS.get(s.get("op", "")), "cutout", False)
+                   for s in recipe.get("steps", [])))
+
+
+# Quick adjustments --------------------------------------------------------------------
+
+ADJUST = {
+    "strength": 1.0,     # how much of the look shows: 0 = the photo as it was, 1 = the full look
+    "subject": 0.0,      # the player's brightness, in stops (+1 doubles the light)
+    "background": 0.0,   # the background's brightness, in stops
+    "warmth": 0.0,       # -1 cooler (blue) to +1 warmer (amber)
+    "auto_fill": False,  # lift a player who is darker than the scene around them
+}
+FILL_MAX = 0.75  # the most the automatic fill light adds, in stops
+FILL_RATIO = 0.85  # it lifts a player until they are this bright next to the background
+
+
+def adjustments(recipe: dict) -> dict:
+    a = recipe.get("adjust") or {}
+    return {k: type(v)(a.get(k, v)) for k, v in ADJUST.items()}
+
+
+def adjusted(recipe: dict) -> bool:
+    return adjustments(recipe) != ADJUST
+
+
+def with_adjust(recipe: dict, adj: dict) -> dict:
+    """A copy of the recipe with these adjustments (left out when they change nothing)."""
+    out = {k: v for k, v in recipe.items() if k != "adjust"}
+    adj = {**ADJUST, **adj}
+    changed = {k: v for k, v in adj.items() if v != ADJUST[k]}
+    if changed:
+        out["adjust"] = changed
+    return out
+
+
+def _brighten(a: np.ndarray, stops: float) -> np.ndarray:
+    out = a * 2 ** stops
+    return np.where(out > 0.9, 0.9 + 0.1 * np.tanh((out - 0.9) / 0.1), out) if stops > 0 else out
+
+
+def fill_light(before: np.ndarray, alpha: np.ndarray | None) -> float:
+    """Stops of fill light for a player darker than the scene around them
+    (backlit, or in shade), measured on the photo before the look; 0 otherwise.
+
+    It compares the player's lit side with the background's, within this
+    photo, so it lifts poor light, not anyone's natural skin tone or kit."""
+    if alpha is None:
+        return 0.0
+    lum = before[..., 0] * 0.299 + before[..., 1] * 0.587 + before[..., 2] * 0.114
+    player, behind = lum[alpha > 0.6], lum[alpha < 0.1]
+    if player.size < 200 or behind.size < 200:
+        return 0.0
+    p, b = np.percentile(player, 75), np.percentile(behind, 75)
+    return float(np.clip(np.log2(FILL_RATIO * b / max(p, 0.02)), 0.0, FILL_MAX))
+
+
+def finish(before: np.ndarray, look: np.ndarray, recipe: dict, alpha: np.ndarray | None) -> tuple[np.ndarray, list[str]]:
+    """The look with the recipe's quick adjustments applied (floats 0-1)."""
+    adj = adjustments(recipe)
+    if adj == ADJUST:
+        return look, []
+    notes = []
+    out = before + (look - before) * float(np.clip(adj["strength"], 0, 1))
+    subject, background = adj["subject"], adj["background"]
+    if adj["auto_fill"]:
+        fill = fill_light(before, alpha)
+        subject += fill
+        if fill:
+            notes.append(f"fill light on the player +{fill:.2f} stops")
+    if subject or background:
+        if alpha is None:
+            notes.append("no player cut-out here, so the player/background brightness was skipped")
+        else:
+            a = alpha[..., None]
+            out = _brighten(out, background) * (1 - a) + _brighten(out, subject) * a
+    if adj["warmth"]:
+        k = 0.08 * adj["warmth"]
+        out = out * np.array([1 + k, 1 + k * 0.25, 1 - k], np.float32)
+    return np.clip(out, 0, 1).astype(np.float32), notes
+
+
+def to_image(arr: np.ndarray) -> Image.Image:
+    return Image.fromarray((np.clip(arr, 0, 1) * 255 + 0.5).astype(np.uint8))
+
+
+def to_array(img: Image.Image) -> np.ndarray:
+    return np.asarray(img.convert("RGB"), np.float32) / 255.0
 
 
 def skin_mask(arr: np.ndarray, people: np.ndarray | None) -> np.ndarray:
@@ -146,10 +240,19 @@ def face_mask(scene: Scene, h: int, w: int) -> np.ndarray | None:
 
 
 def render(img: Image.Image, recipe: dict, library: Library, scene: Scene, seed: int = 0) -> tuple[Image.Image, list[str]]:
-    """The photo with the recipe's steps applied, and notes on any step skipped."""
+    """The photo with the recipe's steps and quick adjustments applied, and notes on any step skipped."""
+    after, _, notes = render_parts(img, recipe, library, scene, seed)
+    return after, notes
+
+
+def render_parts(img: Image.Image, recipe: dict, library: Library, scene: Scene,
+                 seed: int = 0) -> tuple[Image.Image, Image.Image, list[str]]:
+    """The finished photo, the look before its quick adjustments (so they can
+    be changed without making the look again), and notes."""
     from photo_presets import effects  # noqa: F401  (registers the built-in operations)
     load_plugins()
-    arr = np.asarray(img.convert("RGB"), np.float32) / 255.0
+    arr = to_array(img)
+    before = arr
     h, w = arr.shape[:2]
     mask = face_mask(scene, h, w) if recipe.get("protect_faces", True) else None
     outline = resized(scene.subject_mask, h, w)
@@ -196,7 +299,12 @@ def render(img: Image.Image, recipe: dict, library: Library, scene: Scene, seed:
             else:
                 out = out + (arr - out) * alpha[..., None]
         arr = np.clip(out, 0, 1).astype(np.float32)
-    return Image.fromarray((arr * 255 + 0.5).astype(np.uint8)), ctx.notes
+    look = to_image(arr)
+    if not adjusted(recipe):
+        return look, look, ctx.notes
+    # adjust the rounded look, exactly as a later change to the adjustments does
+    done, notes = finish(before, to_array(look), recipe, alpha)
+    return to_image(done), look, ctx.notes + notes
 
 
 _plugins_loaded = False

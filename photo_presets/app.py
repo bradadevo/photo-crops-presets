@@ -1,5 +1,12 @@
 """The Gradio app: make looks (random or preset), compare before/after,
-save looks as presets, manage presets and assets, and export full-size files.
+fine-tune them, save looks as presets, manage presets and assets, and export
+full-size files.
+
+It serves two ways of working:
+- One photo: tick many looks, compare them, fine-tune the best, export it.
+- A batch (a whole game): try looks on one photo first, then use the favorite
+  on every photo, fine-tune it once for all of them, export them all (and make
+  a reel).
 
     uv run photo-presets
 """
@@ -16,11 +23,14 @@ from pathlib import Path
 import gradio as gr
 
 from photo_crops.ui import choose_folder
-from photo_presets import engine, presets, presetform, reel
+from photo_presets import engine, pipeline, presets, presetform, reel
 from photo_presets.assets import Library, Sources
 from photo_presets.engine import CROPS, Engine
 
 RANDOM, PRESET = "Random exploration", "Preset pipeline"
+ONE, ALL = "one", "all"
+RUN_ON = [("Try looks on one photo first", ONE), ("All photos", ALL)]
+ALL_RESULTS, SAME_LOOK, SELECTED = "All results", "Every photo with the selected look", "Selected look only"
 MODES = [("Use presets", PRESET), ("Explore random looks", RANDOM)]
 CROP_LABELS = {v: k for k, v in CROPS.items()}
 DEFAULT_EXPORT = str(Path.home() / "Pictures" / "Photo Presets")
@@ -63,11 +73,33 @@ def _picked(groups) -> list[str]:
     return [n for g in groups for n in (g or [])]
 
 
-def make_looks(files, folder, mode, count, seed, crop_label, *groups, progress=gr.Progress()):
+def photo_status(files, folder):
+    """What step 1 holds, and the step 3 choice that suits it: one photo, or a
+    batch (try looks on one photo first)."""
+    paths = _inputs(files, folder)
+    n = len(paths)
+    if not n:
+        text = "No photos yet."
+    elif n == 1:
+        text = "**1 photo.** Tick as many looks as you like in step 2, then compare them in step 4."
+    else:
+        text = (f"**{n} photos.** Tip: try looks on one photo first (step 3), pick your favorite, then use it "
+                f"on all {n} with one click.")
+    choices = [(q.name, str(q)) for q in paths]
+    return (text, gr.update(visible=n > 1, value=ONE if n > 1 else ALL),
+            gr.update(choices=choices, value=choices[0][1] if choices else None, visible=n > 1))
+
+
+def make_looks(files, folder, mode, count, seed, crop_label, run_on, try_photo, show_cut, *groups,
+               progress=gr.Progress()):
     paths = _inputs(files, folder)
     if not paths:
         raise gr.Error("Step 1: add photos, or choose a folder with photos.")
     crop = CROP_LABELS.get(crop_label, "none")
+    trial = []
+    if len(paths) > 1 and run_on == ONE:
+        trial = [str(q) for q in paths]
+        paths = [q for q in paths if str(q) == try_photo][:1] or paths[:1]
 
     def tick(done, total, title):
         progress(done / max(total, 1), desc=f"{done}/{total} {title}")
@@ -81,12 +113,29 @@ def make_looks(files, folder, mode, count, seed, crop_label, *groups, progress=g
         if not chosen:
             raise gr.Error("Step 2: tick at least one preset (or press Select all).")
         results = eng().presets(paths, chosen, crop, progress=tick)
-    gallery = [(_jpeg(r.after, r.title, r.exif), r.title) for r in results]
-    first = _show(results, 0)
-    return (results, 0, gallery) + first
+        if len(paths) > 1:
+            # a batch reads look by look: every photo in one look, then the next look
+            results.sort(key=lambda r: chosen.index(r.name))
+    return _shown(results, trial, show_cut)
 
 
-def _show(results, index):
+def _shown(results, trial, show_cut, index=0):
+    """Everything step 4 shows for a new set of results."""
+    thumbs = [(_jpeg(r.after, r.title, r.exif), r.title) for r in results]
+    photos = len(trial)
+    use_all = gr.update(visible=bool(trial and results),
+                        value=f"Use the selected look on all {photos} photos")
+    return ((results, index, thumbs, thumbs, trial, use_all, gr.update(visible=bool(results)))
+            + _show(results, index, show_cut) + _controls(results, index))
+
+
+def _pair(r, show_cut=False):
+    after = eng().cutout_view(r) if show_cut else r.after
+    return (_jpeg(r.before, f"{r.source.stem} · original", r.exif),
+            _jpeg(after, r.title + (" · cut-out" if show_cut else ""), r.exif))
+
+
+def _show(results, index, show_cut=False):
     if not results:
         return None, "", "", ""
     r = results[index]
@@ -95,12 +144,87 @@ def _show(results, index):
     notes = ("\n\n**Notes:** " + "; ".join(r.notes)) if r.notes else ""
     info = (f"**{r.title}**" + (f" — {about}" if about else "")
             + f"\n\n<span class='meta'>Seed {r.seed} · {CROPS[r.crop]}</span>{notes}")
-    pair = (_jpeg(r.before, f"{r.source.stem} · original", r.exif), _jpeg(r.after, r.title, r.exif))
-    return pair, info, json.dumps(r.recipe, indent=1), name
+    return _pair(r, show_cut), info, json.dumps(r.recipe, indent=1), name
 
 
-def pick(results, evt: gr.SelectData):
-    return (evt.index,) + _show(results, evt.index)
+def built_in(recipe: dict) -> str:
+    """What the look itself already does to the player's and background's brightness."""
+    found = {}
+    for st in recipe.get("steps", []):
+        if st.get("op") == "exposure" and st.get("layer") in ("subject", "background"):
+            found[st["layer"]] = found.get(st["layer"], 0.0) + float(st.get("stops", 0.3))
+    if not found:
+        return "This look leaves the player's and background's brightness as they are; the sliders change them."
+    words = {"subject": "player", "background": "background"}
+    parts = " · ".join(f"{words[k]} {v:+.2f} stops" for k, v in found.items())
+    return f"Built into this look: {parts}. The sliders add to that."
+
+
+def _controls(results, index):
+    """The fine-tune sliders for the selected look."""
+    if not results:
+        return (gr.skip(),) * 5 + ("",)
+    adj = pipeline.adjustments(results[index].recipe)
+    return (round(adj["strength"] * 100), adj["subject"], adj["background"], adj["warmth"], adj["auto_fill"],
+            built_in(results[index].recipe))
+
+
+def pick(results, show_cut, evt: gr.SelectData):
+    return (evt.index,) + _show(results, evt.index, show_cut) + _controls(results, evt.index)
+
+
+def _adj(strength, subject, background, warmth, auto_fill) -> dict:
+    return {"strength": float(strength) / 100, "subject": float(subject), "background": float(background),
+            "warmth": float(warmth), "auto_fill": bool(auto_fill)}
+
+
+def fine_tune(results, thumbs, index, strength, subject, background, warmth, auto_fill, show_cut):
+    """The sliders on the selected look: instant, the look is not made again."""
+    if not results:
+        return (gr.skip(),) * 6
+    r = eng().adjust(results[index], _adj(strength, subject, background, warmth, auto_fill))
+    results, thumbs = list(results), list(thumbs)
+    results[index] = r
+    thumbs[index] = (_jpeg(r.after, r.title, r.exif), r.title)
+    pair, info, recipe, _ = _show(results, index, show_cut)
+    return results, thumbs, thumbs, pair, info, recipe
+
+
+def copy_to_look(results, thumbs, index, strength, subject, background, warmth, auto_fill,
+                 progress=gr.Progress()):
+    """These settings on every photo with the selected look, so a game stays consistent."""
+    if not results:
+        raise gr.Error("Make some looks first.")
+    name = results[index].name
+    adj = _adj(strength, subject, background, warmth, auto_fill)
+    results, thumbs = list(results), list(thumbs)
+    same = [i for i, r in enumerate(results) if r.name == name]
+    for k, i in enumerate(same):
+        progress(k / len(same), desc=f"Fine-tuning {k + 1}/{len(same)} {results[i].source.name}")
+        results[i] = eng().adjust(results[i], adj)
+        thumbs[i] = (_jpeg(results[i].after, results[i].title, results[i].exif), results[i].title)
+    gr.Info(f"Fine-tuned all {len(same)} photo(s) with \"{name}\"")
+    return results, thumbs, thumbs
+
+
+def use_on_all(results, index, trial, show_cut, progress=gr.Progress()):
+    """The selected look (with its fine-tuning) on every photo from step 1."""
+    if not results or not trial:
+        raise gr.Error("Try looks on one photo first.")
+    r = results[index]
+    paths = [Path(q) for q in trial]
+
+    def tick(done, total, title):
+        progress(done / max(total, 1), desc=f"{done}/{total} {title}")
+
+    out = eng().preset(paths, r.name, r.crop, recipe=r.recipe, progress=tick)
+    return _shown(out, [], show_cut)
+
+
+def show_cutout(results, index, show_cut):
+    if not results:
+        return gr.skip()
+    return _pair(results[index], show_cut)
 
 
 def picker_choices() -> list[list[tuple[str, str]]]:
@@ -133,7 +257,12 @@ def save_look(results, index, name, recipe_text):
 def export(results, index, folder, scope, progress=gr.Progress()):
     if not results:
         raise gr.Error("Make some looks first.")
-    chosen = results if scope == "All results" else [results[index]]
+    if scope == ALL_RESULTS:
+        chosen = results
+    elif scope == SAME_LOOK:
+        chosen = [r for r in results if r.name == results[index].name]
+    else:
+        chosen = [results[index]]
     dest = Path(folder or DEFAULT_EXPORT).expanduser()
 
     def tick(done, total, name):
@@ -155,16 +284,19 @@ def toggle_mode(mode):
     return gr.update(visible=mode == RANDOM), gr.update(visible=mode == PRESET)
 
 
-def preset_estimate(files, folder, *groups):
+def preset_estimate(files, folder, run_on, *groups):
     """How many looks the ticked presets make, and about how long they take."""
     n = len(_picked(groups))
     photos = len(_inputs(files, folder)) or 1
+    if photos > 1 and run_on == ONE:
+        photos = 1
     looks = n * photos
     if not looks:
         return "No presets ticked yet."
     seconds = looks * 2 + photos * 10
     when = f"about {seconds} seconds" if seconds < 90 else f"about {round(seconds / 60)} minutes"
-    return f"**{n}** preset(s) × **{photos}** photo(s) = **{looks}** looks, {when}."
+    trying = " (on one photo)" if photos == 1 and run_on == ONE else ""
+    return f"**{n}** preset(s) × **{photos}** photo(s){trying} = **{looks}** looks, {when}."
 
 
 # Reel ---------------------------------------------------------------------------------
@@ -348,7 +480,7 @@ def choices_updates():
 # ⌘V anywhere puts copied images (a screenshot, a photo copied from Photos, a
 # browser or Finder) into the upload box on screen: Photos on Make looks, the
 # sample photo on Preset manager. Pasting text into a text box works as usual.
-PASTE_JS = """
+PASTE_JS = r"""
 <script>
 document.addEventListener("paste", (e) => {
   const PHOTO = /\.(jpe?g|png|heic|heif|webp|tiff?|arw|dng|cr2|cr3|nef|raf|orf)$/i;
@@ -436,12 +568,14 @@ def build() -> gr.Blocks:
     with gr.Blocks(title="Photo Presets") as demo:
         results = gr.State([])
         selected = gr.State(0)
+        thumbs = gr.State([])  # the gallery's pictures, so one fine-tuned look updates alone
+        trial = gr.State([])  # every photo from step 1, while looks were tried on one of them
         gr.Markdown(
             "# Photo Presets\n"
             "Pro looks for your sports photos. Faces stay clean of effects, and your originals are never "
             "changed.\n\n"
             "<div class='steps-strip'><span>1 · Add photos</span><span>2 · Choose looks</span>"
-            "<span>3 · Make looks</span><span>4 · Compare</span><span>5 · Save or export</span>"
+            "<span>3 · Make looks</span><span>4 · Compare and fine-tune</span><span>5 · Save or export</span>"
             "<span>6 · Instagram reel</span></div>",
             elem_classes="app-header")
 
@@ -457,6 +591,7 @@ def build() -> gr.Blocks:
                         folder = gr.Textbox(label="Or a folder of photos", placeholder="~/Pictures/Game day",
                                             scale=4)
                         choose = gr.Button("Browse…", scale=1, min_width=90)
+                    photo_count = gr.Markdown("No photos yet.", elem_classes="hint")
 
                     step(2, "Choose looks")
                     mode = gr.Radio(MODES, value=PRESET, show_label=False,
@@ -480,6 +615,10 @@ def build() -> gr.Blocks:
                                          info="Leave empty for new looks each time; reuse a seed to repeat a run.")
 
                     step(3, "Crop and make looks")
+                    run_on = gr.Radio(RUN_ON, value=ALL, label="Make looks on", visible=False,
+                                      info="With many photos, try looks on one good photo first: it is quick, "
+                                           "and then one click uses your favorite on all of them.")
+                    try_photo = gr.Dropdown([], label="Photo to try looks on", visible=False)
                     crop = gr.Radio(list(CROPS.values()), value=CROPS["none"], label="Crop first",
                                     info="Optionally crop around the action or a face before styling.")
                     go = gr.Button("Make looks", variant="primary", size="lg", elem_classes="go-button")
@@ -487,11 +626,38 @@ def build() -> gr.Blocks:
                 # Right: the results, then what to do with them
                 with gr.Column(scale=3, min_width=420):
                     with gr.Column(elem_classes="panel"):
-                        step(4, "Compare", "Click a result to compare it with the original; drag the slider.")
+                        step(4, "Compare and fine-tune", "Click a result to compare it with the original; "
+                             "drag the slider.")
                         gallery = gr.Gallery(label="Results", columns=4, height=230, allow_preview=False,
                                              show_label=False)
+                        use_all = gr.Button("Use the selected look on all photos", variant="primary",
+                                            visible=False)
                         compare = gr.ImageSlider(label="Before / after", height=480)
                         info = gr.Markdown()
+                        with gr.Group(visible=False) as tune_box:
+                            gr.Markdown("**Fine-tune the selected look.** Changes show instantly and are kept "
+                                        "when you export, make a reel or save it as a preset.",
+                                        elem_classes="hint")
+                            tune_note = gr.Markdown(elem_classes="hint")
+                            with gr.Row():
+                                t_strength = gr.Slider(0, 100, 100, step=5, label="Look strength (%)",
+                                                       info="Tone the look down; 0 shows the photo as it was.")
+                                t_warmth = gr.Slider(-1, 1, 0, step=0.05, label="Warmth",
+                                                     info="Left cooler (blue), right warmer (amber).")
+                            with gr.Row():
+                                t_subject = gr.Slider(-1, 1, 0, step=0.05, label="Player brightness (stops)",
+                                                      info="+1 doubles the light on the player.")
+                                t_background = gr.Slider(-2, 1, 0, step=0.05, label="Background brightness (stops)",
+                                                         info="Negative darkens everything behind the player.")
+                            with gr.Row():
+                                t_auto = gr.Checkbox(False, label="Auto fill light on the player",
+                                                     info="Lifts a player who is darker than the scene around "
+                                                          "them (backlit or in shade), photo by photo.")
+                                show_cut = gr.Checkbox(False, label="Show the player cut-out",
+                                                       info="Tints in blue what the app treats as the player.")
+                            with gr.Row():
+                                t_reset = gr.Button("Reset", size="sm")
+                                t_copy = gr.Button("Use these settings on every photo with this look", size="sm")
                     with gr.Column(elem_classes="panel"):
                         step(5, "Save or export")
                         with gr.Row(equal_height=False, elem_classes="row-end"):
@@ -502,7 +668,7 @@ def build() -> gr.Blocks:
                             export_dir = gr.Textbox(value=DEFAULT_EXPORT, label="Export folder", scale=4)
                             export_choose = gr.Button("Browse…", scale=1, min_width=90)
                         with gr.Row(equal_height=False, elem_classes="row-end"):
-                            scope = gr.Radio(["All results", "Selected look only"], value="All results",
+                            scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED], value=ALL_RESULTS,
                                              label="Export", scale=3)
                             export_btn = gr.Button("Export full size", variant="primary", scale=2, min_width=150)
                             open_btn = gr.Button("Open folder", scale=1, min_width=140)
@@ -602,14 +768,30 @@ def build() -> gr.Blocks:
         mode.change(toggle_mode, mode, [random_box, preset_box])
         select_all.click(lambda: picker_updates(ticked=set(presets.load_all())), None, pickers)
         clear_all.click(lambda: picker_updates(ticked=[]), None, pickers)
-        for p in pickers:
-            p.change(preset_estimate, [files, folder] + pickers, estimate, show_progress="hidden")
-        files.change(preset_estimate, [files, folder] + pickers, estimate, show_progress="hidden")
+        estimate_inputs = [files, folder, run_on] + pickers
+        for p in pickers + [run_on]:
+            p.change(preset_estimate, estimate_inputs, estimate, show_progress="hidden")
+        for source in (files.change, folder.change):
+            source(photo_status, [files, folder], [photo_count, run_on, try_photo], show_progress="hidden").then(
+                preset_estimate, estimate_inputs, estimate, show_progress="hidden")
+        run_on.change(lambda v, f, d: gr.update(visible=v == ONE and len(_inputs(f, d)) > 1),
+                      [run_on, files, folder], try_photo, show_progress="hidden")
         choose.click(lambda f: choose_folder("Choose a folder of photos", f) or f, folder, folder)
         export_choose.click(lambda f: choose_folder("Choose where to export", f) or f, export_dir, export_dir)
-        go.click(make_looks, [files, folder, mode, count, seed, crop] + pickers,
-                 [results, selected, gallery, compare, info, recipe_box, look_name])
-        gallery.select(pick, results, [selected, compare, info, recipe_box, look_name])
+        tune = [t_strength, t_subject, t_background, t_warmth, t_auto]
+        shown = ([results, selected, thumbs, gallery, trial, use_all, tune_box, compare, info, recipe_box, look_name]
+                 + tune + [tune_note])
+        go.click(make_looks, [files, folder, mode, count, seed, crop, run_on, try_photo, show_cut] + pickers, shown)
+        use_all.click(use_on_all, [results, selected, trial, show_cut], shown)
+        gallery.select(pick, [results, show_cut], [selected, compare, info, recipe_box, look_name] + tune + [tune_note])
+        tuned = [results, thumbs, gallery, compare, info, recipe_box]
+        tune_inputs = [results, thumbs, selected] + tune + [show_cut]
+        for slider in (t_strength, t_subject, t_background, t_warmth):
+            slider.release(fine_tune, tune_inputs, tuned, show_progress="minimal")
+        t_auto.input(fine_tune, tune_inputs, tuned, show_progress="minimal")
+        t_reset.click(lambda: (100, 0, 0, 0, False), None, tune).then(fine_tune, tune_inputs, tuned)
+        t_copy.click(copy_to_look, [results, thumbs, selected] + tune, [results, thumbs, gallery])
+        show_cut.input(show_cutout, [results, selected, show_cut], compare)
         save_btn.click(save_look, [results, selected, look_name, recipe_box], [pm_pick] + pickers)
         export_btn.click(export, [results, selected, export_dir, scope], export_msg)
         open_btn.click(open_folder, export_dir, None)

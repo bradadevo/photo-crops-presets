@@ -5,8 +5,12 @@
 
 Results are made at preview size for speed; export renders each one again
 from the full-size photo, so the saved files are full resolution.
+
+Each result keeps its look before the quick adjustments too, so changing
+them (look strength, player and background brightness, warmth) is instant.
 """
 
+import dataclasses
 import json
 import re
 import time
@@ -14,17 +18,19 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
 from photo_crops import images
 from photo_presets import explore, pipeline, presets, reel
 from photo_presets.assets import Library
-from photo_presets.scene import Prepared, prepare
+from photo_presets.scene import Prepared, prepare, resized
 
 PREVIEW_EDGE = 1600
 REEL_EDGE = 2400  # a landscape photo shows half its width across the reel's 1080 px
 PREPARED_CACHE = 4
+CUTOUT_TINT = np.array([0.18, 0.55, 1.0], np.float32)  # how the cut-out view marks the player
 CROPS = {"none": "Whole photo", "crop": "Pro crop (photo-crops)", "face": "Face close-up (photo-crops)"}
 
 
@@ -38,6 +44,11 @@ class Result:
     after: Image.Image
     notes: list[str] = field(default_factory=list)
     exif: bytes | None = None  # the photo's camera data (date taken, camera, lens), for saved copies
+    look: Image.Image | None = None  # the look before its quick adjustments
+
+    @property
+    def name(self) -> str:
+        return self.recipe.get("name", "look")
 
     @property
     def title(self) -> str:
@@ -48,6 +59,8 @@ class Engine:
     def __init__(self, library: Library | None = None):
         self.library = library or Library()
         self._prepared: OrderedDict[tuple[str, str], Prepared] = OrderedDict()
+        # each photo's player cut-out at preview size (small, so all of a game's fit)
+        self._cutouts: dict[tuple[str, str], np.ndarray | None] = {}
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -66,8 +79,47 @@ class Engine:
             p.ensure_matte()
         small = p.image.copy()
         small.thumbnail((PREVIEW_EDGE, PREVIEW_EDGE))
-        after, notes = pipeline.render(small, recipe, self.library, p.scene, seed)
-        return Result(path, crop, recipe, seed, small, after, notes, p.exif)
+        after, look, notes = pipeline.render_parts(small, recipe, self.library, p.scene, seed)
+        if p.scene.matte is not None:
+            self._keep_cutout(path, crop, p, small.size)
+        return Result(path, crop, recipe, seed, small, after, notes, p.exif, look)
+
+    def _keep_cutout(self, path: Path, crop: str, p: Prepared, size: tuple[int, int]) -> None:
+        m = resized(p.scene.matte, size[1], size[0])
+        self._cutouts[(str(path), crop)] = None if m is None else (np.clip(m, 0, 1) * 255).astype(np.uint8)
+
+    def cutout(self, r: Result) -> np.ndarray | None:
+        """The result's player cut-out (0-1) at its size, traced if needed."""
+        key = (str(r.source), r.crop)
+        if key not in self._cutouts:
+            p = self.prepared(r.source, r.crop)
+            p.ensure_matte()
+            self._keep_cutout(r.source, r.crop, p, r.before.size)
+        m = self._cutouts[key]
+        return None if m is None else m.astype(np.float32) / 255
+
+    def adjust(self, r: Result, adj: dict) -> Result:
+        """The result with new quick adjustments: instant, the look is not made again."""
+        recipe = pipeline.with_adjust(r.recipe, adj)
+        alpha = self.cutout(r) if pipeline.needs_cutout({"adjust": recipe.get("adjust")}) else None
+        look = r.look or r.after
+        done, notes = pipeline.finish(pipeline.to_array(r.before), pipeline.to_array(look), recipe, alpha)
+        kept = [n for n in r.notes if not n.startswith(("fill light", "no player cut-out here, so the player/"))]
+        return dataclasses.replace(r, recipe=recipe, after=pipeline.to_image(done), notes=kept + notes, look=look)
+
+    def cutout_view(self, r: Result) -> Image.Image:
+        """The result with the player tinted blue and outlined: what the app
+        treats as the player (brightened, kept clear of effects)."""
+        after = pipeline.to_array(r.after)
+        m = self.cutout(r)
+        if m is None:
+            return r.after
+        a = m[..., None]
+        tinted = after * (1 - 0.45 * a) + CUTOUT_TINT * 0.45 * a
+        edge = cv2.morphologyEx((m > 0.5).astype(np.uint8), cv2.MORPH_GRADIENT,
+                                np.ones((3, 3), np.uint8)).astype(bool)
+        tinted[edge] = CUTOUT_TINT
+        return pipeline.to_image(tinted)
 
     def explore(self, paths: list[Path], count: int, crop: str = "none", seed: int | None = None,
                 progress=None) -> list[Result]:
