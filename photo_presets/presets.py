@@ -5,6 +5,7 @@ in; saving one with the same name replaces it for you."""
 import copy
 import json
 from pathlib import Path
+from photo_presets.art_presets import ART_ABOUT, ART_GROUPS, ART_STARTERS
 
 PRESETS_FILE = Path.home() / ".config" / "photo-crops-presets" / "presets.json"
 
@@ -220,6 +221,9 @@ STARTERS: dict[str, dict] = {
 }
 
 
+STARTERS.update(ART_STARTERS)
+
+
 def load_all() -> dict[str, dict]:
     """Starters, then your saved presets (yours win on the same name)."""
     out = copy.deepcopy(STARTERS)
@@ -261,7 +265,7 @@ def delete(name: str) -> bool:
 
 # How the app lists the starters: in groups, each with a one-line description
 BOLD, EDITORIAL, STUDIO, MINE = "Bold and dramatic", "Clean editorial", "Studio, smoke and lights", "My presets"
-GROUPS = [BOLD, EDITORIAL, STUDIO, MINE]
+GROUPS = [BOLD, EDITORIAL, STUDIO, *ART_GROUPS, MINE]
 ABOUT: dict[str, tuple[str, str]] = {
     "Grit & Glory": (BOLD, "Gritty black and white with smoke at the feet and rough edges"),
     "Friday Night Lights": (BOLD, "A night-game color grade, a soft spotlight on the player and film grain"),
@@ -295,6 +299,9 @@ ABOUT: dict[str, tuple[str, str]] = {
                                        "with attempt 2's drips (about 15 s a photo)"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
+
+
+ABOUT.update(ART_ABOUT)
 
 
 def describe(name: str, recipe: dict | None = None) -> str:

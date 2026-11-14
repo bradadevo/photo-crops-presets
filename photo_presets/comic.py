@@ -247,27 +247,53 @@ def painted_face(photo: np.ndarray) -> np.ndarray:
 FACE_STYLES.update(paint=painted_face, cel=cel_face, graphite=graphite_face)
 
 
+def _hair_cleanup(head: np.ndarray, alpha: np.ndarray, size: float) -> np.ndarray:
+    """Bright background specks showing between strands at the edge of the hair
+    (sunlit fence, sky) pulled to the hair's own color nearby."""
+    solid = cv2.erode((alpha > 0.5).astype(np.uint8), np.ones((3, 3), np.uint8))
+    depth = cv2.distanceTransform(solid, cv2.DIST_L2, 5)
+    band = (depth > 0) & (depth < max(2.0, size * 0.07))  # only the outermost strands
+    if not band.any():
+        return head
+    core = (depth >= max(2.0, size * 0.07)).astype(np.float32)
+    s = max(2.0, size * 0.12)
+    local = cv2.GaussianBlur(head * core[..., None], (0, 0), s) / np.maximum(cv2.GaussianBlur(core, (0, 0), s), 1e-3)[..., None]
+    lum, ref = head.mean(axis=2), local.mean(axis=2)
+    pull = np.clip((lum - ref - 0.22) / 0.15, 0, 1) * band  # only specks far brighter than the hair: background
+    return head * (1 - pull[..., None]) + local * pull[..., None]
+
+
 def _real_faces(out: np.ndarray, photo: np.ndarray, ctx: Context, amount: float, style: str = "paint") -> np.ndarray:
-    """Each head of the players in the play (face, hair, ears, jaw) from the
-    photo itself, rendered in the look's technique and laid over the drawing,
-    following the head's own outline: the face is the child's, exactly."""
+    """Each head of the players in the play (face, hair, ears, the back of the
+    head however it is turned) from the photo itself, rendered in the look's
+    technique and laid over the drawing, following the head's own outline down
+    to the chin: the face is the child's, exactly."""
     h, w = out.shape[:2]
     render = FACE_STYLES.get(style, painted_face)
+    from photo_presets.watercolor import defringe
     for fx, fy, fr in ctx.scene.faces:
-        r = fr * w * 1.05  # the whole head, not just the face
+        r = fr * w
         if r < 4:
             continue
-        cx, cy = fx * w, fy * h - r * 0.12  # a little up, for the hair
-        x0, y0 = int(max(0, cx - r * 1.5)), int(max(0, cy - r * 1.6))
-        x1, y1 = int(min(w, cx + r * 1.5)), int(min(h, cy + r * 1.6))
+        cx, cy = fx * w, fy * h
+        reach = r * 1.9  # wide enough for the back of the head in a profile, and big hair
+        x0, y0 = int(max(0, cx - reach)), int(max(0, cy - reach * 1.1))
+        x1, y1 = int(min(w, cx + reach)), int(min(h, cy + r * 1.3))
         if x1 - x0 < 8 or y1 - y0 < 8:
             continue
-        yy, xx = np.mgrid[y0:y1, x0:x1]
-        d = np.sqrt(((xx - cx) / r) ** 2 + ((yy - cy) / (r * 1.2)) ** 2)
-        reach = np.clip((1.15 - d) / 0.3, 0, 1)  # full over the head, fading out at the neck and shoulders
+        yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+        d = np.sqrt(((xx - cx) / reach) ** 2 + ((yy - cy) / (reach * 1.05)) ** 2)
+        around = np.clip((1.0 - d) / 0.2, 0, 1)
+        chin = np.clip((cy + r * 0.95 - yy) / max(1.0, r * 0.3), 0, 1)  # stops at the chin and neck
         alpha = ctx.alpha[y0:y1, x0:x1] if ctx.alpha is not None else np.ones((y1 - y0, x1 - x0), np.float32)
-        m = (reach * np.clip(alpha, 0, 1) * amount)[..., None]
-        out[y0:y1, x0:x1] = out[y0:y1, x0:x1] * (1 - m) + render(photo[y0:y1, x0:x1]) * m
+        # only the head's own piece of the cut-out (not a raised arm or a teammate inside the circle)
+        n, lab = cv2.connectedComponents(((alpha > 0.5) & (around > 0)).astype(np.uint8))
+        here = lab[int(np.clip(cy - y0, 0, y1 - y0 - 1)), int(np.clip(cx - x0, 0, x1 - x0 - 1))]
+        piece = (lab == here).astype(np.float32) if here > 0 else (alpha > 0.5).astype(np.float32)
+        piece = cv2.GaussianBlur(cv2.dilate(piece, np.ones((3, 3), np.uint8)), (0, 0), 1.0)
+        m = (around * chin * np.minimum(piece, np.clip(alpha, 0, 1)) * amount)[..., None]
+        clean = _hair_cleanup(defringe(photo[y0:y1, x0:x1], alpha), alpha, r)
+        out[y0:y1, x0:x1] = out[y0:y1, x0:x1] * (1 - m) + render(clean) * m
     return out
 
 

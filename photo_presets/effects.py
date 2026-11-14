@@ -1221,4 +1221,4 @@ def neon_drip2(a, p, ctx):
     return out
 
 
-from photo_presets import art, comic, watercolor  # noqa: E402,F401  (registers their steps)
+from photo_presets import art, comic, technique, watercolor  # noqa: E402,F401  (registers their steps)

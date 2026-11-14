@@ -279,6 +279,44 @@ film) so sunlit grass stays gray instead of going white.
 Saving a preset with a starter's name replaces it for you; deleting yours
 brings the starter back. Presets live in `~/.config/photo-crops-presets/presets.json`.
 
+## Illustration presets (drawn on this Mac)
+
+Five groups of four, each listed under its own heading on Make looks:
+
+| Group | Presets |
+|---|---|
+| Watercolor | Ink & Wash · Rainbow Silhouette · Team Splash · Stadium |
+| Anime | Sky Hero · Sunset · Speed Lines · Night Lights |
+| Oil painting | Dark Studio · Golden Hour · Palette Knife · Old Master |
+| Comic book | Hero Burst · Pop Art · Noir Ink · Manga Action |
+| Pencil and ink | Graphite · Charcoal · Colored · Pen and Ink |
+
+How they are made (all free, all on this Mac; no paid service):
+- **Framing:** each frames itself as a 4:5 portrait around the main player
+  and the ball in play; a teammate sliced by the frame edge becomes background.
+- **The players drawn:** Stable Diffusion 1.5 (DreamShaper 8) with a
+  ControlNet line-art model redraws the players, following the photo's own
+  outlines; Real-ESRGAN enlarges the drawing for full-size exports; the ball
+  and hands get a closer, gentler pass. About 30-60 s a photo; the models
+  (about 5 GB) download once to `~/.cache/huggingface`.
+- **Faces are the child's:** the whole head (face, hair, ears, the back of the
+  head) is the photo's own, never redrawn by the AI, rendered in the look's
+  technique at the face's own scale with portrait rules (no black shadow
+  shapes, light hatching, fine brushwork).
+- **Hair:** each head is traced again on its own, close up, so curly hair and
+  afros keep their curls against the background; the cut-out stays tight
+  (it may not grow past the first trace). Edge colors are cleaned of the old
+  background (no light or dark halos), and the drawing stops just inside the
+  outline (no drawn rim).
+- **Techniques** (the `technique` step): oil brushwork that follows the forms
+  with lit impasto, palette knife, graphite and pen cross-hatching driven by
+  tone, charcoal on toned paper, colored pencil, anime cel shading, comic
+  halftone.
+- **Watercolor** (procedural): paper, washes with pooled wet edges,
+  granulation, blooms, splatter and drips; splash or full-sheet backgrounds;
+  the real scene painted loose; pen-and-ink lines; the players blended into
+  the painting (edges lost in places, washes crossing the outline).
+
 ## Assets
 
 Found automatically (change them on the Assets tab):

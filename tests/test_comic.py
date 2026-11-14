@@ -60,3 +60,33 @@ def test_line_detail_calms_texture():
     busy = (comic.line_art(photo, None, 1.0) > 0).mean()
     calm = (comic.line_art(photo, None, 0.3) > 0).mean()
     assert calm < busy / 2 and calm > 0
+
+
+def test_the_hair_pass_refines_only_the_head_and_never_grows(monkeypatch):
+    """Curly hair: the close-up trace opens gaps between curls, but it is used only
+    around the head and never reaches past the first cut-out."""
+    import sys
+    import types
+    from PIL import Image
+    from photo_presets import scene
+    W = H = 400
+    img = Image.new("RGB", (W, H), (90, 140, 60))
+    first = np.zeros((H, W), np.float32)
+    first[100:400, 150:250] = 1  # body and a smooth blob of a head
+    first[60:100, 160:240] = 1
+
+    def fake_remove(crop, session=None, only_mask=True):  # the close-up: a head with gaps between curls
+        w, h = crop.size
+        m = np.zeros((h, w), np.uint8)
+        m[h // 4:, w // 4:3 * w // 4] = 255
+        m[h // 4:h // 4 + 6, w // 2 - 3:w // 2 + 3] = 0  # a gap between curls
+        m[:, :2] = 255  # something far off to the side, not attached
+        return Image.fromarray(m)
+    monkeypatch.setitem(sys.modules, "rembg", types.SimpleNamespace(remove=fake_remove))
+    monkeypatch.setattr(scene, "_session", lambda: None)
+    out = scene.refine_heads(img, first, [(0.5, 0.25, 0.05)])
+    assert out[350, 200] == 1 and out[300, 160] == 1  # the body untouched
+    assert out.max() <= 1 and (out <= np.maximum(first, 0) + 1e-6)[first == 0][: 10].all()
+    grown = (out > 0.05) & (first < 0.05)
+    assert grown.sum() < 0.02 * (first > 0).sum()  # it does not grow past the first cut-out
+    assert out[:, :5].max() == 0  # the far-off piece is not added

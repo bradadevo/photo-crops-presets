@@ -97,6 +97,8 @@ class Engine:
         w, h = p.image.size
         fine = None if p.fine is None else p.fine[box[1]:box[3], box[0]:box[2]]
         q = Prepared(p.path, p.image.crop(box), p.scene.in_crop(box, (w, h)), p.exif, fine)
+        q.scene.matte = whole_figures(q.scene.matte, q.scene.subject_box)
+        q.scene.subject_mask = whole_figures(q.scene.subject_mask, q.scene.subject_box)
         q._auto = (q.scene.matte, q.scene.subject_mask)  # already traced (and fixed) on the whole photo
         q.frame = (box[0] / w, box[1] / h, box[2] / w, box[3] / h)
         return q
@@ -339,14 +341,19 @@ def frame_box(scene, w: int, h: int, aspect: float, fill: float) -> tuple[int, i
     """A box of this shape (width / height) around the players in the play,
     sized so they fill `fill` of its height (and fit its width), inside the
     photo: how an illustrator would frame them."""
-    pb = players_box(scene)
+    pb = scene.subject_box or players_box(scene)  # framed on the main player
     if pb is None:
         return None
     bx0, by0, bx1, by1 = pb[0] * w, pb[1] * h, pb[2] * w, pb[3] * h
-    for x, y, r in scene.balls:  # the ball in play stays in the picture
-        if bx0 - (bx1 - bx0) < x * w < bx1 + (bx1 - bx0) and by0 - (by1 - by0) / 2 < y * h < by1 + (by1 - by0) / 2:
-            bx0, bx1 = min(bx0, (x - r * 1.3) * w), max(bx1, (x + r * 1.3) * w)
-            by0, by1 = min(by0, y * h - r * 1.3 * w), max(by1, y * h + r * 1.3 * w)
+    def gap(x, y):  # how far a ball is outside the player's box, in pixels
+        dx = max(bx0 - x * w, 0, x * w - bx1)
+        dy = max(by0 - y * h, 0, y * h - by1)
+        return (dx * dx + dy * dy) ** 0.5
+    near = [b for b in scene.balls if gap(b[0], b[1]) <= 0.5 * (by1 - by0)]
+    if near:  # the ball in play (the nearest, if it is close) stays in the picture
+        x, y, r = min(near, key=lambda b: gap(b[0], b[1]))
+        bx0, bx1 = min(bx0, (x - r * 1.3) * w), max(bx1, (x + r * 1.3) * w)
+        by0, by1 = min(by0, y * h - r * 1.3 * w), max(by1, y * h + r * 1.3 * w)
     ch = (by1 - by0) / fill
     cw = ch * aspect
     if cw < (bx1 - bx0) / 0.92:
@@ -359,6 +366,34 @@ def frame_box(scene, w: int, h: int, aspect: float, fill: float) -> tuple[int, i
     x0 = min(max((bx0 + bx1) / 2 - cw / 2, 0), w - cw)
     y0 = min(max((by0 + by1) / 2 - ch * 0.53, 0), h - ch)  # a little more room above the head
     return int(x0), int(y0), int(x0 + cw), int(y0 + ch)
+
+
+def whole_figures(mask: np.ndarray | None, keep_box) -> np.ndarray | None:
+    """A framed cut-out without the figures the frame slices through (a
+    teammate half out of the picture), so they become background instead of
+    half a person; the main player always stays."""
+    if mask is None:
+        return None
+    m = mask.astype(np.float32) / (255.0 if mask.dtype == np.uint8 else 1.0)
+    h, w = m.shape
+    n, lab = cv2.connectedComponents((m > 0.5).astype(np.uint8))
+    if n <= 1:
+        return mask
+    keep_lab = set()
+    if keep_box:
+        x0, y0, x1, y1 = (int(np.clip(keep_box[0] * w, 0, w - 1)), int(np.clip(keep_box[1] * h, 0, h - 1)),
+                          int(np.clip(keep_box[2] * w, 1, w)), int(np.clip(keep_box[3] * h, 1, h)))
+        keep_lab = set(np.unique(lab[y0:y1, x0:x1]).tolist()) - {0}
+    edge = 2
+    cut = set(np.unique(np.concatenate([lab[:, :edge].ravel(), lab[:, -edge:].ravel(), lab[:edge].ravel()])).tolist())
+    drop = (cut - keep_lab) - {0}
+    if not drop:
+        return mask
+    gone = np.isin(lab, list(drop))
+    gone = cv2.dilate(gone.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)  # their soft edges too
+    out = mask.copy()
+    out[gone] = 0
+    return out
 
 
 def to_frame(frame, x: float, y: float) -> tuple[float, float]:

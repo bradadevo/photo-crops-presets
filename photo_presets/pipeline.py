@@ -32,6 +32,8 @@ skin takes the look's brightness but keeps its hue.
 """
 
 import importlib.util
+import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -43,6 +45,7 @@ from PIL import Image
 from photo_presets.assets import Library
 from photo_presets.scene import Scene, resized
 
+TIMING = bool(os.environ.get("ALLPRO_TIMING"))  # print how long each step takes
 PLUGIN_DIR = Path.home() / ".config" / "photo-crops-presets" / "plugins"
 
 
@@ -334,11 +337,15 @@ def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int):
             continue
         params = {**operation.defaults, **step}
         ctx.seed = seed * 1000 + i
+        started = time.perf_counter()
         try:
             out = operation.fn(arr, params, ctx)
         except (MissingAsset, KeyError) as e:
             ctx.notes.append(f"{operation.label} skipped: {e}")
             continue
+        took = time.perf_counter() - started
+        if TIMING:
+            print(f"  step {operation.name}: {took:.1f}s", flush=True)
         if operation.protect and mask is not None:
             # Faces get the step's overall tone and color change but none of its
             # texture, so they stay clean without standing out as patches

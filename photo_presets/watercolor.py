@@ -544,3 +544,64 @@ def wc_finish(a, p, ctx: Context):
     rng = np.random.default_rng(ctx.seed + 51)
     tooth = fractal(rng, h, w, max(2.0, max(h, w) * 0.0025), 3) - 0.5
     return np.clip(a * (1 - float(p["grain"]) * 0.07 * tooth)[..., None], 0, 1).astype(np.float32)
+
+
+@op("wc_integrate", cutout=True, label="Watercolor: blend the players into the painting", colors="#2f6db3,#8fc1e8",
+    lost=1.0, cross=1.0, splatter=0.6)
+def wc_integrate(a, p, ctx: Context):
+    """The painted players made part of the painting, as a watercolorist leaves
+    them: some outer edges lost into the paper (ragged, never on the face),
+    washes of the background colors crossing the outline, and drops flicked over
+    them."""
+    alpha = _mask(ctx)
+    h, w = alpha.shape
+    rng = np.random.default_rng(ctx.seed + 71)
+    pal = shades(p["colors"], 9)
+    g = grain(rng, h, w)
+    x0, y0, x1, y1, ph = _figure(alpha)
+    out = a.copy()
+    inside = (alpha > 0.5).astype(np.float32)
+    faces = np.zeros((h, w), np.float32)
+    for fx, fy, fr in ctx.scene.faces:  # faces stay untouched
+        cv2.circle(faces, (int(fx * w), int(fy * h - fr * w * 0.1)), int(fr * w * 1.3), 1.0, -1)
+    faces = cv2.GaussianBlur(faces, (0, 0), max(2.0, ph * 0.02))
+    if float(p["lost"]) > 0:
+        # how far inside the outline each pixel is; edges are lost where noise says so, more at the bottom
+        depth = cv2.distanceTransform(inside.astype(np.uint8), cv2.DIST_L2, 5) / ph
+        noise = fractal(rng, h, w, ph * 0.12, 4)
+        low = np.clip((np.arange(h, dtype=np.float32)[:, None] - y0) / max(ph, 1), 0, 1)  # 0 top, 1 feet
+        # only in patches (where the noise is high), more toward the feet; never a rim all round
+        reach = 0.06 * np.clip(noise - 0.58, 0, 1) * 2.4 * (0.3 + low) * float(p["lost"])
+        lost = np.clip((reach - depth) / np.maximum(reach, 1e-4), 0, 1) * inside * (reach > 0.004)
+        lost = ragged(rng, lost, 0.35, max(2.0, ph * 0.01)) * lost.astype(bool) * (1 - faces)
+        # lost into what is around them (the painted background), not into a white outline
+        bg = (alpha < 0.05).astype(np.float32)
+        sigma = max(3.0, ph * 0.03)
+        around = cv2.GaussianBlur(a * bg[..., None], (0, 0), sigma) / np.maximum(cv2.GaussianBlur(bg, (0, 0), sigma),
+                                                                                 1e-3)[..., None]
+        out = out * (1 - lost[..., None] * 0.85) + around * (lost[..., None] * 0.85)
+    if float(p["cross"]) > 0:
+        ring = cv2.morphologyEx(inside.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+        ys, xs = np.nonzero(ring)
+        for _ in range(int(14 * float(p["cross"]))) if len(xs) else []:
+            k = rng.integers(len(xs))
+            r = ph * rng.uniform(0.04, 0.1)
+            b = blob(rng, h, w, xs[k], ys[k], r, rough=0.6, stretch=rng.uniform(0.8, 2.0), angle=rng.uniform(0, 180))
+            if b is None:
+                continue
+            shape, at = b
+            d = wash(rng, shape, rng.uniform(0.15, 0.35), 1.0, 0.5, 0.7, g[at]) * (1 - faces[at])
+            out[at] = glaze(out[at], pal[rng.integers(len(pal))], d)
+    if float(p["splatter"]) > 0:
+        for _ in range(int(90 * float(p["splatter"]))):
+            x, y = rng.uniform(x0, x1), rng.uniform(y0 + ph * 0.25, y1)
+            if inside[int(y), int(x)] < 0.5 or faces[int(y), int(x)] > 0.2:
+                continue
+            r = ph * rng.uniform(0.002, 0.008) * (1 + rng.pareto(3.0))
+            b = blob(rng, h, w, x, y, r, rough=0.2)
+            if b is None:
+                continue
+            shape, at = b
+            out[at] = paint(out[at], pal[rng.integers(len(pal))], wash(rng, shape, rng.uniform(0.5, 0.85), 0.0, 0.1, 0.2,
+                                                                     g[at]), shape, 0.4)
+    return np.clip(out, 0, 1).astype(np.float32)

@@ -65,6 +65,13 @@ DEFAULTS = {
     # quick adjustments, over the finished look (the Fine-tune sliders on Make looks)
     # drawn by AI (comic_redraw), and framing the players for illustration looks
     "cr_on": False, "cr_strength": 0.7, "cr_lines": 0.9, "cr_spill": 0.0, "cr_seed": 7, "cr_prompt": "",
+    "cr_model": "Lykon/dreamshaper-8", "cr_real_face": 1.0, "cr_face_style": "paint", "cr_detail": 0.5,
+    # watercolor and illustration backgrounds
+    "wcs_on": False, "wcs_colors": "#6a4fb3,#e0a52b,#2c7a4b,#3fb6a8,#e8577a,#2b3a8c,#f2c94c,#c2185b,#8bc34a",
+    "wcb_on": False, "wcb_style": "splash", "wcb_colors": "#2f6db3,#8fc1e8",
+    "wcsc_on": False, "wci_on": False, "wci_amount": 0.65, "wcf_on": False,
+    "ab_on": False, "ab_kind": "speedlines", "ab_colors": "#ffffff,#eef3fa", "ab_ink": "#1b1b1b",
+    "tq_on": False, "tq_kind": "oil", "tq_where": "all", "wcg_on": False, "wcg_colors": "#2f6db3,#8fc1e8",
     "fr_on": False, "fr_fill": 0.8,
     "adj_strength": 100, "adj_subject": 0.0, "adj_background": 0.0, "adj_warmth": 0.0, "adj_auto": False,
 }
@@ -123,9 +130,27 @@ def to_recipe(v: dict) -> dict:
                   "shading": v["pa_shading"], "glow": v["pa_glow"], "outline": v["pa_outline"],
                   "background": v["pa_bg"], "background_amount": v["pa_bg_amount"],
                   "crisp": 1.0 if v["pa_crisp"] else 0.0, "smooth": 1.0 if v["pa_smooth"] else 0.0})
+    if v["wcs_on"]:
+        s.append({"op": "wc_silhouette", "colors": v["wcs_colors"]})
+    if v["wcb_on"]:
+        s.append({"op": "wc_backdrop", "style": v["wcb_style"], "colors": v["wcb_colors"]})
+    if v["wcsc_on"]:
+        s.append({"op": "wc_scene"})
+    if v["ab_on"]:
+        s.append({"op": "art_backdrop", "kind": v["ab_kind"], "colors": v["ab_colors"], "ink": v["ab_ink"]})
     if v["cr_on"]:
         s.append({"op": "comic_redraw", "strength": v["cr_strength"], "lines": v["cr_lines"], "spill": v["cr_spill"],
-                  "seed": int(v["cr_seed"]), "prompt": (v["cr_prompt"] or "").strip()})
+                  "seed": int(v["cr_seed"]), "prompt": (v["cr_prompt"] or "").strip(), "model": v["cr_model"],
+                  "real_face": v["cr_real_face"], "face_style": v["cr_face_style"], "detail": v["cr_detail"],
+                  "face_pass": 0.3})
+    if v["tq_on"]:
+        s.append({"op": "technique", "kind": v["tq_kind"], "where": v["tq_where"]})
+    if v["wci_on"]:
+        s.append({"op": "wc_ink", "amount": v["wci_amount"]})
+    if v["wcg_on"]:
+        s.append({"op": "wc_integrate", "colors": v["wcg_colors"]})
+    if v["wcf_on"]:
+        s.append({"op": "wc_finish"})
     if v["nl_on"]:
         s.append({"op": "neon_lineart", "darkness": v["nl_darkness"], "lines": v["nl_lines"], "detail": v["nl_detail"],
                   "rim": v["nl_rim"], "glow": v["nl_glow"]})
@@ -274,7 +299,25 @@ def from_recipe(recipe: dict) -> dict:
                      pa_crisp=float(g("crisp", 0.0)) >= 0.5, pa_smooth=float(g("smooth", 0.0)) >= 0.5)
         elif op == "comic_redraw":
             v.update(cr_on=True, cr_strength=g("strength", 0.7), cr_lines=g("lines", 0.9), cr_spill=g("spill", 0.0),
-                     cr_seed=g("seed", 7), cr_prompt=g("prompt", ""))
+                     cr_seed=g("seed", 7), cr_prompt=g("prompt", ""), cr_model=g("model", "Lykon/dreamshaper-8"),
+                     cr_real_face=g("real_face", 0.0), cr_face_style=g("face_style", "paint"), cr_detail=g("detail", 1.0))
+        elif op == "wc_silhouette":
+            v.update(wcs_on=True, wcs_colors=g("colors", v["wcs_colors"]))
+        elif op == "wc_backdrop":
+            v.update(wcb_on=True, wcb_style=g("style", "splash"), wcb_colors=g("colors", v["wcb_colors"]))
+        elif op == "wc_scene":
+            v.update(wcsc_on=True)
+        elif op == "wc_ink":
+            v.update(wci_on=True, wci_amount=g("amount", 0.65))
+        elif op == "wc_finish":
+            v.update(wcf_on=True)
+        elif op == "technique":
+            v.update(tq_on=True, tq_kind=g("kind", "oil"), tq_where=g("where", "all"))
+        elif op == "wc_integrate":
+            v.update(wcg_on=True, wcg_colors=g("colors", v["wcg_colors"]))
+        elif op == "art_backdrop":
+            v.update(ab_on=True, ab_kind=g("kind", "speedlines"), ab_colors=g("colors", v["ab_colors"]),
+                     ab_ink=g("ink", v["ab_ink"]))
         elif op == "neon_lineart":
             v.update(nl_on=True, nl_darkness=g("darkness", 0.6), nl_lines=g("lines", 1.0), nl_detail=g("detail", 0.6),
                      nl_rim=g("rim", 1.0), nl_glow=g("glow", 0.5))
@@ -533,6 +576,52 @@ def components(ids: dict) -> dict:
                     slider("cr_spill", 0, 0.08, "Paint past the outline", step=0.005,
                            info="Painted or sketched edges on a plain background.")
                     slider("cr_seed", 1, 99, "Drawing number", step=1, info="Try another drawing of the same photo.")
+            with when("cr_on"):
+                with gr.Row():
+                    slider("cr_real_face", 0, 1, "Real face from the photo",
+                           info="1 = the face, hair and ears are the photo's, in the look's technique: exactly the child.")
+                    drop("cr_face_style", [("Painted", "paint"), ("Cel shaded (anime, comic)", "cel"),
+                                           ("Pencil", "graphite")], "Face technique")
+                    slider("cr_detail", 0.2, 1, "Line detail followed", info="Lower: the model draws more freely.")
+                c["cr_model"] = gr.Textbox(d["cr_model"], label="Drawing model (advanced)",
+                                           info="A Stable Diffusion 1.5 model on Hugging Face; downloaded once.")
+            check("wcs_on", "Watercolor silhouette", "The players as a silhouette of bright watercolor blooms, with "
+                  "splatter, on paper (no faces: a wall-print style).")
+            with when("wcs_on"):
+                c["wcs_colors"] = gr.Textbox(d["wcs_colors"], label="Colors (comma separated)")
+            check("wcb_on", "Watercolor background", "Paint behind the players in their colors: a splash around "
+                  "them, or the whole sheet washed.")
+            with when("wcb_on"):
+                with gr.Row():
+                    drop("wcb_style", [("Splash, fading to white paper", "splash"), ("Whole sheet", "full")], "Style")
+                    c["wcb_colors"] = gr.Textbox(d["wcb_colors"], label="Colors (team colors, comma separated)")
+            check("wcsc_on", "Watercolor scene", "The photo's own background painted loosely, dissolving into "
+                  "paper, with drips.")
+            check("wci_on", "Pen and ink lines", "Sketchy ink lines over the players (after the drawing).")
+            with when("wci_on"):
+                slider("wci_amount", 0, 1, "Ink")
+            check("wcg_on", "Blend the players into the painting", "Edges lost into the paint in places, washes "
+                  "crossing the outline, drops over them (never on faces).")
+            with when("wcg_on"):
+                c["wcg_colors"] = gr.Textbox(d["wcg_colors"], label="Wash colors (comma separated)")
+            check("wcf_on", "Watercolor paper finish", "One paper grain over the whole picture.")
+            check("tq_on", "Artist technique", "Oil brushwork, graphite, charcoal, pen and ink, colored pencil, anime "
+                  "cel shading or comic halftone over the picture; faces drawn at their own scale so they stay the "
+                  "child's.")
+            with when("tq_on"):
+                with gr.Row():
+                    drop("tq_kind", [("Oil brushwork", "oil"), ("Palette knife", "knife"), ("Graphite pencil", "graphite"),
+                                     ("Charcoal", "charcoal"), ("Pen and ink", "pen"),
+                                     ("Colored pencil", "colored_pencil"), ("Anime cel shading", "cel"),
+                                     ("Comic halftone", "comic")], "Technique")
+                    drop("tq_where", [("The whole picture", "all"), ("Only the players", "players")], "Where")
+            check("ab_on", "Illustration background", "Speed lines, halftone dots, a sunset, night lights or paper.")
+            with when("ab_on"):
+                with gr.Row():
+                    drop("ab_kind", [("Speed lines", "speedlines"), ("Halftone dots", "halftone"),
+                                     ("Sunset sky", "sunset"), ("Night lights", "bokeh"), ("Paper", "paper")], "Kind")
+                    c["ab_colors"] = gr.Textbox(d["ab_colors"], label="Colors (comma separated)")
+                    color("ab_ink", "Ink / dots color")
             check("fr_on", "Frame the players like an illustration", "Crops to a 4:5 portrait around the players "
                   "before the look, so they fill the picture.")
             with when("fr_on"):

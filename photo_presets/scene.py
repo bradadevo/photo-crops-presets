@@ -36,7 +36,9 @@ MATTE_MODEL = "birefnet-general"
 # The cut-out is traced on the whole picture when this small; on bigger ones
 # around the players, padded, at this many pixels on the long edge
 WHOLE_FRAME_PIXELS = 4_000_000
-MATTE_EDGE = 2048
+MATTE_EDGE = 3072  # high enough to keep the hair pass's detail (see refine_heads)
+HEAD_EDGE = 1024  # each head is traced again on its own, at this size
+HEAD_REACH = 1.8  # the head crop, in face radii around it
 # Pieces of the traced outline count as the players when this much of them is
 # inside YOLO's outlines of the players in the play
 ATTACHED = 0.5
@@ -66,6 +68,7 @@ class Scene:
     # The players' precise cut-out (alpha 0-1), set when a look needs layers
     matte: np.ndarray | None = field(default=None, repr=False)
     hands: list[tuple[float, float, float]] = field(default_factory=list)  # the players in the play: x, y, radius
+    subject_box: tuple[float, float, float, float] | None = None  # the main player (shares of the image)
 
     def in_crop(self, box: Box, size: tuple[int, int]) -> "Scene":
         """The same scene inside a crop of the image it was found in."""
@@ -92,8 +95,13 @@ class Scene:
                         int(x0 / w * mw):max(int(x0 / w * mw) + 1, int(x1 / w * mw))]
 
         feet = move(*self.feet) if self.feet else None
+        sb = None
+        if self.subject_box:
+            a0, b0 = move(self.subject_box[0], self.subject_box[1])
+            a1, b1 = move(self.subject_box[2], self.subject_box[3])
+            sb = (a0, b0, a1, b1)
         return Scene(keep(self.faces), keep(self.balls), feet, min(1.0, self.subject_height * h / ch),
-                     cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands))
+                     cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands), sb)
 
 
 def resized(mask: np.ndarray | None, h: int, w: int) -> np.ndarray | None:
@@ -125,6 +133,8 @@ class Prepared:
                 matte = None
                 if self.scene.subject_mask is not None:
                     matte = cutout(self.image, self.scene.subject_mask)
+                    if matte is not None:
+                        matte = refine_heads(self.image, matte, self.scene.faces)
                     matte = with_balls(matte, self.scene.balls) if matte is not None else None
                 self._auto = (matte, self.scene.subject_mask)
             self.scene.matte, self.scene.subject_mask = self._fixed()
@@ -165,6 +175,51 @@ class Prepared:
                 matte = matte * (1 - piece)
                 outline &= ~part
         return matte.astype(np.float32), (outline.astype(np.uint8) * 255 if outline.any() else None)
+
+
+def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, float, float]]) -> np.ndarray:
+    """Each head traced again on its own, close up, so curly hair and afros keep
+    their detail against the background (the gaps between curls open up). The
+    new edge is used only around the head, and may not grow past the first
+    cut-out, so no background object joins the player."""
+    from rembg import remove
+    W, H = img.size
+    mh, mw = matte.shape
+    out = matte.copy()
+    for fx, fy, fr in faces:
+        r = fr * W
+        if r < 6:
+            continue
+        cx, cy = fx * W, fy * H - r * 0.25  # a little up: hair
+        half = r * HEAD_REACH
+        x0, y0, x1, y1 = int(max(0, cx - half)), int(max(0, cy - half)), int(min(W, cx + half)), int(min(H, cy + half))
+        if x1 - x0 < 16 or y1 - y0 < 16:
+            continue
+        crop = img.crop((x0, y0, x1, y1))
+        crop.thumbnail((HEAD_EDGE, HEAD_EDGE))
+        fine = np.asarray(remove(crop, session=_session(), only_mask=True), np.float32) / 255
+        X0, Y0 = int(x0 / W * mw), int(y0 / H * mh)
+        X1, Y1 = max(X0 + 1, int(x1 / W * mw)), max(Y0 + 1, int(y1 / H * mh))
+        fine = cv2.resize(fine, (X1 - X0, Y1 - Y0), interpolation=cv2.INTER_LINEAR)
+        old = out[Y0:Y1, X0:X1]
+        # only the piece holding the face, and never past the first cut-out (grown a hair's width)
+        n, lab = cv2.connectedComponents((fine > 0.3).astype(np.uint8))
+        fcx, fcy = int((fx * W - x0) / (x1 - x0) * (X1 - X0)), int((fy * H - y0) / (y1 - y0) * (Y1 - Y0))
+        here = lab[min(max(fcy, 0), Y1 - Y0 - 1), min(max(fcx, 0), X1 - X0 - 1)]
+        if here == 0:
+            continue
+        piece = cv2.dilate((lab == here).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(np.float32)
+        grow = max(3, int((X1 - X0) * 0.02)) | 1
+        allowed = cv2.dilate((old > 0.05).astype(np.uint8), np.ones((grow, grow), np.uint8)).astype(np.float32)
+        fine = fine * piece * allowed
+        # used around the head, blending back to the first cut-out toward the crop's edges and below the chin
+        yy, xx = np.mgrid[0:Y1 - Y0, 0:X1 - X0].astype(np.float32)
+        d = np.sqrt(((xx - (X1 - X0) / 2) / ((X1 - X0) / 2)) ** 2 + ((yy - (Y1 - Y0) / 2) / ((Y1 - Y0) / 2)) ** 2)
+        zone = np.clip((1.0 - d) / 0.3, 0, 1)
+        chin = int((fy * H + r * 0.9 - y0) / (y1 - y0) * (Y1 - Y0))
+        zone[max(0, chin):] *= np.clip(1 - (np.arange(max(0, chin), Y1 - Y0) - chin) / max(1, (Y1 - Y0) * 0.1), 0, 1)[:, None]
+        out[Y0:Y1, X0:X1] = old * (1 - zone) + fine * zone
+    return out
 
 
 def with_balls(matte: np.ndarray, balls: list[tuple[float, float, float]]) -> np.ndarray:
@@ -315,7 +370,9 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
     subject = plan.subject
     feet = ((subject.box[0] + subject.box[2]) / 2 / w, subject.box[3] / h) if subject else None
     height = (subject.height / h) if subject else 0.5
-    return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size), hands=hands)
+    sb = (subject.box[0] / w, subject.box[1] / h, subject.box[2] / w, subject.box[3] / h) if subject else None
+    return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size), hands=hands,
+                 subject_box=sb)
 
 
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,
