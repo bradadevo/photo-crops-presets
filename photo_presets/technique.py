@@ -168,7 +168,7 @@ def _render(a: np.ndarray, kind: str, size: float, rng: np.random.Generator, det
         relief = (8 if portrait else 14) if kind == "oil" else (10 if portrait else 22)
         busy = cv2.GaussianBlur(np.abs(cv2.Laplacian(cv2.GaussianBlur(_lum(a), (0, 0), 2.0), cv2.CV_32F)), (0, 0),
                                 size * 0.02)
-        busy = 0.35 + 0.65 * np.clip(busy / max(float(np.percentile(busy, 90)), 1e-4), 0, 1)  # calmer on flat areas
+        busy = 0.12 + 0.88 * np.clip(busy / max(float(np.percentile(busy, 90)), 1e-4), 0, 1)  # calm on flat areas
         light = np.clip(1 + (gx * -0.6 + gy * -0.8) * relief * busy, 0.9, 1.1)  # raised paint, lit from the top left
         out = paint * light[..., None]
         if kind == "knife":
