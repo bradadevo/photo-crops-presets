@@ -11,19 +11,24 @@ It serves two ways of working:
     uv run allprophoto
 """
 
+import base64
+import html
+import io
 import json
 import re
 import shutil
 import subprocess
 import tempfile
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 from pathlib import Path
 
 import gradio as gr
 
 from photo_crops.ui import choose_folder
-from photo_presets import deliver, engine, lightroom, pipeline, presets, presetform, reel
+from photo_presets import deliver, engine, lightroom, pipeline, presets, presetform, reel, timing
 from photo_presets.assets import Library, Sources
 from photo_presets.engine import CROPS, Engine
 from photo_presets.scene import Fix
@@ -111,8 +116,9 @@ def _single_preview(path: Path) -> str | None:
     return _PREVIEWED[key]
 
 
-def make_looks(files, folder, mode, count, seed, crop_label, run_on, try_photo, show_cut, *groups,
-               progress=gr.Progress()):
+def make_looks(files, folder, mode, count, seed, crop_label, run_on, try_photo, show_cut, *groups):
+    """Makes the looks one by one, showing them on the progress card as they come
+    (see _card); everything else in step 4 is filled in at the end."""
     paths = _inputs(files, folder)
     if not paths:
         raise gr.Error("Step 1: add photos, or choose a folder with photos.")
@@ -121,23 +127,120 @@ def make_looks(files, folder, mode, count, seed, crop_label, run_on, try_photo, 
     if len(paths) > 1 and run_on == ONE:
         trial = [str(q) for q in paths]
         paths = [q for q in paths if str(q) == try_photo][:1] or paths[:1]
-
-    def tick(done, total, title):
-        progress(done / max(total, 1), desc=f"{done}/{total} {title}")
-
+    e = eng()
     if mode == RANDOM:
-        seed_value = None if seed in (None, "") else int(seed)
-        results = eng().explore(paths, int(count), crop, seed_value, tick)
+        chosen = []
+        jobs = e.explore_jobs(paths, int(count), None if seed in (None, "") else int(seed))
     else:
         available = presets.load_all()
         chosen = [n for n in _picked(groups) if n in available]
         if not chosen:
             raise gr.Error("Step 2: tick at least one preset (or press Select all).")
-        results = eng().presets(paths, chosen, crop, progress=tick)
-        if len(paths) > 1:
-            # a batch reads look by look: every photo in one look, then the next look
-            results.sort(key=lambda r: chosen.index(r.name))
-    return _shown(results, trial, show_cut)
+        jobs = e.preset_jobs(paths, chosen)
+    results = yield from _stream(jobs, crop)
+    if len(paths) > 1 and chosen:
+        # a batch reads look by look: every photo in one look, then the next look
+        results.sort(key=lambda r: chosen.index(r.name))
+    yield _shown(results, trial, show_cut) + (HIDE_CARD,)
+
+
+SHOWN = 19  # how many things step 4 shows (_shown); the progress card comes after them
+HIDE_CARD = gr.update(value="", visible=False)
+
+
+def _stream(jobs, crop):
+    """Makes the jobs' looks one by one (in a worker, so the card can update every
+    second), yielding the progress card; returns the results. Each look's time is
+    learned for its preset, unless it included getting the photo ready or loading
+    the models."""
+    e = eng()
+    waiting = SHOWN
+    tiles = [{"title": j.title, "look": j.recipe.get("name", "Random look"), "state": "wait"} for j in jobs]
+    expect = [timing.seconds(j.recipe.get("name", ""), j.recipe) for j in jobs]
+    results, took = [], []
+    clean = []  # (took, expected) of looks with nothing one-off in them: how this run's pace compares
+    started = time.perf_counter()
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            for i, job in enumerate(jobs):
+                extra = 0.0
+                fresh = not e.is_prepared(job.path, crop)
+                if fresh:
+                    extra += timing.PHOTO_READY
+                if pipeline.needs_cutout(job.recipe) and not e.is_cut_out(job.path, crop):
+                    extra += timing.CUT_OUT
+                    fresh = True  # not this look's own time
+                loading = timing.uses_ai(job.recipe) and not timing.models_loaded()
+                if loading:
+                    extra += timing.MODEL_LOAD
+                tiles[i]["state"] = "now"
+                t0 = time.perf_counter()
+                future = pool.submit(e.look, job, crop)
+                while True:
+                    try:
+                        r = future.result(timeout=1.0)
+                        break
+                    except TimeoutError:
+                        pass
+                    spent = time.perf_counter() - t0
+                    tiles[i]["pct"] = min(95, int(100 * spent / (expect[i] + extra)))
+                    tiles[i]["note"] = "loading the AI models" if loading and not timing.models_loaded() else ""
+                    yield (gr.skip(),) * waiting + (_card(tiles, expect, took, clean, i, spent, extra, started),)
+                spent = time.perf_counter() - t0
+                if not fresh and not loading:
+                    timing.learn(job.recipe.get("name", ""), spent)  # random looks have no name: not kept
+                    clean.append((spent, expect[i]))
+                took.append(spent)
+                results.append(r)
+                tiles[i].update(state="done", thumb=_thumb(r.after), secs=spent)
+                yield (gr.skip(),) * waiting + (_card(tiles, expect, took, clean, i + 1, 0.0, 0.0, started),)
+    except Exception:
+        yield (gr.skip(),) * waiting + (HIDE_CARD,)
+        raise
+    return results
+
+
+def _thumb(img) -> str:
+    """A small JPEG of a result for the progress card, as a data URL."""
+    small = img.copy()
+    small.thumbnail((180, 180))
+    buf = io.BytesIO()
+    small.convert("RGB").save(buf, "JPEG", quality=80)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _card(tiles, expect, took, clean, current, spent, extra, started):
+    """The floating progress card: one small tile per look (waiting, being made with
+    its %, or done with its picture), how many are done and about how long is left.
+    The time left is the looks' times, scaled by how this run is going so far (only
+    looks without one-off work, like getting a photo ready, count toward the pace)."""
+    done = len(took)
+    pace = min(2.5, max(0.5, sum(t for t, _ in clean) / max(1e-6, sum(x for _, x in clean)))) if clean else 1.0
+    left = max(0.0, (expect[current] + extra) * pace - spent) if current < len(tiles) else 0.0
+    left += sum(expect[current + 1:]) * pace
+    whole = 100 * (done + (tiles[current].get("pct", 0) / 100 if current < len(tiles) else 0)) / len(tiles)
+    cells = []
+    for t in tiles:
+        tip = html.escape(t["title"], quote=True)
+        name = html.escape(t["look"])
+        if t["state"] == "done":
+            cells.append(f"<div class='qt done' title='{tip}'><img src='{t['thumb']}' alt='{tip}'>"
+                         f"<span class='qs'>{round(t['secs'])} s</span></div>")
+        elif t["state"] == "now":
+            note = f"<span class='qn'>{html.escape(t['note'])}</span>" if t.get("note") else ""
+            cells.append(f"<div class='qt now' title='{tip}'><span class='qp'>{t.get('pct', 0)}%</span>"
+                         f"<span class='ql'>{name}</span>{note}"
+                         f"<i style='width:{t.get('pct', 0)}%'></i></div>")
+        else:
+            cells.append(f"<div class='qt wait' title='{tip}'><span class='ql'>{name}</span></div>")
+    elapsed = time.perf_counter() - started
+    status = (f"{done} of {len(tiles)} done · {timing.say(left)} left" if left >= 1
+              else f"{done} of {len(tiles)} done · finishing")
+    return gr.update(visible=True, value=(
+        f"<div class='q-card'><div class='q-head'><b>Making looks</b><span>{status}</span></div>"
+        f"<div class='q-bar'><i style='width:{whole:.0f}%'></i></div>"
+        f"<div class='q-grid'>{''.join(cells)}</div>"
+        f"<div class='q-foot'>{timing.say(elapsed)} so far · results open in step 4 when all are done</div></div>"))
 
 
 def _shown(results, trial, show_cut, index=0):
@@ -229,18 +332,14 @@ def copy_to_look(results, thumbs, index, strength, subject, background, warmth, 
     return results, thumbs, thumbs
 
 
-def use_on_all(results, index, trial, show_cut, progress=gr.Progress()):
+def use_on_all(results, index, trial, show_cut):
     """The selected look (with its fine-tuning) on every photo from step 1."""
     if not results or not trial:
         raise gr.Error("Try looks on one photo first.")
     r = results[index]
-    paths = [Path(q) for q in trial]
-
-    def tick(done, total, title):
-        progress(done / max(total, 1), desc=f"{done}/{total} {title}")
-
-    out = eng().preset(paths, r.name, r.crop, recipe=r.recipe, progress=tick)
-    return _shown(out, [], show_cut)
+    jobs = [engine.Job(Path(q), dict(r.recipe, name=r.name), i) for i, q in enumerate(trial)]
+    out = yield from _stream(jobs, r.crop)
+    yield _shown(out, [], show_cut) + (HIDE_CARD,)
 
 
 # Fixing the cut-out ------------------------------------------------------------------
@@ -313,7 +412,8 @@ def remake_photo(results, thumbs, index, progress=gr.Progress()):
 def picker_choices() -> list[list[tuple[str, str]]]:
     """Each group's presets as (name — description, name)."""
     all_presets = presets.load_all()
-    return [[(f"{n} — {presets.describe(n, all_presets[n])}".rstrip(" —"), n) for n in names]
+    return [[(f"{n} — {presets.describe(n, all_presets[n])}".rstrip(" —")
+              + f" · ⏱ {timing.say(timing.seconds(n, all_presets[n]))} a photo", n) for n in names]
             for names in presets.grouped(all_presets).values()]
 
 
@@ -448,15 +548,19 @@ def toggle_mode(mode):
 
 def preset_estimate(files, folder, run_on, *groups):
     """How many looks the ticked presets make, and about how long they take."""
-    n = len(_picked(groups))
+    names = _picked(groups)
+    n = len(names)
     photos = len(_inputs(files, folder)) or 1
     if photos > 1 and run_on == ONE:
         photos = 1
     looks = n * photos
     if not looks:
         return "No presets ticked yet."
-    seconds = looks * 2 + photos * 10
-    when = f"about {seconds} seconds" if seconds < 90 else f"about {round(seconds / 60)} minutes"
+    available = presets.load_all()
+    each = [(m, available[m]) for m in names if m in available]
+    when = timing.say(timing.run_seconds(each * photos, photos))
+    if any(timing.uses_ai(r) for _, r in each) and not timing.models_loaded():
+        when += " (including about a minute to load the AI models, once per session)"
     trying = " (on one photo)" if photos == 1 and run_on == ONE else ""
     return f"**{n}** preset(s) × **{photos}** photo(s){trying} = **{looks}** looks, {when}."
 
@@ -789,6 +893,32 @@ CSS = """
 .picker .wrap { flex-direction: column; gap: 0.25rem !important; }
 .picker .wrap label { width: 100%; padding: 0.35rem 0.6rem !important; font-size: 0.86rem; line-height: 1.3; }
 .picker-groups .label-wrap span { font-weight: 650; }
+/* the progress card: pinned to the corner, so a run can be watched without scrolling */
+.q-card { position: fixed; right: 18px; bottom: 18px; z-index: 1000; width: min(440px, calc(100vw - 32px));
+    max-height: 62vh; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.85rem 0.95rem;
+    background: var(--background-fill-primary); border: 1px solid var(--border-color-primary);
+    border-radius: 14px; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22); font-size: 0.85rem; }
+.q-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; }
+.q-head b { font-size: 0.98rem; }
+.q-head span, .q-foot { color: var(--body-text-color-subdued); }
+.q-foot { font-size: 0.78rem; }
+.q-bar { height: 5px; border-radius: 3px; background: var(--background-fill-secondary); overflow: hidden; }
+.q-bar i, .qt.now i { display: block; height: 100%; background: var(--color-accent); transition: width 0.9s linear; }
+.q-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px;
+    overflow-y: auto; padding-right: 2px; }
+.qt { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    background: var(--background-fill-secondary); border: 1px solid var(--border-color-primary); }
+.qt img { width: 100%; height: 100%; object-fit: cover; }
+.qt .ql { font-size: 0.68rem; line-height: 1.15; padding: 0 4px; color: var(--body-text-color-subdued);
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.qt.wait { opacity: 0.55; }
+.qt.now { border-color: var(--color-accent); }
+.qt.now .qp { font-size: 1rem; font-weight: 700; color: var(--color-accent); }
+.qt.now .qn { font-size: 0.6rem; color: var(--body-text-color-subdued); }
+.qt.now i { position: absolute; left: 0; bottom: 0; height: 4px; }
+.qt .qs { position: absolute; right: 3px; bottom: 3px; font-size: 0.62rem; padding: 0 4px; border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6); color: white; }
 """
 
 
@@ -807,6 +937,7 @@ def build() -> gr.Blocks:
     with gr.Blocks(title="AllProPhoto") as demo:
         results = gr.State([])
         selected = gr.State(0)
+        card = gr.HTML("", visible=False, elem_id="progress-card")  # floats over the page while looks are made
         thumbs = gr.State([])  # the gallery's pictures, so one fine-tuned look updates alone
         trial = gr.State([])  # every photo from step 1, while looks were tried on one of them
         gr.Markdown(
@@ -1103,8 +1234,12 @@ def build() -> gr.Blocks:
         shown = ([results, selected, thumbs, gallery, trial, use_all, tune_box, match_box, compare, info, recipe_box,
                   look_name]
                  + tune + [tune_note, fix_img])
-        go.click(make_looks, [files, folder, mode, count, seed, crop, run_on, try_photo, show_cut] + pickers, shown)
-        use_all.click(use_on_all, [results, selected, trial, show_cut], shown)
+        assert len(shown) == SHOWN
+        # the progress card shows how the run is going; no loading boxes over step 4
+        go.click(make_looks, [files, folder, mode, count, seed, crop, run_on, try_photo, show_cut] + pickers,
+                 shown + [card], show_progress="hidden").then(
+            picker_updates, None, pickers, show_progress="hidden")  # the presets' times, as learned
+        use_all.click(use_on_all, [results, selected, trial, show_cut], shown + [card], show_progress="hidden")
         gallery.select(pick, [results, show_cut],
                        [selected, compare, info, recipe_box, look_name] + tune + [tune_note, fix_img])
         tuned = [results, thumbs, gallery, compare, info, recipe_box]

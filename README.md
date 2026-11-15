@@ -67,9 +67,11 @@ results). It suits both ways of working:
 2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
    dramatic, Clean editorial, Studio smoke and lights, Watercolor, Anime, Oil
    painting, Comic book, Pencil and ink, My presets), each with a
-   one-line description. Tick any, or **Select all**; every photo goes through
-   each one, and it shows how many looks that makes and about how long it
-   takes. **Explore random looks** invents new looks instead (how many per
+   one-line description and about how long it takes per photo (⏱). Tick
+   any, or **Select all**; every photo goes through each one, and it shows how
+   many looks that makes and about how long the run takes. The times were
+   measured on this Mac and keep learning from your own runs (in
+   `~/.config/photo-crops-presets/timings.json`). **Explore random looks** invents new looks instead (how many per
    photo, and an optional seed to repeat a run).
 3. **Make looks on** (with more than one photo): **Try looks on one photo
    first** (pick which) or **All photos**. **Crop first**, then **Make looks**:
@@ -82,7 +84,11 @@ results). It suits both ways of working:
      tightly around the players in the play (often a third of the photo).
    - **Face close-up**: head and shoulders.
 
-   With many photos, results are grouped look by look.
+   While the looks are made, a small **Making looks** card floats in the
+   corner of the screen (no scrolling needed): a tile for every look, waiting,
+   being made with its %, or done with its picture and how long it took; how
+   many are done and about how long is left. The results open in step 4 when
+   all are done. With many photos, results are grouped look by look.
 4. **Compare and fine-tune**: click any result to see it against the original
    on the before/after slider, with its description. After a one-photo trial,
    **Use the selected look on all N photos** makes it (with its fine-tuning) on
@@ -306,8 +312,9 @@ How they are made (all free, all on this Mac; no paid service):
   5 GB) download once to `~/.cache/huggingface`.
 - **Drawing size:** the AI draws at 768 px (the comic_redraw step's `size`);
   at 1024 it starts inventing details and drifting skin tones.
-- **Time:** about 17-18 s per look on the M5, plus about a minute for the
-  first illustration look of a session while the models load. Other heavy
+- **Time:** about 25 s per look on the M5 (each preset shows its own time),
+  plus about a minute for the first illustration look of a session while
+  the models load. Other heavy
   work on the Mac at the same time (another render) can make it much slower.
 - **Drawn once:** exporting a look or putting it in a reel reuses the
   drawing from its preview (kept per photo, crop, framing, cut-out fixes and
@@ -514,5 +521,6 @@ photo_presets/
   deliver.py          Export sizes, file types, name, copyright and watermark
   lightroom.py        Lightroom presets to LUTs (HALD charts)
   reel.py             Instagram reels: timing, beat sync, framing, titles, MP4
+  timing.py           How long each look takes (measured, then learned from your runs)
 tests/
 ```

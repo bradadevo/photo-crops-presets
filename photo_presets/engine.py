@@ -60,6 +60,18 @@ class Result:
         return f"{self.source.stem} · {self.recipe.get('name', 'look')}"
 
 
+@dataclass
+class Job:
+    """One look to make: a photo and the look's recipe."""
+    path: Path
+    recipe: dict
+    seed: int
+
+    @property
+    def title(self) -> str:
+        return f"{self.path.stem} · {self.recipe.get('name', 'look')}"
+
+
 class Engine:
     def __init__(self, library: Library | None = None):
         self.library = library or Library()
@@ -210,17 +222,39 @@ class Engine:
         tinted[edge] = CUTOUT_TINT
         return pipeline.to_image(tinted)
 
+    def explore_jobs(self, paths: list[Path], count: int, seed: int | None = None) -> list[Job]:
+        """The random looks to make: (photo, recipe, seed), photo by photo."""
+        base = int(time.time()) % 100000 if seed is None else seed
+        return [Job(path, explore.recipe(base + i * count + k, self.library), base + i * count + k)
+                for i, path in enumerate(paths) for k in range(count)]
+
+    def preset_jobs(self, paths: list[Path], names: list[str]) -> list[Job]:
+        """Every photo through each of the named presets (photo by photo, so each
+        photo is prepared once)."""
+        saved = presets.load_all()
+        return [Job(path, dict(saved[name], name=name), 0) for path in paths for name in names]
+
+    def look(self, job: Job, crop: str = "none") -> Result:
+        """One look of one photo, at preview size."""
+        return self._one(job.path, crop, job.recipe, job.seed)
+
+    def is_prepared(self, path: Path, crop: str) -> bool:
+        return (str(path), crop) in self._prepared
+
+    def is_cut_out(self, path: Path, crop: str) -> bool:
+        p = self._prepared.get((str(path), crop))
+        return p is not None and p._auto is not None
+
     def explore(self, paths: list[Path], count: int, crop: str = "none", seed: int | None = None,
                 progress=None) -> list[Result]:
-        base = int(time.time()) % 100000 if seed is None else seed
+        return self._run(self.explore_jobs(paths, count, seed), crop, progress)
+
+    def _run(self, jobs: list[Job], crop: str, progress=None) -> list[Result]:
         out = []
-        total = len(paths) * count
-        for i, path in enumerate(paths):
-            for k in range(count):
-                s = base + i * count + k
-                out.append(self._one(path, crop, explore.recipe(s, self.library), s))
-                if progress:
-                    progress(len(out), total, out[-1].title)
+        for job in jobs:
+            out.append(self.look(job, crop))
+            if progress:
+                progress(len(out), len(jobs), out[-1].title)
         return out
 
     def preset(self, paths: list[Path], name: str, crop: str = "none", recipe: dict | None = None,
@@ -236,15 +270,7 @@ class Engine:
     def presets(self, paths: list[Path], names: list[str], crop: str = "none", progress=None) -> list[Result]:
         """Every photo through each of the named presets (photo by photo, so each
         photo is prepared once)."""
-        saved = presets.load_all()
-        out = []
-        total = len(paths) * len(names)
-        for path in paths:
-            for name in names:
-                out.append(self._one(path, crop, dict(saved[name], name=name), 0))
-                if progress:
-                    progress(len(out), total, out[-1].title)
-        return out
+        return self._run(self.preset_jobs(paths, names), crop, progress)
 
     def reel_shots(self, results: list[Result], progress=None) -> list[reel.Shot]:
         """The looks again at REEL_EDGE px (sharper than the previews on a
