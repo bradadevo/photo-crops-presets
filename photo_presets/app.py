@@ -31,7 +31,8 @@ from photo_presets.scene import Fix
 RANDOM, PRESET = "Random exploration", "Preset pipeline"
 ONE, ALL = "one", "all"
 RUN_ON = [("Try looks on one photo first", ONE), ("All photos", ALL)]
-ALL_RESULTS, SAME_LOOK, SELECTED = "All results", "Every photo with the selected look", "Selected look only"
+ALL_RESULTS, SAME_LOOK, SELECTED, PICKED = ("All results", "Every photo with the selected look",
+                                            "Selected look only", "The ones I tick")
 MODES = [("Use presets", PRESET), ("Explore random looks", RANDOM)]
 CROP_LABELS = {v: k for k, v in CROPS.items()}
 DEFAULT_EXPORT = str(Path.home() / "Pictures" / "Photo Presets")
@@ -346,12 +347,28 @@ WATERMARK_STYLES = [("Corner: small text, bottom right", deliver.CORNER),
                     ("Across: large, repeated (for client proofs)", deliver.ACROSS)]
 
 
-def export(results, index, folder, scope, kind, sizes, creator, notice, contact, marked, mark_text, mark_style,
-           mark_opacity, progress=gr.Progress()):
+def export_choices(results, index, picked, shown):
+    """The tick list for exporting some results: one row per result. Ticks are kept while the
+    results are the same photos and looks (fine-tuning one keeps them); a new set of looks
+    starts with the selected one ticked. shown: the titles the list was made for."""
+    titles = [r.title for r in results or []]
+    if titles == shown:
+        return gr.skip(), shown
+    choices = [(f"{i + 1}. {t}", i) for i, t in enumerate(titles)]
+    ticked = [index] if 0 <= index < len(titles) else []
+    return gr.update(choices=choices, value=ticked), titles
+
+
+def export(results, index, folder, scope, picked, kind, sizes, creator, notice, contact, marked, mark_text,
+           mark_style, mark_opacity, progress=gr.Progress()):
     if not results:
         raise gr.Error("Make some looks first.")
     if scope == ALL_RESULTS:
         chosen = results
+    elif scope == PICKED:
+        chosen = [results[i] for i in sorted(picked or []) if 0 <= i < len(results)]
+        if not chosen:
+            raise gr.Error("Tick at least one photo to export.")
     elif scope == SAME_LOOK:
         chosen = [r for r in results if r.name == results[index].name]
     else:
@@ -853,8 +870,9 @@ def build() -> gr.Blocks:
                     with gr.Column(elem_classes="panel"):
                         step(4, "Compare and fine-tune", "Click a result to compare it with the original; "
                              "drag the slider.")
+                        # no download buttons: they give 1600 px previews (as a zip); Export (step 5) saves full size
                         gallery = gr.Gallery(label="Results", columns=4, height=230, allow_preview=False,
-                                             show_label=False)
+                                             show_label=False, buttons=[])
                         use_all = gr.Button("Use the selected look on all photos", variant="primary",
                                             visible=False)
                         with gr.Group(visible=False) as match_box:
@@ -915,7 +933,11 @@ def build() -> gr.Blocks:
                         with gr.Row(equal_height=False, elem_classes="row-end"):
                             export_dir = gr.Textbox(value=DEFAULT_EXPORT, label="Export folder", scale=4)
                             export_choose = gr.Button("Browse…", scale=1, min_width=90)
-                        scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED], value=ALL_RESULTS, label="Export")
+                        scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED, PICKED], value=ALL_RESULTS,
+                                         label="Export")
+                        export_pick = gr.CheckboxGroup([], label="Tick the photos to export", visible=False,
+                                                       info="The one you clicked in the results is ticked; "
+                                                            "tick one or as many as you like.")
                         sizes = gr.CheckboxGroup(SIZE_CHOICES, value=[deliver.FULL], label="Sizes",
                                                  info="Each size is cropped to its shape around the players. "
                                                       "Instagram sizes get a light sharpening for phones; print "
@@ -1098,7 +1120,12 @@ def build() -> gr.Blocks:
         fix_reset_btn.click(fix_reset, [results, selected], [fix_img, fix_msg])
         fix_remake.click(remake_photo, [results, thumbs, selected], tuned)
         save_btn.click(save_look, [results, selected, look_name, recipe_box], [pm_pick] + pickers)
-        export_btn.click(export, [results, selected, export_dir, scope, file_kind, sizes, c_creator, c_notice,
+        scope.change(lambda v: gr.update(visible=v == PICKED), scope, export_pick, show_progress="hidden",
+                     queue=False)
+        pick_titles = gr.State([])
+        results.change(export_choices, [results, selected, export_pick, pick_titles], [export_pick, pick_titles],
+                       show_progress="hidden")
+        export_btn.click(export, [results, selected, export_dir, scope, export_pick, file_kind, sizes, c_creator, c_notice,
                                   c_contact, w_on, w_text, w_style, w_opacity], export_msg)
         w_on.change(lambda v: gr.update(visible=v), w_on, w_box, show_progress="hidden", queue=False)
         match_btn.click(match_game, [results, thumbs, selected], tuned + [match_msg])

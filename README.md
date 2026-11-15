@@ -125,7 +125,8 @@ results). It suits both ways of working:
    photo back as shot.
 5. **Save or export**: name a look and **Save preset** to keep it, or
    **Export full size** to save every result (or every photo with the selected
-   look, or just the selected one) at full
+   look, just the selected one, or **The ones I tick**: a tick list of the
+   results, to export one photo or a few) at full
    resolution to your export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
    **Sizes** (tick any): **Full size**, **Instagram post 4:5** (1080 x
