@@ -31,6 +31,7 @@ PROMPT = ("highly detailed neon comic illustration of a young athlete, bold blac
           "glowing neon rim light, vivid cyan, hot pink, orange and yellow, airbrushed highlights, graphic novel "
           "art, digital painting, black background")
 NEGATIVE = ("photo, photorealistic, blurry, noisy, text, letters, writing, watermark, signature, artist name, "
+            "numbers, digits, jersey number, label, tag, patch, "
             "deformed, extra limbs, extra ball, bad anatomy, bad hands, extra fingers, ugly face, distorted face, "
             "different person, blood, red marks on face")
 FACE_REACH = 3.4  # a face pass covers this many face radii across (hair to chin)
@@ -166,11 +167,13 @@ def _memo(ctx: Context, p: dict, *what) -> tuple | None:
 
 @op("comic_redraw", cutout=True, label="AI illustration of the players (drawn on this Mac)", strength=0.7,
     lines=0.9, face=0.0, steps=25, prompt="", seed=7, spill=0.0, face_pass=0.45, detail=1.0, model=BASE,
-    real_face=0.0, face_style="paint", inset=0.003, size=EDGE)
+    real_face=0.0, face_style="paint", inset=0.003, size=EDGE, honest_text=1)
 def comic_redraw(a, p, ctx: Context):
     """Redraws the players in the prompt's style (see the module notes).
     spill lets the drawing reach past their outline (a share of their size),
-    for painted or sketched edges on a plain background."""
+    for painted or sketched edges on a plain background. honest_text (on by
+    default): numbers and letters the model invents are painted out, and the
+    photo's own text put back (textguard.py)."""
     box = players_box(ctx.alpha) if ctx.alpha is not None else None
     if box is None:
         raise MissingAsset("no player cut-out in this photo")
@@ -184,6 +187,9 @@ def comic_redraw(a, p, ctx: Context):
     drawn = _match_background(_draw(pipe, a[y0:y1, x0:x1], original[y0:y1, x0:x1], alpha, p, edge=int(p["size"]),
                                     memo=_memo(ctx, p, "main")),
                               a[y0:y1, x0:x1], alpha)
+    if p["honest_text"]:
+        from photo_presets.textguard import honest_text
+        drawn, _, _ = honest_text(drawn, original[y0:y1, x0:x1], alpha, a[y0:y1, x0:x1])
     # the drawing stops just inside the outline: models draw their own pale contour there (a halo);
     # the outermost pixels come from the look underneath, whose edge colors are already clean
     inset = max(1, int(round(float(p["inset"]) * max(alpha.shape))))

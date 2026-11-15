@@ -316,6 +316,12 @@ How they are made (all free, all on this Mac; no paid service):
   and hands get a closer, gentler pass (a hand only where bare skin shows, so
   a wrist hidden behind the body never gets one drawn). The models (about
   5 GB) download once to `~/.cache/huggingface`.
+- **No made-up text:** image models cannot write: they invent jersey numbers
+  and garble sponsor names. After each drawing, the Mac's own text detection
+  (Apple Vision, free, on this Mac) compares it with the photo: text the AI
+  invented is painted out, and the photo's real text is put back so it reads
+  as it really does (`honest_text` on the comic_redraw step). The AI is also
+  told to avoid numbers, labels, tags and patches.
 - **Drawing size:** the AI draws at 768 px (the comic_redraw step's `size`);
   at 1024 it starts inventing details and drifting skin tones.
 - **Time:** about 25 s per look on the M5 (each preset shows its own time),
@@ -529,5 +535,6 @@ photo_presets/
   lightroom.py        Lightroom presets to LUTs (HALD charts)
   reel.py             Instagram reels: timing, beat sync, framing, titles, MP4
   timing.py           How long each look takes (measured, then learned from your runs)
+  textguard.py        No invented numbers or letters in AI drawings; the photo's real text kept
 tests/
 ```
