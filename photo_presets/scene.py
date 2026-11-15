@@ -69,6 +69,23 @@ class Scene:
     matte: np.ndarray | None = field(default=None, repr=False)
     hands: list[tuple[float, float, float]] = field(default_factory=list)  # the players in the play: x, y, radius
     subject_box: tuple[float, float, float, float] | None = None  # the main player (shares of the image)
+    # everyone else's heads and hands: they join faces and hands when the cut-out takes them in
+    # (a child holding the main player's hand is drawn with them, so needs their real face too)
+    other_faces: list[tuple[float, float, float]] = field(default_factory=list)
+    other_hands: list[tuple[float, float, float]] = field(default_factory=list)
+
+    def take_in(self, matte: np.ndarray) -> None:
+        """Everyone else whose head is inside the cut-out becomes a player in the
+        play for faces and hands: their face is kept clean (and in drawn looks, the
+        child's own), their hair traced, their hands drawn."""
+        mh, mw = matte.shape[:2]
+        for x, y, r in list(self.other_faces):
+            cx, cy, rad = int(x * mw), int(y * mh), max(1, int(r * mw * 0.35))
+            spot = matte[max(0, cy - rad):cy + rad + 1, max(0, cx - rad):cx + rad + 1]
+            if spot.size and float(spot.mean()) > 0.5:
+                self.faces.append((x, y, r))
+                self.other_faces.remove((x, y, r))
+                self.hands += [hd for hd in self.other_hands if abs(hd[0] - x) < r * 6 and abs(hd[1] - y) < r * 8]
 
     def in_crop(self, box: Box, size: tuple[int, int]) -> "Scene":
         """The same scene inside a crop of the image it was found in."""
@@ -101,7 +118,8 @@ class Scene:
             a1, b1 = move(self.subject_box[2], self.subject_box[3])
             sb = (a0, b0, a1, b1)
         return Scene(keep(self.faces), keep(self.balls), feet, min(1.0, self.subject_height * h / ch),
-                     cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands), sb)
+                     cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands), sb,
+                     keep(self.other_faces), keep(self.other_hands))
 
 
 def resized(mask: np.ndarray | None, h: int, w: int) -> np.ndarray | None:
@@ -134,6 +152,7 @@ class Prepared:
                 if self.scene.subject_mask is not None:
                     matte = cutout(self.image, self.scene.subject_mask)
                     if matte is not None:
+                        self.scene.take_in(matte)
                         matte = refine_heads(self.image, matte, self.scene.faces)
                     matte = with_balls(matte, self.scene.balls) if matte is not None else None
                 self._auto = (matte, self.scene.subject_mask)
@@ -357,14 +376,17 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
                and p.box[3] <= gy1 + 2]
     if not in_play and plan.subject:
         in_play = [plan.subject]
-    faces = []
+    def head(p):
+        x, y, spread = p.head
+        return x / w, y / h, max(spread * 1.4, p.height * 0.12) * FACE_REACH / 2 / w
+
     # Only the players in the play keep clean faces; people in the background
-    # take the look like everything around them (else their faces stand out as patches)
-    for p in in_play:
-        if p.head and p.height > 0.08 * h:
-            x, y, spread = p.head
-            radius = max(spread * 1.4, p.height * 0.12) * FACE_REACH / 2
-            faces.append((x / w, y / h, radius / w))
+    # take the look like everything around them (else their faces stand out as patches).
+    # Others are kept aside: the cut-out may take them in (Scene.take_in).
+    others = [p for p in people if p not in in_play and p.head and p.height > 0.08 * h]
+    faces = [head(p) for p in in_play if p.head and p.height > 0.08 * h]
+    other_faces = [head(p) for p in others]
+    other_hands = [(x / w, y / h, p.height * 0.065 / w) for p in others for x, y in p.hands]
     ball_list = [((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, (b[2] - b[0]) / 2 / w) for b in balls]
     hands = [(x / w, y / h, p.height * 0.065 / w) for p in in_play for x, y in p.hands if p.height > 0.08 * h]
     subject = plan.subject
@@ -372,7 +394,7 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
     height = (subject.height / h) if subject else 0.5
     sb = (subject.box[0] / w, subject.box[1] / h, subject.box[2] / w, subject.box[3] / h) if subject else None
     return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size), hands=hands,
-                 subject_box=sb)
+                 subject_box=sb, other_faces=other_faces, other_hands=other_hands)
 
 
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,
