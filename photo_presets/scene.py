@@ -368,6 +368,27 @@ def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
     return out * 255
 
 
+BALL_IN_PLAY = 0.08  # a ball's size as a share of the nearest player's height, at least
+BALL_REACH = 1.5  # how far a ball in the play can be from the nearest player, in their heights
+
+
+def ball_in_play(ball: Box, in_play: list[Person]) -> bool:
+    """Whether a ball belongs to the play: about as big as a ball at the players'
+    own distance (a ball is about a seventh of a young player's height), and near
+    them. A ball far behind them (another game, the warm-up) looks much smaller, and
+    one far off to the side (or something round in a tree) is not in the play: both
+    are left out of the cut-out, the framing and the effects placed at the ball."""
+    if not in_play:
+        return True
+    bx, by = (ball[0] + ball[2]) / 2, (ball[1] + ball[3]) / 2
+    def gap(p):
+        return (max(p.box[0] - bx, 0, bx - p.box[2]) ** 2 + max(p.box[1] - by, 0, by - p.box[3]) ** 2) ** 0.5
+
+    near = min(in_play, key=gap)
+    size = max(ball[2] - ball[0], ball[3] - ball[1])
+    return size >= BALL_IN_PLAY * near.height and gap(near) <= BALL_REACH * near.height
+
+
 def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing.Plan) -> Scene:
     w, h = img.size
     # The players in the play: everyone whose box is inside the crop's group (team photos: everyone big)
@@ -387,7 +408,8 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
     faces = [head(p) for p in in_play if p.head and p.height > 0.08 * h]
     other_faces = [head(p) for p in others]
     other_hands = [(x / w, y / h, p.height * 0.065 / w) for p in others for x, y in p.hands]
-    ball_list = [((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, (b[2] - b[0]) / 2 / w) for b in balls]
+    ball_list = [((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, (b[2] - b[0]) / 2 / w)
+                 for b in balls if ball_in_play(b, in_play)]
     hands = [(x / w, y / h, p.height * 0.065 / w) for p in in_play for x, y in p.hands if p.height > 0.08 * h]
     subject = plan.subject
     feet = ((subject.box[0] + subject.box[2]) / 2 / w, subject.box[3] / h) if subject else None

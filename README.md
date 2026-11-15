@@ -426,8 +426,9 @@ dodge, color burn, linear dodge, difference, lighten, darken.
 cut out with BiRefNet, an open-source subject segmentation model, run on your
 Mac through rembg (it traces hair and limbs precisely). photo-crops' YOLO
 outlines decide which traced pieces are the players in the play, so
-background people, poles and signs stay in the background; the ball joins
-the players. Steps on the `subject` layer change only the players, steps on
+background people, poles and signs stay in the background; the ball in the
+play joins the players (only a ball near them and about as big as a ball at
+their distance: one far behind them, in another game, is left out). Steps on the `subject` layer change only the players, steps on
 the `background` layer only what is behind them. The cut-out is made only
 when a look needs it.
 
