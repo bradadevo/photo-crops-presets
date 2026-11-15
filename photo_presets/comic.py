@@ -166,7 +166,7 @@ def _memo(ctx: Context, p: dict, *what) -> tuple | None:
 
 @op("comic_redraw", cutout=True, label="AI illustration of the players (drawn on this Mac)", strength=0.7,
     lines=0.9, face=0.0, steps=25, prompt="", seed=7, spill=0.0, face_pass=0.45, detail=1.0, model=BASE,
-    real_face=0.0, face_style="paint", inset=0.003)
+    real_face=0.0, face_style="paint", inset=0.003, size=EDGE)
 def comic_redraw(a, p, ctx: Context):
     """Redraws the players in the prompt's style (see the module notes).
     spill lets the drawing reach past their outline (a share of their size),
@@ -181,7 +181,8 @@ def comic_redraw(a, p, ctx: Context):
     original = ctx.original if ctx.original is not None else a
     x0, y0, x1, y1 = box
     alpha = ctx.alpha[y0:y1, x0:x1]
-    drawn = _match_background(_draw(pipe, a[y0:y1, x0:x1], original[y0:y1, x0:x1], alpha, p, memo=_memo(ctx, p, "main")),
+    drawn = _match_background(_draw(pipe, a[y0:y1, x0:x1], original[y0:y1, x0:x1], alpha, p, edge=int(p["size"]),
+                                    memo=_memo(ctx, p, "main")),
                               a[y0:y1, x0:x1], alpha)
     # the drawing stops just inside the outline: models draw their own pale contour there (a halo);
     # the outermost pixels come from the look underneath, whose edge colors are already clean
