@@ -100,6 +100,57 @@ def render(a: np.ndarray, kind: str, size: float, rng: np.random.Generator, deta
     return np.clip(_render(a, kind, size, rng, detail, portrait), 0, 1).astype(np.float32)
 
 
+def dodge_sketch(a: np.ndarray, size: float) -> np.ndarray:
+    """The classic pencil sketch of a photo (gray divided by its blurred
+    negative, a 'color dodge'): lines appear along every change of tone, so a
+    face keeps every feature and every curl of hair; flat areas go to paper."""
+    g = _lum(cv2.bilateralFilter((np.clip(a, 0, 1) * 255).astype(np.uint8), 5, 18, 3).astype(np.float32) / 255)
+    blur = cv2.GaussianBlur(1 - g, (0, 0), max(1.0, size * 0.012))
+    return np.clip(g / np.maximum(1 - blur, 0.02), 0, 1)
+
+
+def portrait(a: np.ndarray, kind: str, size: float, rng: np.random.Generator) -> np.ndarray:
+    """A face in the technique, keeping every tonal gradation (so strong side
+    light on any skin tone keeps the features): only the surface is stylized."""
+    g = _lum(a)
+    if kind in ("graphite", "charcoal", "pen"):
+        sketch = dodge_sketch(a, size)
+        shade = cv2.GaussianBlur(g, (0, 0), max(1.0, size * 0.01))
+        if kind == "pen":
+            ink = np.clip((0.82 - sketch) / 0.25, 0, 1)
+            deep = np.clip((0.22 - shade) / 0.15, 0, 1) * _hatch(*g.shape, 45, size * 0.012, size * 0.004, rng)
+            ink = np.maximum(ink, deep)
+            return _paper(rng, *g.shape, (0.985, 0.98, 0.965), 0.02) * (1 - ink[..., None] * 0.92)
+        tone = sketch * (0.55 + 0.45 * np.clip(shade * 1.4, 0, 1))  # the sketch, shaded softly by the light
+        if kind == "charcoal":
+            tone = np.clip(tone * 0.92 - 0.04, 0, 1)
+            paper_tone = (0.93, 0.91, 0.87)
+        else:
+            paper_tone = (0.97, 0.96, 0.93)
+        deep = np.clip((0.2 - shade) / 0.15, 0, 1) * _hatch(*g.shape, 45, size * 0.012, size * 0.004, rng) * 0.35
+        return _paper(rng, *g.shape, paper_tone, 0.04) * np.clip(tone - deep, 0, 1)[..., None]
+    if kind in ("cel", "comic"):
+        u8 = (np.clip(a, 0, 1) * 255).astype(np.uint8)
+        u8 = cv2.bilateralFilter(cv2.bilateralFilter(u8, 7, 22, 3), 7, 18, 3)
+        soft = u8.astype(np.float32) / 255
+        lab = cv2.cvtColor(soft, cv2.COLOR_RGB2LAB)
+        L = lab[..., 0] / 100
+        lab[..., 0] = (L + (np.round(L * 6) / 6 - L) * 0.35) * 100  # leaning toward cel tones, gradients kept
+        if kind == "comic":
+            lab[..., 1:] *= 1.1
+        out = np.clip(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB), 0, 1)
+        lines = np.clip((0.86 - dodge_sketch(a, size)) / 0.3, 0, 1) * 0.75  # fine ink at the features
+        return out * (1 - lines[..., None])
+    if kind in ("oil", "knife"):  # small, soft strokes; the face's modelling kept
+        paint = kuwahara(a, max(1, int(size * 0.0035)))
+        theta = _orientation(paint, max(1.0, size * 0.01))
+        height = strokes(rng, *g.shape, theta, max(3.0, size * 0.03), max(1.0, size * 0.006))
+        gy, gx = np.gradient(cv2.GaussianBlur(height, (0, 0), 1.0))
+        light = np.clip(1 + (gx * -0.6 + gy * -0.8) * 5, 0.95, 1.05)
+        return paint * light[..., None]
+    return _render(a, kind, size, rng, 1.0, portrait=True)
+
+
 def _render(a: np.ndarray, kind: str, size: float, rng: np.random.Generator, detail: float = 1.0,
             portrait: bool = False) -> np.ndarray:
     """The picture in a technique, its marks sized for `size` pixels. portrait:
@@ -111,11 +162,14 @@ def _render(a: np.ndarray, kind: str, size: float, rng: np.random.Generator, det
         paint = kuwahara(a, r)
         if not portrait:
             paint = kuwahara(paint, max(2, r // 2))
-        theta = _orientation(paint, size * 0.006)
-        height = strokes(rng, h, w, theta, size * (0.03 if kind == "oil" else 0.045), size * 0.004)
-        gy, gx = np.gradient(cv2.GaussianBlur(height, (0, 0), 1.0))
-        relief = (12 if portrait else 28) if kind == "oil" else (18 if portrait else 40)
-        light = np.clip(1 + (gx * -0.6 + gy * -0.8) * relief, 0.85, 1.15)  # raised paint, lit from the top left
+        theta = _orientation(paint, size * 0.01)
+        height = strokes(rng, h, w, theta, size * (0.05 if kind == "oil" else 0.07), size * 0.007)
+        gy, gx = np.gradient(cv2.GaussianBlur(height, (0, 0), 1.5))
+        relief = (8 if portrait else 14) if kind == "oil" else (10 if portrait else 22)
+        busy = cv2.GaussianBlur(np.abs(cv2.Laplacian(cv2.GaussianBlur(_lum(a), (0, 0), 2.0), cv2.CV_32F)), (0, 0),
+                                size * 0.02)
+        busy = 0.35 + 0.65 * np.clip(busy / max(float(np.percentile(busy, 90)), 1e-4), 0, 1)  # calmer on flat areas
+        light = np.clip(1 + (gx * -0.6 + gy * -0.8) * relief * busy, 0.9, 1.1)  # raised paint, lit from the top left
         out = paint * light[..., None]
         if kind == "knife":
             gray = out.mean(axis=2, keepdims=True)
@@ -213,7 +267,7 @@ def technique(a, p, ctx: Context):
         if x1 - x0 < 8 or y1 - y0 < 8:
             continue
         # marks sized for the face (r is about half a head): fine brushwork and hatching
-        face = render(a[y0:y1, x0:x1], kind, r * 4, np.random.default_rng(ctx.seed + 83), 1.0, portrait=True)
+        face = np.clip(portrait(a[y0:y1, x0:x1], kind, r * 4, np.random.default_rng(ctx.seed + 83)), 0, 1)
         yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
         d = np.sqrt(((xx - cx) / (r * 1.25)) ** 2 + ((yy - cy) / (r * 1.4)) ** 2)
         m = np.clip((1.0 - d) / 0.35, 0, 1)
