@@ -10,8 +10,10 @@ with a Gradio app.
   B&W channel mix or duotone) with textures, blend modes, impact overlays,
   lighting and edge effects.
 - **Preset pipeline**: save looks as named presets (like "Grit & Glory") and
-  run photos straight through them. 29 starter presets come built in, in
-  groups, each with a one-line description; tick any or all of them.
+  run photos straight through them. 47 starter presets come built in, in
+  groups, each with a one-line description; tick any or all of them,
+  including 20 illustration looks (watercolor, anime, oil, comic, pencil)
+  drawn by a free AI model on this Mac.
 - **Instagram reels**: turn the looks into a vertical video under a minute
   (2 seconds per photo, cuts on your song's beat), ready to post.
 
@@ -34,7 +36,9 @@ uv sync
 The first run downloads two free models (about 250 MB, once) to
 `~/.cache/photo-crops`, and the player cut-out model BiRefNet (about 970 MB,
 once) to `~/.rembg` the first time a look separates player and background
-(already there if you use ai-versions). Reels and video overlays need ffmpeg
+(already there if you use ai-versions). The illustration looks download
+their drawing models (about 5 GB, once) to `~/.cache/huggingface` the first
+time one is used. Reels and video overlays need ffmpeg
 (`brew install ffmpeg`).
 
 ## The AllProPhoto app
@@ -61,7 +65,8 @@ results). It suits both ways of working:
    sample photo box. It says how many photos you added, and with more than one
    suggests trying looks on one photo first.
 2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
-   dramatic, Clean editorial, Studio smoke and lights, My presets), each with a
+   dramatic, Clean editorial, Studio smoke and lights, Watercolor, Anime, Oil
+   painting, Comic book, Pencil and ink, My presets), each with a
    one-line description. Tick any, or **Select all**; every photo goes through
    each one, and it shows how many looks that makes and about how long it
    takes. **Explore random looks** invents new looks instead (how many per
@@ -295,12 +300,23 @@ How they are made (all free, all on this Mac; no paid service):
 - **The players drawn:** Stable Diffusion 1.5 (DreamShaper 8) with a
   ControlNet line-art model redraws the players, following the photo's own
   outlines; Real-ESRGAN enlarges the drawing for full-size exports; the ball
-  and hands get a closer, gentler pass. About 30-60 s a photo; the models
-  (about 5 GB) download once to `~/.cache/huggingface`.
+  and hands get a closer, gentler pass (a hand only where bare skin shows, so
+  a wrist hidden behind the body never gets one drawn). The models (about
+  5 GB) download once to `~/.cache/huggingface`.
+- **Drawing size:** the AI draws at 768 px (the comic_redraw step's `size`);
+  at 1024 it starts inventing details and drifting skin tones.
+- **Time:** about 17-18 s per look on the M5, plus about a minute for the
+  first illustration look of a session while the models load. Other heavy
+  work on the Mac at the same time (another render) can make it much slower.
+- **Drawn once:** exporting a look or putting it in a reel reuses the
+  drawing from its preview (kept per photo, crop, framing, cut-out fixes and
+  look settings), so the export matches the preview and is quick; faces,
+  hair, techniques and backgrounds are still made at full size.
 - **Faces are the child's:** the whole head (face, hair, ears, the back of the
   head) is the photo's own, never redrawn by the AI, rendered in the look's
   technique at the face's own scale with portrait rules (no black shadow
-  shapes, light hatching, fine brushwork).
+  shapes, light hatching, fine brushwork). The real head also covers the neck,
+  fading softly into the drawing, so there is no seam under the chin.
 - **Hair:** each head is traced again on its own, close up, so curly hair and
   afros keep their curls against the background; the cut-out stays tight
   (it may not grow past the first trace). Edge colors are cleaned of the old
@@ -379,6 +395,10 @@ adjustments (`"adjust"`: `strength` 0-1, `subject` and `background` stops,
 | `neon_drip2` | as `neon_drip` (`amount`, `length`, `width`, `inner`, `gloss`, `glow`, `rain`, `grid`, `coat`, `outline`): every drip its own outlined, glossy shape, spaced apart, from sideways lower edges only, drawn at 2x for smooth edges |
 | `subject_vignette` | `amount`, `spread`: darkens away from the player's outline |
 | `backdrop` | `top`, `bottom` (colors), `glow`, `amount`: a studio gradient instead of the background (needs the player cut-out) |
+| `comic_redraw` | `prompt`, `strength`, `lines`, `steps`, `seed`, `size` (drawing size, default 768), `real_face`, `face_style`: the AI illustration of the players (see Illustration presets) |
+| `technique` | `kind` (`oil`, `knife`, `graphite`, `charcoal`, `colored_pencil`, `pen`, `cel`, `comic`), `amount`, `detail`, `where` (`all` or `players`): an artist's technique over the picture, faces by portrait rules |
+| `art_backdrop` | `kind` (`speedlines`, `halftone`, `bokeh` (night lights), `sunset`, `paper`), `colors`, `ink`, `amount`: an illustration background |
+| `wc_backdrop`, `wc_scene`, `wc_silhouette`, `wc_ink`, `wc_integrate`, `wc_finish` | watercolor: splash or full-sheet background, the real scene painted loose, rainbow-bloom silhouette, pen-and-ink lines, blending the players into the painting, paper grain |
 
 Any step can also take `"layer"`: `"all"` (the whole photo), `"subject"`
 (the players only) or `"background"` (everything behind them). Overlays, fog,
@@ -484,6 +504,14 @@ photo_presets/
   presetform.py       The preset manager's form (tabs, explanations), to and from recipes
   explore.py          Random looks
   presets.py          Saved and starter presets, their groups and descriptions
+  art_presets.py      The 20 illustration presets
+  comic.py            The AI drawing of the players (Stable Diffusion + ControlNet), real heads, hair
+  technique.py        Artist techniques (oil, pencil, charcoal, ink, cel, comic)
+  art.py              Illustration backgrounds
+  watercolor.py       The watercolor steps
+  match.py            Match the game (exposure and white balance across photos)
+  deliver.py          Export sizes, file types, name, copyright and watermark
+  lightroom.py        Lightroom presets to LUTs (HALD charts)
   reel.py             Instagram reels: timing, beat sync, framing, titles, MP4
 tests/
 ```
