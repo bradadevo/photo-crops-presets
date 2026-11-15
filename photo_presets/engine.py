@@ -32,6 +32,7 @@ JPEG, TIFF, BOTH = "jpeg", "tiff", "both"
 PREVIEW_EDGE = 1600
 REEL_EDGE = 2400  # a landscape photo shows half its width across the reel's 1080 px
 PREPARED_CACHE = 4
+DRAWINGS_KEPT = 400  # AI drawings kept for reuse (about 1 MB each)
 CUTOUT_TINT = np.array([0.18, 0.55, 1.0], np.float32)  # how the cut-out view marks the player
 CROPS = {"none": "Whole photo", "wide": "Pro crop: no zoom (keeps the scene)",
          "crop": "Pro crop: zoomed in on the action", "face": "Face close-up"}
@@ -67,6 +68,8 @@ class Engine:
         self._cutouts: dict[tuple, np.ndarray | None] = {}
         # your clicks fixing each photo's cut-out, kept for every look and export of it
         self.fixes: dict[tuple[str, str], list[Fix]] = {}
+        # AI drawings, kept so a look's export (and reel) reuse its preview's drawing
+        self.drawings: OrderedDict = OrderedDict()
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -103,11 +106,21 @@ class Engine:
         q.frame = (box[0] / w, box[1] / h, box[2] / w, box[3] / h)
         return q
 
+    def memo_key(self, path: Path, crop: str, recipe: dict, frame) -> tuple:
+        """What a look of a photo is, for reusing its AI drawings: the photo, crop,
+        framing, cut-out fixes and the look (its quick adjustments aside)."""
+        look = json.dumps({k: v for k, v in recipe.items() if k != "adjust"}, sort_keys=True, default=str)
+        fixes = tuple((f.x, f.y, f.add) for f in self.fixes.get((str(path), crop), []))
+        while len(self.drawings) > DRAWINGS_KEPT:
+            self.drawings.popitem(last=False)
+        return str(path), crop, frame, look, fixes
+
     def _one(self, path: Path, crop: str, recipe: dict, seed: int) -> Result:
         p = self.ready(path, crop, recipe)
         small = p.image.copy()
         small.thumbnail((PREVIEW_EDGE, PREVIEW_EDGE))
-        after, look, notes = pipeline.render_parts(small, recipe, self.library, p.scene, seed)
+        after, look, notes = pipeline.render_parts(small, recipe, self.library, p.scene, seed, self.drawings,
+                                                   self.memo_key(path, crop, recipe, p.frame))
         if p.scene.matte is not None:
             self._keep_cutout((str(path), crop, p.frame), p, small.size)
         return Result(path, crop, recipe, seed, small, after, notes, p.exif, look, p.frame)
@@ -241,7 +254,8 @@ class Engine:
             p = self.ready(r.source, r.crop, r.recipe)
             img = p.image.copy()
             img.thumbnail((REEL_EDGE, REEL_EDGE))
-            look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed)
+            look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed, self.drawings,
+                                      self.memo_key(r.source, r.crop, r.recipe, p.frame))
             shots.append(reel.Shot(look, focus(p.scene), r.title))
             if progress:
                 progress(i + 1, len(results), r.title)
@@ -302,7 +316,8 @@ class Engine:
         for i, r in enumerate(results):
             p = self.ready(r.source, r.crop, r.recipe)
             full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
-                                               self.library, p.scene, r.seed)
+                                               self.library, p.scene, r.seed, self.drawings,
+                                               self.memo_key(r.source, r.crop, r.recipe, p.frame))
             taken = images.taken_at(p.exif)
             exif = deliver.credited_exif(p.exif, credit, taken.year if taken else None)
             xmp = deliver.xmp(credit, taken.year if taken else None)

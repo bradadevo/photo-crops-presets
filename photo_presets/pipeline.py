@@ -61,6 +61,8 @@ class Context:
     notes: list[str] = field(default_factory=list)
     alpha: np.ndarray | None = None  # the players' cut-out at this image's size, when there is one
     original: np.ndarray | None = None  # the photo before any step (floats), for steps that trace it
+    memo: dict | None = None  # results slow steps may reuse (the AI drawings), shared across sizes
+    memo_key: tuple | None = None  # what this photo and look are, for the memo
 
 
 @dataclass
@@ -278,17 +280,18 @@ def face_mask(scene: Scene, h: int, w: int) -> np.ndarray | None:
     return np.maximum(core, cv2.GaussianBlur(soft, (0, 0), max(1.0, biggest * 0.35)))
 
 
-def render(img: Image.Image, recipe: dict, library: Library, scene: Scene, seed: int = 0) -> tuple[Image.Image, list[str]]:
+def render(img: Image.Image, recipe: dict, library: Library, scene: Scene, seed: int = 0,
+           memo: dict | None = None, memo_key: tuple | None = None) -> tuple[Image.Image, list[str]]:
     """The photo with the recipe's steps and quick adjustments applied, and notes on any step skipped."""
-    after, _, notes = render_parts(img, recipe, library, scene, seed)
+    after, _, notes = render_parts(img, recipe, library, scene, seed, memo, memo_key)
     return after, notes
 
 
-def render_parts(img: Image.Image, recipe: dict, library: Library, scene: Scene,
-                 seed: int = 0) -> tuple[Image.Image, Image.Image, list[str]]:
+def render_parts(img: Image.Image, recipe: dict, library: Library, scene: Scene, seed: int = 0,
+                 memo: dict | None = None, memo_key: tuple | None = None) -> tuple[Image.Image, Image.Image, list[str]]:
     """The finished photo, the look before its quick adjustments (so they can
     be changed without making the look again), and notes."""
-    before, look, alpha, notes = _steps(img, recipe, library, scene, seed)
+    before, look, alpha, notes = _steps(img, recipe, library, scene, seed, memo, memo_key)
     look_img = to_image(look)
     if not adjusted(recipe):
         return look_img, look_img, notes
@@ -298,17 +301,18 @@ def render_parts(img: Image.Image, recipe: dict, library: Library, scene: Scene,
 
 
 def render_fine(img: Image.Image | np.ndarray, recipe: dict, library: Library, scene: Scene,
-                seed: int = 0) -> tuple[np.ndarray, list[str]]:
+                seed: int = 0, memo: dict | None = None, memo_key: tuple | None = None) -> tuple[np.ndarray, list[str]]:
     """The finished photo as floats 0-1, never rounded to 8 bits on the way:
     for full-size exports (pass the 16-bit image when there is one)."""
-    before, look, alpha, notes = _steps(img, recipe, library, scene, seed)
+    before, look, alpha, notes = _steps(img, recipe, library, scene, seed, memo, memo_key)
     if not adjusted(recipe):
         return look, notes
     done, more = finish(before, look, recipe, alpha)
     return done, notes + more
 
 
-def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int):
+def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int, memo: dict | None = None,
+           memo_key: tuple | None = None):
     """The photo before, after the recipe's steps (floats), its cut-out, and notes."""
     from photo_presets import effects  # noqa: F401  (registers the built-in operations)
     load_plugins()
@@ -328,7 +332,7 @@ def _steps(img, recipe: dict, library: Library, scene: Scene, seed: int):
                                for s in recipe.get("steps", [])):
         people = resized(scene.people_mask, h, w)
         skin = skin_mask(arr, None if people is None else (people > 0.5).astype(np.float32))
-    ctx = Context(library, scene, seed, alpha=alpha, original=before)
+    ctx = Context(library, scene, seed, alpha=alpha, original=before, memo=memo, memo_key=memo_key)
     warned = False
     for i, step in enumerate(recipe.get("steps", [])):
         operation = OPS.get(step.get("op", ""))

@@ -90,3 +90,31 @@ def test_the_hair_pass_refines_only_the_head_and_never_grows(monkeypatch):
     grown = (out > 0.05) & (first < 0.05)
     assert grown.sum() < 0.02 * (first > 0).sum()  # it does not grow past the first cut-out
     assert out[:, :5].max() == 0  # the far-off piece is not added
+
+
+def test_ai_drawings_are_reused_across_sizes_but_not_across_looks(monkeypatch):
+    from PIL import Image
+    from photo_presets import comic, pipeline
+    from photo_presets.assets import Library, Sources
+    from photo_presets.scene import Scene
+    calls = []
+
+    class FakePipe:
+        def __call__(self, prompt, image, **kw):
+            calls.append(prompt)
+            return type("R", (), {"images": [image]})()
+    monkeypatch.setattr(comic, "_pipeline", lambda base=None: FakePipe())
+    monkeypatch.setattr(comic, "upscale", lambda img, size: __import__("cv2").resize(img, size))
+    lib = Library(Sources([], [], [], [], [], []))
+    alpha = np.zeros((60, 80), np.float32)
+    alpha[10:50, 30:50] = 1
+    recipe = {"steps": [{"op": "comic_redraw", "face_pass": 0, "prompt": "a"}]}
+    memo, key = {}, ("photo", "none", None)
+    for size in ((80, 60), (160, 120)):  # the preview, then a bigger export
+        img = Image.new("RGB", size, (120, 90, 60))
+        a = __import__("cv2").resize(alpha, size)
+        pipeline.render(img, recipe, lib, Scene(matte=a), 0, memo, key)
+    assert len(calls) == 1  # drawn once, reused for the bigger picture
+    other = {"steps": [{"op": "comic_redraw", "face_pass": 0, "prompt": "b"}]}
+    pipeline.render(Image.new("RGB", (80, 60)), other, lib, Scene(matte=alpha), 0, memo, key)
+    assert len(calls) == 2  # a different look: a new drawing

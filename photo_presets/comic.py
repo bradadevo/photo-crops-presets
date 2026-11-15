@@ -127,11 +127,18 @@ def players_box(alpha: np.ndarray, pad: float = PAD) -> tuple[int, int, int, int
 
 
 def _draw(pipe, look: np.ndarray, photo: np.ndarray, alpha: np.ndarray | None, p: dict,
-          strength: float | None = None, edge: int = EDGE, steps: int | None = None) -> np.ndarray:
+          strength: float | None = None, edge: int = EDGE, steps: int | None = None,
+          memo: tuple | None = None) -> np.ndarray:
     """One part of the picture (floats 0-1) drawn: starting from the look,
-    following the photo's outlines; returned at the part's own size."""
+    following the photo's outlines; returned at the part's own size. memo:
+    (store, key): the drawing is kept there and reused (the drawing is made at
+    `edge` px whatever the picture's size, so a preview's drawing serves the
+    full-size export too)."""
     import torch
     ch, cw = look.shape[:2]
+    if memo is not None and memo[1] in memo[0]:
+        drawn = memo[0][memo[1]]
+        return upscale(drawn.astype(np.float32) / 255, (cw, ch))
     s = edge / max(cw, ch)
     tw, th = max(64, int(cw * s) // 8 * 8), max(64, int(ch * s) // 8 * 8)
     small = lambda arr: cv2.resize(arr, (tw, th), interpolation=cv2.INTER_AREA)  # noqa: E731
@@ -143,7 +150,18 @@ def _draw(pipe, look: np.ndarray, photo: np.ndarray, alpha: np.ndarray | None, p
                  num_inference_steps=int(steps or p["steps"]), guidance_scale=7.0,
                  controlnet_conditioning_scale=float(p["lines"]), negative_prompt=NEGATIVE,
                  generator=gen).images[0]
-    return upscale(np.asarray(drawn, np.float32) / 255, (cw, ch))
+    drawn = np.asarray(drawn)
+    if memo is not None:
+        memo[0][memo[1]] = drawn
+    return upscale(drawn.astype(np.float32) / 255, (cw, ch))
+
+
+def _memo(ctx: Context, p: dict, *what) -> tuple | None:
+    """Where this drawing is kept for reuse (by the photo and look, this step's settings and which part)."""
+    if ctx.memo is None or ctx.memo_key is None:
+        return None
+    settings = tuple(sorted((k, str(v)) for k, v in p.items()))
+    return ctx.memo, (ctx.memo_key, settings, what)
 
 
 @op("comic_redraw", cutout=True, label="AI illustration of the players (drawn on this Mac)", strength=0.7,
@@ -163,7 +181,8 @@ def comic_redraw(a, p, ctx: Context):
     original = ctx.original if ctx.original is not None else a
     x0, y0, x1, y1 = box
     alpha = ctx.alpha[y0:y1, x0:x1]
-    drawn = _match_background(_draw(pipe, a[y0:y1, x0:x1], original[y0:y1, x0:x1], alpha, p), a[y0:y1, x0:x1], alpha)
+    drawn = _match_background(_draw(pipe, a[y0:y1, x0:x1], original[y0:y1, x0:x1], alpha, p, memo=_memo(ctx, p, "main")),
+                              a[y0:y1, x0:x1], alpha)
     # the drawing stops just inside the outline: models draw their own pale contour there (a halo);
     # the outermost pixels come from the look underneath, whose edge colors are already clean
     inset = max(1, int(round(float(p["inset"]) * max(alpha.shape))))
@@ -319,7 +338,7 @@ def _faces(pipe, out: np.ndarray, look: np.ndarray, photo: np.ndarray, ctx: Cont
         alpha = ctx.alpha[y0:y1, x0:x1]
         # small areas: a smaller, quicker drawing is as sharp as they need
         drawn = _draw(pipe, look[y0:y1, x0:x1], photo[y0:y1, x0:x1], alpha, p, strength, DETAIL_EDGE,
-                      max(12, int(int(p["steps"]) * 0.6)))
+                      max(12, int(int(p["steps"]) * 0.6)), memo=_memo(ctx, p, "spot", i))
         yy, xx = np.mgrid[y0:y1, x0:x1]
         d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / r
         ring = np.clip((1 - d) / 0.35, 0, 1)  # full in the middle, fading out toward the edge
