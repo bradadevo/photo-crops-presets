@@ -269,8 +269,6 @@ uv run allprophoto-batch ~/Movies/"Game day" --all-presets
 | Neon Pop Art Sharp Black | Neon Pop Art Sharp on a true black background instead of sepia brown |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
-| Ice Cream Drip Attempt 1 | The player (and the ball, a flag) melting into neon paint: vivid neon paint, crisp outlined glossy drips (first attempt) |
-| Ice Cream Drip Attempt 2 | Melting neon paint with distinct drips: each drip its own smooth, outlined, glossy shape with a teardrop end, in rows along every sideways lower edge, drawn at twice the size for clean edges |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
 The black-and-white looks lean on blue in their mix (like a red filter on
