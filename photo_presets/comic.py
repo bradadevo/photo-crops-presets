@@ -298,13 +298,16 @@ def _real_faces(out: np.ndarray, photo: np.ndarray, ctx: Context, amount: float,
         cx, cy = fx * w, fy * h
         reach = r * 1.9  # wide enough for the back of the head in a profile, and big hair
         x0, y0 = int(max(0, cx - reach)), int(max(0, cy - reach * 1.1))
-        x1, y1 = int(min(w, cx + reach)), int(min(h, cy + r * 1.3))
+        x1, y1 = int(min(w, cx + reach)), int(min(h, cy + r * 2.0))
         if x1 - x0 < 8 or y1 - y0 < 8:
             continue
         yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
         d = np.sqrt(((xx - cx) / reach) ** 2 + ((yy - cy) / (reach * 1.05)) ** 2)
         around = np.clip((1.0 - d) / 0.2, 0, 1)
-        chin = np.clip((cy + r * 0.95 - yy) / max(1.0, r * 0.3), 0, 1)  # stops at the chin and neck
+        # the neck, straight down from the face, fading softly sideways and toward the collar (no seams)
+        neck = np.exp(-((xx - cx) / (r * 0.6)) ** 2) * (yy > cy) * np.clip((cy + r * 1.7 - yy) / max(1.0, r * 0.5), 0, 1)
+        around = np.maximum(around, neck)
+        chin = np.clip((cy + r * 1.75 - yy) / max(1.0, r * 0.35), 0, 1)  # the neck too, fading out at the collar
         alpha = ctx.alpha[y0:y1, x0:x1] if ctx.alpha is not None else np.ones((y1 - y0, x1 - x0), np.float32)
         # only the head's own piece of the cut-out (not a raised arm or a teammate inside the circle)
         n, lab = cv2.connectedComponents(((alpha > 0.5) & (around > 0)).astype(np.uint8))
@@ -317,6 +320,24 @@ def _real_faces(out: np.ndarray, photo: np.ndarray, ctx: Context, amount: float,
     return out
 
 
+HAND_SKIN = 0.2  # share of skin-toned pixels a hand spot needs to be drawn again
+
+
+def _hand_visible(photo: np.ndarray, x: float, y: float, r: float) -> bool:
+    """Whether a hand the pose model found is really there and bare: skin-toned
+    pixels around the point. Hidden hands (behind the body) and wrong guesses
+    are left alone instead of a hand being drawn where there is none."""
+    from photo_presets.pipeline import skin_mask
+    h, w = photo.shape[:2]
+    rad = max(3, int(r * w * 0.7))
+    cx, cy = int(x * w), int(y * h)
+    x0, y0, x1, y1 = max(0, cx - rad), max(0, cy - rad), min(w, cx + rad), min(h, cy + rad)
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return False
+    skin = skin_mask(photo[y0:y1, x0:x1], None)
+    return float((skin > 0.5).mean()) >= HAND_SKIN
+
+
 def _faces(pipe, out: np.ndarray, look: np.ndarray, photo: np.ndarray, ctx: Context, p: dict) -> np.ndarray:
     """Each face, and the ball, drawn again up close and more gently, from the
     real one: in the style, but still the player (the "detail" pass)."""
@@ -325,7 +346,7 @@ def _faces(pipe, out: np.ndarray, look: np.ndarray, photo: np.ndarray, ctx: Cont
     spots = [] if real else [(fx, fy, fr * FACE_REACH / 2) for fx, fy, fr in ctx.scene.faces]
     spots += [(bx, by, br * 1.6) for bx, by, br in ctx.scene.balls]
     gentle = len(spots)  # hands keep their real shape best with an even lighter touch
-    spots += [(hx, hy, hr * 1.4) for hx, hy, hr in ctx.scene.hands]
+    spots += [(hx, hy, hr * 1.1) for hx, hy, hr in ctx.scene.hands if _hand_visible(photo, hx, hy, hr)]
     for i, (fx, fy, fr) in enumerate(spots):
         strength = float(p["face_pass"]) * (0.75 if i >= gentle else 1.0)
         r = fr * w
