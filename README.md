@@ -89,7 +89,16 @@ results). It suits both ways of working:
    being made with its %, or done with its picture and how long it took; how
    many are done and about how long is left. The results open in step 4 when
    all are done. With many photos, results are grouped look by look.
-4. **Compare and fine-tune**: click any result to see it against the original
+4. **Compare, fine-tune and export**: every result is a picture with a ✓ in
+   its corner. Tick ✓ the good ones (leave the bad ones out) and press
+   **Export selected**, or press ⬇ on one picture to export just that one.
+   **Select all**, **Select this look** (every photo in the look you are
+   viewing) and **Clear** help with big batches. **Export as**: **Files in my
+   export folder**, or **One zip file** (saved in the export folder and shown
+   in Finder). Exports are full size, made with the sizes, file type and your
+   name in step 5, with a progress card in the corner.
+   Click any result to see it against the original
+
    on the before/after slider, with its description. After a one-photo trial,
    **Use the selected look on all N photos** makes it (with its fine-tuning) on
    every photo. **Fine-tune the selected look** changes it instantly, without
@@ -129,11 +138,8 @@ results). It suits both ways of working:
    looks are made again. The correction is in each result's recipe as
    `"match"` (left out when you save a preset). **Undo matching** puts every
    photo back as shot.
-5. **Save or export**: name a look and **Save preset** to keep it, or
-   **Export full size** to save every result (or every photo with the selected
-   look, just the selected one, or **The ones I tick**: a tick list of the
-   results, to export one photo or a few) at full
-   resolution to your export folder (default `~/Pictures/Photo Presets`), each
+5. **Save a preset, export settings**: name a look and **Save preset** to
+   keep it. The export settings used by step 4: the export folder (default `~/Pictures/Photo Presets`), each
    with its recipe beside it as `.json`. **Open folder** shows them in Finder.
    **Sizes** (tick any): **Full size**, **Instagram post 4:5** (1080 x
    1350), **Instagram square** (1080 x 1080), **Instagram story / reel cover

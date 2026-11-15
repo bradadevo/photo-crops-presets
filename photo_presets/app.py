@@ -21,6 +21,7 @@ import subprocess
 import tempfile
 import sys
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 from pathlib import Path
@@ -36,8 +37,6 @@ from photo_presets.scene import Fix
 RANDOM, PRESET = "Random exploration", "Preset pipeline"
 ONE, ALL = "one", "all"
 RUN_ON = [("Try looks on one photo first", ONE), ("All photos", ALL)]
-ALL_RESULTS, SAME_LOOK, SELECTED, PICKED = ("All results", "Every photo with the selected look",
-                                            "Selected look only", "The ones I tick")
 MODES = [("Use presets", PRESET), ("Explore random looks", RANDOM)]
 CROP_LABELS = {v: k for k, v in CROPS.items()}
 DEFAULT_EXPORT = str(Path.home() / "Pictures" / "Photo Presets")
@@ -293,11 +292,6 @@ def _controls(results, index):
             built_in(results[index].recipe))
 
 
-def pick(results, show_cut, evt: gr.SelectData):
-    return ((evt.index,) + _show(results, evt.index) + _controls(results, evt.index)
-            + (_fix_picture(results, evt.index, show_cut),))
-
-
 def _adj(strength, subject, background, warmth, auto_fill) -> dict:
     return {"strength": float(strength) / 100, "subject": float(subject), "background": float(background),
             "warmth": float(warmth), "auto_fill": bool(auto_fill)}
@@ -447,39 +441,84 @@ WATERMARK_STYLES = [("Corner: small text, bottom right", deliver.CORNER),
                     ("Across: large, repeated (for client proofs)", deliver.ACROSS)]
 
 
-def export_choices(results, index, picked, shown):
-    """The tick list for exporting some results: one row per result. Ticks are kept while the
-    results are the same photos and looks (fine-tuning one keeps them); a new set of looks
-    starts with the selected one ticked. shown: the titles the list was made for."""
+# The results board (step 4): pick, tick and export pictures right where they are --------
+
+BOARD_THUMB = 360  # px: sharp at the board's tile size on a Retina screen
+FILES, ZIP = "files", "zip"
+HOW = [("Files in my export folder", FILES), ("One zip file", ZIP)]
+
+
+def _board_thumb(r) -> str:
+    """The result's picture for the board, as a data URL (made once per result)."""
+    t = getattr(r, "_board_thumb", None)
+    if t is None:
+        small = r.after.copy()
+        small.thumbnail((BOARD_THUMB, BOARD_THUMB))
+        buf = io.BytesIO()
+        small.convert("RGB").save(buf, "JPEG", quality=82)
+        t = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+        r._board_thumb = t
+    return t
+
+
+def _ticked_text(picked, n) -> str:
+    if not n:
+        return ""
+    if not picked:
+        return "Tick pictures to export them together, or press ⬇ on one to export just that one."
+    return f"**{len(picked)} of {n}** selected"
+
+
+def render_board(results, index, picked, shown):
+    """The board's tiles: each result's picture, ticked or not, the one shown in the
+    before/after outlined. Ticks are kept while the results are the same photos and
+    looks (fine-tuning keeps them); a new set of looks starts with none ticked.
+    shown: the titles the ticks were made for."""
     titles = [r.title for r in results or []]
-    if titles == shown:
-        return gr.skip(), shown
-    choices = [(f"{i + 1}. {t}", i) for i, t in enumerate(titles)]
-    ticked = [index] if 0 <= index < len(titles) else []
-    return gr.update(choices=choices, value=ticked), titles
+    picked = [i for i in (picked or []) if i < len(titles)] if titles == shown else []
+    tiles = [{"i": i, "src": _board_thumb(r), "title": r.title, "picked": i in picked, "current": i == index}
+             for i, r in enumerate(results or [])]
+    return tiles, picked, titles, _ticked_text(picked, len(titles))
 
 
-def export(results, index, folder, scope, picked, kind, sizes, creator, notice, contact, marked, mark_text,
-           mark_style, mark_opacity, progress=gr.Progress()):
+def board_open(results, show_cut, evt: gr.EventData):
+    """A picture clicked on the board: shown in before/after, ready to fine-tune."""
+    i = int(evt.index)
+    if not results or not 0 <= i < len(results):
+        return (gr.skip(),) * 12
+    return (i,) + _show(results, i) + _controls(results, i) + (_fix_picture(results, i, show_cut),)
+
+
+def board_tick(results, evt: gr.EventData):
+    picked = sorted(int(i) for i in evt.picked)
+    return picked, _ticked_text(picked, len(results or []))
+
+
+def tick_all(results, index, shown):
+    return render_board(results, index, list(range(len(results or []))), shown)
+
+
+def tick_look(results, index, shown):
+    """Every picture in the same look as the one shown in before/after."""
     if not results:
-        raise gr.Error("Make some looks first.")
-    if scope == ALL_RESULTS:
-        chosen = results
-    elif scope == PICKED:
-        chosen = [results[i] for i in sorted(picked or []) if 0 <= i < len(results)]
-        if not chosen:
-            raise gr.Error("Tick at least one photo to export.")
-    elif scope == SAME_LOOK:
-        chosen = [r for r in results if r.name == results[index].name]
-    else:
-        chosen = [results[index]]
-    dest = Path(folder or DEFAULT_EXPORT).expanduser()
+        return render_board(results, index, [], shown)
+    name = results[index].name
+    return render_board(results, index, [i for i, r in enumerate(results) if r.name == name], shown)
 
-    def tick(done, total, name):
-        progress(done / max(total, 1), desc=f"Exporting {done}/{total} {name}")
 
+def tick_none(results, index, shown):
+    return render_board(results, index, [], shown)
+
+
+def _deliver(chosen, how, folder, kind, sizes, creator, notice, contact, marked, mark_text, mark_style,
+             mark_opacity):
+    """Exports the chosen results at full size (as files, or one zip), showing the
+    progress card; yields (card, message)."""
+    if not chosen:
+        raise gr.Error("Tick at least one picture to export (or press ⬇ on one).")
     if not sizes:
-        raise gr.Error("Tick at least one size.")
+        raise gr.Error("Export settings: tick at least one size.")
+    dest = Path(folder or DEFAULT_EXPORT).expanduser()
     credit = deliver.Credit(creator or "", notice or "", contact or "")
     if credit != deliver.Credit.load():
         credit.save()  # remembered for next time
@@ -487,19 +526,65 @@ def export(results, index, folder, scope, picked, kind, sizes, creator, notice, 
     if marked:
         text = (mark_text or "").strip() or credit.notice() or "PROOF"
         mark = deliver.Watermark(text, mark_style, float(mark_opacity))
-    saved, notes = eng().export(chosen, dest, tick, kind, list(sizes), credit, mark)
+    into = Path(tempfile.mkdtemp(prefix="allprophoto-zip-")) if how == ZIP else dest
+    state = {"done": 0, "name": chosen[0].title}
+
+    def tick(done, total, name):
+        state.update(done=done, name=name)
+
+    started = time.perf_counter()
+    with ThreadPoolExecutor(1) as pool:
+        future = pool.submit(eng().export, chosen, into, tick, kind, list(sizes), credit, mark)
+        while True:
+            try:
+                saved, notes = future.result(timeout=1.0)
+                break
+            except TimeoutError:
+                yield _export_card(state["done"], len(chosen), state["name"], started), gr.skip()
     what = {engine.JPEG: "JPEG", engine.TIFF: "16-bit TIFF", engine.BOTH: "JPEG and 16-bit TIFF"}[kind]
     names = [label.split(" (")[0] for label, key in SIZE_CHOICES if key in sizes]
-    extras = ["sRGB color profile", "the date taken"]
-    if not credit.empty:
-        extras.append("your name and copyright")
+    extras = ["your name and copyright"] if not credit.empty else []
     if mark:
         extras.append("a watermark")
-    text = (f"Saved {len(saved)} file(s) ({len(chosen)} photo(s) × {', '.join(names)}) as {what}, with "
-            f"{', '.join(extras)}, each with its recipe (.json), to `{dest}`")
+    photos = f"{len(chosen)} picture{'s' if len(chosen) != 1 else ''}"
+    if how == ZIP:
+        dest.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y-%m-%d %H.%M.%S")
+        zipped = dest / f"AllProPhoto {stamp} ({photos}).zip"
+        with zipfile.ZipFile(zipped, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted(into.rglob("*")):
+                if f.is_file():
+                    z.write(f, f.relative_to(into))
+        shutil.rmtree(into, ignore_errors=True)
+        subprocess.run(["open", "-R", str(zipped)])  # shows the zip in Finder
+        text = f"Saved **{zipped.name}** ({photos}: {', '.join(names)}, {what}) to `{dest}`; it is shown in Finder."
+    else:
+        text = (f"Saved {len(saved)} file(s) ({photos} × {', '.join(names)}, {what}) to `{dest}`"
+                + (f", with {' and '.join(extras)}" if extras else "") + ". **Open folder** shows them.")
     if notes:
         text += "\n\n**Note:** " + "; ".join(notes)
-    return text
+    yield HIDE_CARD, text
+
+
+def _export_card(done, total, name, started):
+    whole = 100 * done / max(total, 1)
+    return gr.update(visible=True, value=(
+        f"<div class='q-card'><div class='q-head'><b>Exporting full size</b>"
+        f"<span>{done} of {total} done · {timing.say(time.perf_counter() - started)} so far</span></div>"
+        f"<div class='q-bar'><i style='width:{whole:.0f}%'></i></div>"
+        f"<div class='q-foot'>Now: {html.escape(name)}</div></div>"))
+
+
+def export_ticked(results, picked, *settings):
+    yield from _deliver([results[i] for i in sorted(picked or []) if i < len(results or [])], *settings)
+
+
+def export_one(results, how, folder, kind, sizes, creator, notice, contact, marked, mark_text, mark_style,
+               mark_opacity, evt: gr.EventData):
+    """⬇ on one picture: just that one."""
+    i = int(evt.index)
+    yield from _deliver([results[i]] if results and 0 <= i < len(results) else [], how, folder, kind, sizes,
+                        creator, notice, contact, marked, mark_text, mark_style, mark_opacity)
 
 
 def match_game(results, thumbs, index, progress=gr.Progress()):
@@ -869,6 +954,54 @@ THEME = gr.themes.Soft(
     block_label_border_width="0", block_info_text_size="*text_sm",
 )
 
+BOARD_HTML = """<div class="rb">{{#each value}}<div class="rt{{#if this.current}} cur{{/if}}{{#if this.picked}} on{{/if}}"
+ data-i="{{this.i}}" title="{{this.title}}"><img src="{{this.src}}" alt="{{this.title}}" draggable="false">
+<button type="button" class="rt-tick" data-act="tick" aria-label="Select for export">✓</button>
+<button type="button" class="rt-dl" data-act="export" aria-label="Export this picture">⬇</button>
+<span class="rt-name">{{this.title}}</span></div>{{/each}}</div>"""
+
+BOARD_CSS = """
+.rb { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.rt { position: relative; aspect-ratio: 4 / 5; border-radius: 10px; overflow: hidden; cursor: pointer;
+    background: var(--background-fill-secondary); border: 2px solid transparent; }
+.rt img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; }
+.rt.cur { border-color: var(--color-accent); }
+.rt.on { box-shadow: 0 0 0 3px var(--color-accent-soft); }
+.rt button { position: absolute; top: 6px; width: 28px; height: 28px; border-radius: 50%; border: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700;
+    cursor: pointer; background: rgba(0, 0, 0, 0.45); color: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8); transition: opacity 0.15s; }
+.rt-tick { left: 6px; }
+.rt-dl { right: 6px; opacity: 0; }
+.rt:hover .rt-dl, .rt-dl:focus-visible { opacity: 1; }
+.rt.on .rt-tick { background: var(--color-accent); color: white; box-shadow: 0 0 0 1.5px white; }
+.rt button:hover { background: rgba(0, 0, 0, 0.7); }
+.rt.on .rt-tick:hover { background: var(--color-accent); filter: brightness(1.1); }
+.rt-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 7px 5px; font-size: 0.72rem;
+    color: white; background: linear-gradient(transparent, rgba(0, 0, 0, 0.65)); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+@media (hover: none) { .rt-dl { opacity: 1; } }
+"""
+
+# clicks on the board: ✓ ticks a picture (kept on the server), ⬇ exports it, anywhere else opens it
+BOARD_JS = """
+element.addEventListener('click', (ev) => {
+  const tile = ev.target.closest('.rt');
+  if (!tile) return;
+  const i = parseInt(tile.dataset.i, 10);
+  const act = ev.target.closest('[data-act]')?.dataset.act;
+  if (act === 'tick') {
+    props.value = props.value.map(t => t.i === i ? {...t, picked: !t.picked} : t);
+    trigger('input', {picked: props.value.filter(t => t.picked).map(t => t.i)});
+  } else if (act === 'export') {
+    trigger('submit', {index: i});
+  } else {
+    props.value = props.value.map(t => ({...t, current: t.i === i}));
+    trigger('click', {index: i});
+  }
+});
+"""
+
 CSS = """
 .gradio-container { max-width: 1440px !important; margin: auto; }
 .app-header h1 { font-size: 1.9rem; font-weight: 700; margin-bottom: 0.15rem; letter-spacing: -0.01em; }
@@ -893,6 +1026,9 @@ CSS = """
 .picker .wrap { flex-direction: column; gap: 0.25rem !important; }
 .picker .wrap label { width: 100%; padding: 0.35rem 0.6rem !important; font-size: 0.86rem; line-height: 1.3; }
 .picker-groups .label-wrap span { font-weight: 650; }
+.export-bar { border-top: 1px solid var(--border-color-primary); padding-top: 0.6rem !important; gap: 0.5rem !important; }
+.export-bar .ticked { align-self: center; margin: 0 0 0 0.4rem; }
+.export-bar .ticked p { margin: 0; }
 /* the progress card: pinned to the corner, so a run can be watched without scrolling */
 .q-card { position: fixed; right: 18px; bottom: 18px; z-index: 1000; width: min(440px, calc(100vw - 32px));
     max-height: 62vh; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.85rem 0.95rem;
@@ -999,11 +1135,26 @@ def build() -> gr.Blocks:
                 # Right: the results, then what to do with them
                 with gr.Column(scale=3, min_width=420):
                     with gr.Column(elem_classes="panel"):
-                        step(4, "Compare and fine-tune", "Click a result to compare it with the original; "
-                             "drag the slider.")
-                        # no download buttons: they give 1600 px previews (as a zip); Export (step 5) saves full size
-                        gallery = gr.Gallery(label="Results", columns=4, height=230, allow_preview=False,
-                                             show_label=False, buttons=[])
+                        step(4, "Compare, fine-tune and export", "Click a picture to compare it with the "
+                             "original. Tick ✓ the ones to export together, or press ⬇ on one to export just "
+                             "that one.")
+                        gallery = gr.State([])  # the results' pictures, kept for the handlers that update them
+                        board = gr.HTML([], html_template=BOARD_HTML, css_template=BOARD_CSS, js_on_load=BOARD_JS,
+                                        elem_id="results-board")
+                        with gr.Column(visible=False, elem_classes="export-bar") as export_bar:
+                            with gr.Row(equal_height=True, elem_classes="row-end"):
+                                tick_all_btn = gr.Button("Select all", size="sm", min_width=90)
+                                tick_look_btn = gr.Button("Select this look", size="sm", min_width=120)
+                                tick_none_btn = gr.Button("Clear", size="sm", min_width=70)
+                                ticked_msg = gr.Markdown(elem_classes="hint ticked")
+                            with gr.Row(equal_height=True, elem_classes="row-end"):
+                                how = gr.Radio(HOW, value=FILES, label="Export as", scale=3)
+                                export_btn = gr.Button("Export selected", variant="primary", scale=2,
+                                                       min_width=150)
+                                open_btn = gr.Button("Open folder", scale=1, min_width=120)
+                            export_msg = gr.Markdown(elem_classes="hint")
+                            gr.Markdown("Full-size files, made with the sizes, file type and your name in "
+                                        "**Export settings** (step 5).", elem_classes="hint")
                         use_all = gr.Button("Use the selected look on all photos", variant="primary",
                                             visible=False)
                         with gr.Group(visible=False) as match_box:
@@ -1015,7 +1166,8 @@ def build() -> gr.Blocks:
                                 match_btn = gr.Button("Match all photos to the selected one", size="sm")
                                 unmatch_btn = gr.Button("Undo matching", size="sm")
                             match_msg = gr.Markdown(elem_classes="hint")
-                        compare = gr.ImageSlider(label="Before / after", height=480)
+                        # no download button: it saves a preview; export (above) saves full size
+                        compare = gr.ImageSlider(label="Before / after", height=480, buttons=["fullscreen"])
                         info = gr.Markdown()
                         with gr.Group(visible=False) as tune_box:
                             gr.Markdown("**Fine-tune the selected look.** Changes show instantly and are kept "
@@ -1056,7 +1208,7 @@ def build() -> gr.Blocks:
                                 fix_reset_btn = gr.Button("Back to automatic", size="sm")
                                 fix_remake = gr.Button("Remake this photo's looks", variant="primary", size="sm")
                     with gr.Column(elem_classes="panel"):
-                        step(5, "Save or export")
+                        step(5, "Save a preset, export settings")
                         with gr.Row(equal_height=False, elem_classes="row-end"):
                             look_name = gr.Textbox(label="Save the selected look as a preset",
                                                    placeholder="Preset name", scale=4)
@@ -1064,11 +1216,6 @@ def build() -> gr.Blocks:
                         with gr.Row(equal_height=False, elem_classes="row-end"):
                             export_dir = gr.Textbox(value=DEFAULT_EXPORT, label="Export folder", scale=4)
                             export_choose = gr.Button("Browse…", scale=1, min_width=90)
-                        scope = gr.Radio([ALL_RESULTS, SAME_LOOK, SELECTED, PICKED], value=ALL_RESULTS,
-                                         label="Export")
-                        export_pick = gr.CheckboxGroup([], label="Tick the photos to export", visible=False,
-                                                       info="The one you clicked in the results is ticked; "
-                                                            "tick one or as many as you like.")
                         sizes = gr.CheckboxGroup(SIZE_CHOICES, value=[deliver.FULL], label="Sizes",
                                                  info="Each size is cropped to its shape around the players. "
                                                       "Instagram sizes get a light sharpening for phones; print "
@@ -1097,10 +1244,6 @@ def build() -> gr.Blocks:
                                     w_text = gr.Textbox(label="Watermark text", placeholder="Empty: your copyright notice "
                                                         "(or PROOF)")
                                     w_opacity = gr.Slider(0.1, 1, 0.5, step=0.05, label="Strength")
-                        with gr.Row(equal_height=False, elem_classes="row-end"):
-                            export_btn = gr.Button("Export full size", variant="primary", scale=2, min_width=150)
-                            open_btn = gr.Button("Open folder", scale=1, min_width=140)
-                        export_msg = gr.Markdown(elem_classes="hint")
                         with gr.Accordion("Advanced: this look's recipe", open=False):
                             recipe_box = gr.Code(language="json", label="Recipe (edit before saving if you like)")
                     with gr.Column(elem_classes="panel"):
@@ -1240,8 +1383,9 @@ def build() -> gr.Blocks:
                  shown + [card], show_progress="hidden").then(
             picker_updates, None, pickers, show_progress="hidden")  # the presets' times, as learned
         use_all.click(use_on_all, [results, selected, trial, show_cut], shown + [card], show_progress="hidden")
-        gallery.select(pick, [results, show_cut],
-                       [selected, compare, info, recipe_box, look_name] + tune + [tune_note, fix_img])
+        board.click(board_open, [results, show_cut],
+                    [selected, compare, info, recipe_box, look_name] + tune + [tune_note, fix_img],
+                    show_progress="hidden")
         tuned = [results, thumbs, gallery, compare, info, recipe_box]
         tune_inputs = [results, thumbs, selected] + tune
         for slider in (t_strength, t_subject, t_background, t_warmth):
@@ -1255,13 +1399,18 @@ def build() -> gr.Blocks:
         fix_reset_btn.click(fix_reset, [results, selected], [fix_img, fix_msg])
         fix_remake.click(remake_photo, [results, thumbs, selected], tuned)
         save_btn.click(save_look, [results, selected, look_name, recipe_box], [pm_pick] + pickers)
-        scope.change(lambda v: gr.update(visible=v == PICKED), scope, export_pick, show_progress="hidden",
-                     queue=False)
-        pick_titles = gr.State([])
-        results.change(export_choices, [results, selected, export_pick, pick_titles], [export_pick, pick_titles],
-                       show_progress="hidden")
-        export_btn.click(export, [results, selected, export_dir, scope, export_pick, file_kind, sizes, c_creator, c_notice,
-                                  c_contact, w_on, w_text, w_style, w_opacity], export_msg)
+        picked, pick_titles = gr.State([]), gr.State([])
+        boarded = [board, picked, pick_titles, ticked_msg]
+        results.change(render_board, [results, selected, picked, pick_titles], boarded, show_progress="hidden")
+        results.change(lambda r: gr.update(visible=bool(r)), results, export_bar, show_progress="hidden")
+        board.input(board_tick, results, [picked, ticked_msg], show_progress="hidden")
+        tick_all_btn.click(tick_all, [results, selected, pick_titles], boarded, show_progress="hidden")
+        tick_look_btn.click(tick_look, [results, selected, pick_titles], boarded, show_progress="hidden")
+        tick_none_btn.click(tick_none, [results, selected, pick_titles], boarded, show_progress="hidden")
+        settings = [how, export_dir, file_kind, sizes, c_creator, c_notice, c_contact, w_on, w_text, w_style,
+                    w_opacity]
+        export_btn.click(export_ticked, [results, picked] + settings, [card, export_msg], show_progress="hidden")
+        board.submit(export_one, [results] + settings, [card, export_msg], show_progress="hidden")
         w_on.change(lambda v: gr.update(visible=v), w_on, w_box, show_progress="hidden", queue=False)
         match_btn.click(match_game, [results, thumbs, selected], tuned + [match_msg])
         unmatch_btn.click(clear_match, [results, thumbs, selected], tuned + [match_msg])
