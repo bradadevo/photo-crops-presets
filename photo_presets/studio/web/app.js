@@ -1068,12 +1068,6 @@ async function pollSwatches(pid) {
     };
     live.src = `/img/swatch/${pid}/${enc(name)}.jpg?e=${enc(r.token || "")}&t=${Date.now()}`;
   }
-  if (Date.now() - swatchSince > 5000) {  // the looks that cut out the players wait for the cut-out
-    for (const card of swatchWanted.values()) {
-      const l = lookByName(card.dataset.name), c = card.querySelector(".coming");
-      if (l?.cutout && c) c.textContent = "Cutting out the players…";
-    }
-  }
   if (swatchWanted.size) swatchTimer = setTimeout(() => pollSwatches(pid), 1000);
 }
 

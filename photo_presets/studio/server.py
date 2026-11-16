@@ -287,7 +287,8 @@ class Session:
                 if s.loading and not timing.models_loaded():
                     phase = "Loading the AI models (once a session)"
                 elif s.extra >= timing.cut_out() * 0.9 and spent < s.extra * pace:
-                    phase = "Cutting out the players (once a photo)"
+                    p = self.photos.get(s.photo)
+                    phase = "Separating the players from the background" + (f" · {p.name}" if p is not None else "")
                 else:
                     phase = f"Making {s.look}"
         for s in self.slots.values():

@@ -159,7 +159,7 @@ class Prepared:
                         matte = refine_heads(self.image, matte, self.scene.faces)
                     matte = with_balls(matte, self.scene.balls) if matte is not None else None
                     if matte is not None and self.scene.team:
-                        matte = fill_group(matte)
+                        matte = fill_group(matte, self.image, self.scene.subject_mask)
                 self._auto = (matte, self.scene.subject_mask)
             self.scene.matte, self.scene.subject_mask = self._fixed()
         return self.scene.matte
@@ -386,10 +386,11 @@ def cutout(img: Image.Image, subject_mask: np.ndarray) -> np.ndarray | None:
     return full
 
 
-def fill_group(alpha: np.ndarray) -> np.ndarray:
-    """A team photo's cut-out as one group: the gaps enclosed by the players (a child half
-    hidden behind the others, a dark kit the cut-out missed, the grass between them) are
-    taken in, so no look puts smoke or blur inside the group."""
+def fill_group(alpha: np.ndarray, image: Image.Image | None = None, people: np.ndarray | None = None) -> np.ndarray:
+    """A team photo's cut-out as one group: a child half hidden behind the others, or a dark kit
+    the cut-out missed, inside the group is taken in, so no look puts smoke or blur over them.
+    The grass between the players is not: what looks like the ground and background just around
+    the team stays background (a look that greys or darkens the background reaches it too)."""
     h, w = alpha.shape
     solid = (alpha > 0.4).astype(np.uint8)
     k = max(5, int(0.05 * h)) | 1
@@ -411,8 +412,43 @@ def fill_group(alpha: np.ndarray) -> np.ndarray:
     add = (group & (solid == 0) & (depth > k * 0.6)).astype(np.uint8)
     add = cv2.dilate(add, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k // 3 | 1, k // 3 | 1)))  # up to the players
     add = (add > 0) & group
+    if image is not None and add.any():
+        ground = _like_background(image, group, add, k)
+        if people is not None:  # inside a player the detector found, it is the player, whatever the color
+            person = cv2.resize(people.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            ground &= ~cv2.erode(person.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        add &= ~ground
+        add = cv2.morphologyEx(add.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)) > 0
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(add.astype(np.uint8), connectivity=8)
+        big = np.zeros(count, bool)
+        big[1:] = stats[1:, cv2.CC_STAT_AREA] >= 0.002 * h * w  # a missed child, not a few blades of grass
+        add = big[labels]
     soft = cv2.GaussianBlur(add.astype(np.float32), (0, 0), 1.5)
     return np.maximum(alpha, soft).astype(np.float32)
+
+
+def _like_background(image: Image.Image, group: np.ndarray, add: np.ndarray, k: int) -> np.ndarray:
+    """Which of the gaps' pixels look like what is just around the group (the grass, the field)."""
+    h, w = group.shape
+    lab = cv2.cvtColor(np.asarray(image.convert("RGB").resize((w, h))), cv2.COLOR_RGB2LAB).astype(np.float32)
+    ring = cv2.dilate(group.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1))) > 0
+    ring &= ~group
+    ys = np.nonzero(group.any(1))[0]
+    if len(ys):  # the ground around the lower half of the group (not the trees or sky above the team)
+        ring[: int((ys[0] + ys[-1]) / 2)] = False
+    samples = lab[ring]
+    if len(samples) < 200:
+        return np.zeros_like(add)
+    rng = np.random.default_rng(0)
+    samples = samples[rng.choice(len(samples), min(6000, len(samples)), replace=False)]
+    _, _, centers = cv2.kmeans(samples, 8, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0), 2,
+                               cv2.KMEANS_PP_CENTERS)
+    px = lab[add]
+    weight = np.array([0.45, 1.0, 1.0], np.float32)  # the color counts most, the light less (shade on grass)
+    d = np.sqrt((((px[:, None, :] - centers[None]) * weight) ** 2).sum(-1)).min(1)
+    out = np.zeros_like(add)
+    out[add] = d < 14
+    return out
 
 
 def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
