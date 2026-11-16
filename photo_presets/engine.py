@@ -13,6 +13,7 @@ them (look strength, player and background brightness, warmth) is instant.
 import dataclasses
 import hashlib
 import json
+import os
 import re
 import time
 from collections import OrderedDict
@@ -546,7 +547,8 @@ class Engine:
 
     def export(self, results: list[Result], folder: Path, progress=None, kind: str = JPEG,
                sizes: list[str] | None = None, credit: deliver.Credit | None = None,
-               mark: deliver.Watermark | None = None, logo: dict | None = None) -> tuple[list[Path], list[str]]:
+               mark: deliver.Watermark | None = None, logo: dict | None = None,
+               recipes: bool = False) -> tuple[list[Path], list[str]]:
         """Each result in each size (full size, Instagram, prints), with its
         recipe beside it as JSON. Returns the files saved and notes (such as a
         print size enlarged past the photo's own pixels).
@@ -606,11 +608,15 @@ class Engine:
                     images.save_jpeg(pipeline.to_image(arr), dest, exif, xmp)
                 if kind in (TIFF, BOTH):
                     images.save_tiff16(arr, dest.with_suffix(".tif"), exif, xmp)
-                dest.with_suffix(".json").write_text(json.dumps(
+                for f in (dest, dest.with_suffix(".tif")):  # dated now, so they sit with today's files
+                    if f.exists():  # (the date taken stays inside the picture, where Photos reads it)
+                        os.utime(f, None)
+                if recipes:  # (only when asked: how each picture was made)
+                    dest.with_suffix(".json").write_text(json.dumps(
                     {"source": str(r.source), "crop": r.crop, "seed": r.seed, "size": key, "recipe": r.recipe,
                      "edits": r.edits, "removed": self.removals.get(str(r.source), []),
                      "notes": notes, "cutout_fixes": [[f.x, f.y, f.add] for f in self.fixes_for(r)]},
-                    indent=1))
+                        indent=1))
                 saved.append(dest)
             if progress:
                 progress(i + 1, len(results), r.title)

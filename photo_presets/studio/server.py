@@ -1456,23 +1456,27 @@ async def export(req: Request):
     save_prefs({"folder": str(dest), "how": how, "kind": kind, "sizes": sizes,
                 "watermark": {k: w.get(k) for k in ("on", "text", "style", "opacity")},
                 "logo": {k: (body.get("logo") or {}).get(k) for k in ("on", "id", "corner", "size", "color")}})
+    recipes = bool(body.get("recipes"))
+    save_prefs({"recipes": recipes})
     task = Task(next(S.ids), "export", len(chosen), now=chosen[0].title)
     S.tasks[task.id] = task
-    W.submit(OUTPUT, _export, task, chosen, dest, how, kind, sizes, credit, mark, logo)
+    W.submit(OUTPUT, _export, task, chosen, dest, how, kind, sizes, credit, mark, logo, recipes)
     return task.public()
 
 
-def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo=None) -> None:
+def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo=None, recipes=False) -> None:
     def tick(done, total, name):
         task.done, task.now = done, name
     try:
-        into = Path(tempfile.mkdtemp(prefix="allprophoto-zip-")) if how == ZIP else dest
-        saved, notes = E.export(chosen, into, tick, kind, sizes, credit, mark, logo)
         n = len(chosen)
         photos = f"{n} picture{'s' if n != 1 else ''}"
+        stamp = f"AllProPhoto {time.strftime('%Y-%m-%d %H.%M.%S')} ({photos})"
+        # separate files go in a folder of their own (never scattered over the Desktop)
+        into = Path(tempfile.mkdtemp(prefix="allprophoto-zip-")) if how == ZIP else engine._unique(dest / stamp)
+        saved, notes = E.export(chosen, into, tick, kind, sizes, credit, mark, logo, recipes)
         if how == ZIP:
             dest.mkdir(parents=True, exist_ok=True)
-            zipped = engine._unique(dest / f"AllProPhoto {time.strftime('%Y-%m-%d %H.%M.%S')} ({photos}).zip")
+            zipped = engine._unique(dest / f"{stamp}.zip")
             with zipfile.ZipFile(zipped, "w", zipfile.ZIP_DEFLATED) as z:
                 for f in sorted(into.rglob("*")):
                     if f.is_file():
@@ -1480,8 +1484,8 @@ def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo
             shutil.rmtree(into, ignore_errors=True)
             task.path, task.message = str(zipped), f"Saved {photos} in {zipped.name}"
         else:
-            task.path = str(saved[0]) if saved else str(dest)
-            task.message = f"Saved {photos} to {dest.name}" + (f" ({len(saved)} files)" if len(saved) != n else "")
+            task.path = str(saved[0]) if saved else str(into)
+            task.message = f"Saved {photos} in {dest.name} › {into.name}" + (f" ({len(saved)} files)" if len(saved) != n else "")
         if notes:
             task.message += ". " + "; ".join(notes)
         task.state = "done"

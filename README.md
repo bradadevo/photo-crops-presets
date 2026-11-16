@@ -277,6 +277,13 @@ picture (GAME DAY, the line under it, a number) and its box opens in the
 panel with the words selected, ready to type over. The **×** beside a box
 takes those words off the poster (type in the box to put them back).
 
+**Export**: separate files go in a new folder of their own ("AllProPhoto
+<date> (<n> pictures)") inside the folder you choose, like the zip; each file
+is dated when it was exported (the date the photo was taken stays inside it,
+where Photos reads it). A small .json beside each picture (how it was made)
+is saved only with **Also save how each was made** ticked (under "Your name,
+copyright, watermark and more"); the command line always saves it.
+
 **Posters in any shape**: pick **Post** (Instagram 4:5), **Square** (1:1),
 **Story** (Instagram or TikTok story or reel, 9:16) or **Wide** (YouTube, X,
 Facebook, 16:9); the picture you edit is that shape, as it will be exported.

@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     e = Engine()
     results = (e.explore(paths, a.random, a.crop, a.seed, progress) if a.random
                else e.presets(paths, names, a.crop, progress=progress))
-    saved, notes = e.export(results, Path(a.out).expanduser(), progress, credit=deliver.Credit.load())
+    saved, notes = e.export(results, Path(a.out).expanduser(), progress, credit=deliver.Credit.load(), recipes=True)
     for note in notes:
         print(note)
     print(f"Saved {len(saved)} photo(s) to {Path(a.out).expanduser()}")

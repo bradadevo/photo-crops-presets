@@ -790,7 +790,7 @@ function openExport(ids) {
   const m = modal(`<header><h2>Export ${plural(n, "picture")}</h2><div class="thumbs">${thumbs}</div></header>
     <div class="body">
       <div class="fld"><label>Save to</label><div class="path"><code id="x-folder"></code><button class="btn" id="x-change">Change…</button></div></div>
-      <div class="fld"><label>As</label><div class="seg full" id="x-how"><button data-v="files">${icon("image")} Separate files</button><button data-v="zip">${icon("layers")} One zip file</button></div></div>
+      <div class="fld"><label>As</label><div class="seg full" id="x-how"><button data-v="files" title="In a new folder of their own">${icon("image")} Separate files</button><button data-v="zip">${icon("layers")} One zip file</button></div></div>
       <div class="fld"><label>Sizes <span style="color:var(--faint);font-weight:400">· each cropped around the players</span></label><div class="chips" id="x-sizes">
         ${st.sizes.map((s) => `<button data-v="${s.key}" title="${esc(s.label)}">${esc(s.short)}</button>`).join("")}</div></div>
       <div class="fld"><label>File type</label><div class="seg full" id="x-kind"><button data-v="jpeg">JPEG</button><button data-v="tiff">16-bit TIFF</button><button data-v="both">Both</button></div>
@@ -802,9 +802,10 @@ function openExport(ids) {
           <div class="seg full small" id="x-logo-color">${[["auto", "Auto"], ["original", "As it is"], ["white", "White"], ["black", "Black"]].map(([v, t]) => `<button data-v="${v}">${t}</button>`).join("")}</div>
           <div class="slider"><label>Size</label><output id="x-logo-size-v"></output><input type="range" id="x-logo-size" min="0.06" max="0.4" step="0.01" value="${sel.logo.size}"></div>
         </div></div>` : ""}
-      <details class="more"><summary>${icon("chev")} Your name, copyright and watermark</summary><div class="inner">
+      <details class="more"><summary>${icon("chev")} Your name, copyright, watermark and more</summary><div class="inner">
         <div class="fld"><div class="two"><input class="field" id="x-creator" placeholder="Photographer" value="${esc(c.creator || "")}"><input class="field" id="x-contact" placeholder="Email, website or @handle" value="${esc(c.contact || "")}"></div></div>
         <input class="field" id="x-copy" placeholder="Copyright (empty: © year taken, your name)" value="${esc(c.copyright || "")}">
+        <label class="toggle"><input type="checkbox" id="x-recipes" ${p.recipes ? "checked" : ""}><span><b>Also save how each was made</b><small>A small .json file beside each picture (its look, edits and settings)</small></span></label>
         <label class="toggle"><input type="checkbox" id="x-mark" ${sel.mark.on ? "checked" : ""}><span><b>Add a watermark</b><small>For client proofs and posts</small></span></label>
         <div id="x-mark-box" class="fld" ${sel.mark.on ? "" : "hidden"}>
           <div class="seg full" id="x-style"><button data-v="corner">Corner</button><button data-v="across">Across (proofs)</button></div>
@@ -849,7 +850,8 @@ function openExport(ids) {
     const body = { ids, how: sel.how, kind: sel.kind, sizes: [...sel.sizes], folder: sel.folder,
       credit: { creator: $("#x-creator", m).value, contact: $("#x-contact", m).value, copyright: $("#x-copy", m).value },
       watermark: { on: sel.mark.on, text: $("#x-mtext", m).value, style: sel.mark.style, opacity: sel.mark.opacity },
-      logo: { ...sel.logo, on: sel.logo.on && !!sel.logo.id } };
+      logo: { ...sel.logo, on: sel.logo.on && !!sel.logo.id }, recipes: $("#x-recipes", m).checked };
+    st.prefs.recipes = body.recipes;
     closeModal();
     await api("/api/export", body);
     refresh();
