@@ -50,12 +50,13 @@ SIZES = {s.key: s for s in [
     Size("ig_portrait", "Instagram post 4:5 (1080 x 1350)", 1080, 1350, True, True),
     Size("ig_square", "Instagram square (1080 x 1080)", 1080, 1080, True, True),
     Size("ig_story", "Instagram story / reel cover 9:16 (1080 x 1920)", 1080, 1920, True, True),
+    Size("wide", "Wide 16:9 for YouTube, X, Facebook (1920 x 1080)", 1920, 1080, True, False),
     Size("print_4x6", "Print 4 x 6 in (1200 x 1800, 300 ppi)", 1200, 1800, False),
     Size("print_5x7", "Print 5 x 7 in (1500 x 2100, 300 ppi)", 1500, 2100, False),
     Size("print_8x10", "Print 8 x 10 in (2400 x 3000, 300 ppi)", 2400, 3000, False),
     Size("print_11x14", "Print 11 x 14 in (3300 x 4200, 300 ppi)", 3300, 4200, False),
 ]}
-SHORT = {"ig_portrait": "ig-4x5", "ig_square": "ig-square", "ig_story": "ig-story", "print_4x6": "4x6",
+SHORT = {"ig_portrait": "ig-4x5", "ig_square": "ig-square", "ig_story": "ig-story", "wide": "wide-16x9", "print_4x6": "4x6",
          "print_5x7": "5x7", "print_8x10": "8x10", "print_11x14": "11x14"}
 
 

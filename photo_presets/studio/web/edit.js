@@ -546,13 +546,16 @@ const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]]
   teamcolor: [["title", "Name or title"], ["line", "Line under it"]],
   matchday: [["title", "Small title"], ["away", "Opponent"], ["line", "When and where"]],
   champions: [["title", "Title"], ["line", "The event"]] };
+const POSTER_SHAPES = [["post", "Post", "Instagram post, 4:5", 4, 5], ["square", "Square", "Instagram or Facebook square, 1:1", 1, 1],
+  ["story", "Story", "Instagram or TikTok story or reel, 9:16", 9, 16], ["wide", "Wide", "YouTube, X or Facebook, 16:9", 16, 9]];
 const WORD_COLORS = ["#ffffff", "#111111", "#d4af37", "#c8102e", "#0b3d91", "#1f2a44", "#0f5f3a", "#d97706", "#5b2a86", "#7dd3fc"];
 const TEAM_COLORS = ["#1f2a44", "#0b3d91", "#b3121a", "#0f5f3a", "#5b2a86", "#d97706", "#111111"];
 function posterSection(e) {
   const p = e.poster;
   return `<div class="section"><h3>Poster</h3>
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
-    ${p ? `<div class="seg full small" id="pp-shape"><button data-v="post" class="${p.shape === "post" ? "on" : ""}" title="Instagram post, 4:5">Post</button><button data-v="story" class="${p.shape === "story" ? "on" : ""}" title="Instagram story or reel cover, 9:16">Story</button></div>
+    ${p ? `<div class="fld"><label>Shape <small class="faint">· what you see is what's exported</small></label><div class="shape-picks" id="pp-shape">${POSTER_SHAPES.map(([v, l, sub, w, h]) => `<button data-v="${v}" class="${p.shape === v ? "on" : ""}" title="${esc(sub)}"><i style="aspect-ratio:${w}/${h}"></i><b>${l}</b><small>${esc(sub)}</small></button>`).join("")}</div></div>
+      <div class="slider"><label title="Make every word and banner smaller or bigger (they already fit the shape you pick)">Words and banners size</label><output>${Math.round((p.size || 1) * 100)}%</output><input type="range" id="pp-size" min="0.6" max="1.5" step="0.05" value="${p.size || 1}"></div>
       ${p.template === "spotlight" ? `<div class="fld"><label>Number</label><div class="seg full small" id="pp-numstyle">
         <button data-v="badge" class="${(p.number_style || "badge") === "badge" ? "on" : ""}" title="A solid badge on the card's corner, in front">Badge</button>
         <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
@@ -608,6 +611,12 @@ function bindPosterSection(cur, pane) {
     toast("Taken off the poster", { small: "Type in its box to put it back, or ⌘Z" });
   });
   pane.querySelectorAll("#pp-shape button").forEach((b) => b.onclick = () => set((p) => { p.shape = b.dataset.v; }));
+  const size = $("#pp-size", pane);
+  if (size) {
+    size.oninput = () => { size.previousElementSibling.textContent = `${Math.round(size.value * 100)}%`; };
+    size.onchange = () => set((p) => { p.size = +size.value; });
+    size.ondblclick = () => set((p) => { p.size = 1; });
+  }
   pane.querySelectorAll("#pp-color button").forEach((b) => b.onclick = () => set((p) => { p.color = b.dataset.v; }));
   pane.querySelectorAll("#pp-logo button").forEach((b) => b.onclick = () => set((p) => { p.logo = b.dataset.v; }));
   $("#pp-off", pane)?.addEventListener("click", () => { st.tool = null; changeEdits(s0(), (ed) => { delete ed.poster; }); });

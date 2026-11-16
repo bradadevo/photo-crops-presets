@@ -716,3 +716,13 @@ details.group > summary:hover h3, details.group > summary:hover svg { color: var
 .pick-own { width: 24px; height: 24px; border-radius: 50%; overflow: hidden; border: 2px solid var(--line-2); cursor: pointer;
   background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red); position: relative; }
 .pick-own input { opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+/* the poster's shape: what you see is what is exported */
+.shape-picks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.shape-picks button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px 6px; border-radius: 8px;
+  border: 1px solid var(--line-2); background: var(--panel-2); color: var(--muted); cursor: pointer; }
+.shape-picks button i { display: block; height: 22px; max-width: 34px; border: 1.5px solid currentColor; border-radius: 3px; }
+.shape-picks button b { font-size: 12px; font-weight: 650; }
+.shape-picks button small { display: none; }
+.shape-picks button:hover { color: var(--text); }
+.shape-picks button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.fld label small.faint { color: var(--faint); font-weight: 500; }

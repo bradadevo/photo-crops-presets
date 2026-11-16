@@ -567,6 +567,7 @@ class Engine:
                                                self.memo_key(r.source, r.crop, r.recipe, p.frame))
             fh, fw = full.shape[:2]
             where, players = focus(p.scene), players_box(p.scene)
+            made = full  # (the look before its edits: a poster is laid out again for each size's shape)
             if edits.edited(r.edits):
                 where = edits.map_point(*where, fw, fh, r.edits)
                 players = edits.map_box(players, fw, fh, r.edits)
@@ -579,7 +580,14 @@ class Engine:
                 arr, name = full, stem
                 if key != deliver.FULL:
                     size = deliver.SIZES[key]
-                    arr, grow = deliver.sized(full, size, where, players)
+                    tw, th = size.target(*full.shape[1::-1])
+                    poster_here = (r.edits or {}).get("poster")
+                    if poster_here and abs(tw / th - full.shape[1] / full.shape[0]) > 0.02:
+                        # a poster in another shape: laid out again for it (never cropped: no words cut off)
+                        again = dataclasses.replace(r, edits={**r.edits, "poster": {**poster_here, "aspect": tw / th}})
+                        arr, grow = deliver.sized(self.finalize(again, made, texts=False), size, where, players)
+                    else:
+                        arr, grow = deliver.sized(full, size, where, players)
                     name = f"{stem}_{deliver.SHORT[key]}"
                     if grow > 1.05:
                         notes_out.append(f"{r.source.name} {size.label.split(' (')[0]}: enlarged {grow:.1f}x "

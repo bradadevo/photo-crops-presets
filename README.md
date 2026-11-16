@@ -277,6 +277,14 @@ picture (GAME DAY, the line under it, a number) and its box opens in the
 panel with the words selected, ready to type over. The **×** beside a box
 takes those words off the poster (type in the box to put them back).
 
+**Posters in any shape**: pick **Post** (Instagram 4:5), **Square** (1:1),
+**Story** (Instagram or TikTok story or reel, 9:16) or **Wide** (YouTube, X,
+Facebook, 16:9); the picture you edit is that shape, as it will be exported.
+Every word and banner fits the shape (on a tall story they are smaller, to its
+width), and **Words and banners size** makes them all smaller or bigger.
+Exporting a poster in other sizes lays it out again for each size's shape
+(nothing is cropped off), and export has a **Wide 16:9** size too.
+
 **Any word, any color**: the round dot beside each poster word opens its
 colors (white, black, gold, red, blue, navy, green, orange, purple, sky, or
 any color with the rainbow dot); **A** puts back the layout's own color.
