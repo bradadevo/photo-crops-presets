@@ -17,6 +17,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "ADDED", tmp_path / "added")
     monkeypatch.setattr(server, "SESSION", tmp_path / "session.json")
     monkeypatch.setattr(server, "PREFS", tmp_path / "prefs.json")
+    monkeypatch.setattr(server, "LOOKS", tmp_path / "looks")
     monkeypatch.setattr(server, "S", server.Session())
     return TestClient(server.app)
 
@@ -104,3 +105,22 @@ def test_sharing_exports_then_hands_over(client, monkeypatch, tmp_path):
     assert server.S.tasks[task["id"]].state == "done"
     assert calls and calls[0][-2:] == ["airdrop", str(out)]
     assert client.post("/api/slots/999/share", json={"service": "fax"}).status_code == 400
+
+
+def test_looks_come_back_after_a_restart(client, monkeypatch):
+    slot = _made(client, monkeypatch)
+    client.post("/api/slots/999/edit", json={"edits": {"crop": [0, 0, 0.5, 1]}})
+    client.post("/api/slots/keep", json={"ids": [999], "on": True})
+    server.Keeper().flush()
+    monkeypatch.setattr(server, "S", server.Session())
+    server.S.restore()
+    back = server.S.slots[999]
+    assert back.state == "done" and back.kept and back.result.edits["crop"] == [0, 0, 0.5, 1]
+    assert back.result.after.size == (320, 240)
+    assert next(server.S.ids) > 999  # new looks never take its number
+
+
+def test_the_page_is_the_one_the_app_started_with(client):
+    r = client.get("/static/app.js")
+    assert r.status_code == 200 and r.content == server.PAGE["app.js"]
+    assert client.get("/static/nope.js").status_code == 404

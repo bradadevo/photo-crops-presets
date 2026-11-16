@@ -185,7 +185,7 @@ async function refresh() {
   const before = new Set(st.photos.map((p) => p.id));
   const wasActive = st.activePhoto;
   st.photos = data.photos; st.slots = data.slots; st.tasks = data.tasks; st.busy = data.busy; st.left = data.left;
-  st.modelsLoaded = data.models_loaded; st.credit = data.credit; st.prefs = data.prefs;
+  st.modelsLoaded = data.models_loaded; st.credit = data.credit; st.prefs = data.prefs; st.update = data.update;
   if (st.activePhoto && !st.photos.some((p) => p.id === st.activePhoto)) st.activePhoto = null;
   if (!st.activePhoto && st.photos.length) st.activePhoto = st.photos.find((p) => !before.has(p.id))?.id ?? st.photos[0].id;
   if (st.current && !slotById(st.current)) st.current = null;
@@ -196,7 +196,7 @@ async function refresh() {
 }
 function schedule() {
   clearTimeout(pollTimer);
-  if (st.busy) pollTimer = setTimeout(refresh, 700);
+  pollTimer = setTimeout(refresh, st.busy ? 700 : 30000);  // when idle, now and then: a newer version, say
 }
 async function loadLooks() {
   const data = await api("/api/looks");
@@ -236,6 +236,9 @@ function renderTop() {
       <button class="btn ghost" id="stop-run">Stop</button><span class="bar" style="width:${(frac * 100).toFixed(1)}%"></span>`;
     $("#stop-run").onclick = async () => { await api("/api/run/stop", {}); toast("Stopped. The looks already made are kept."); refresh(); };
   } else pill.hidden = true;
+  const up = $("#update-btn");
+  up.hidden = !st.update;
+  up.onclick = restartApp;
   const kept = keptSlots().length;
   const btn = $("#export-btn");
   const cur = slotById(st.current);
@@ -1310,6 +1313,26 @@ document.addEventListener("keydown", (e) => {
   else if (k === "enter" && st.view === "grid" && cur) { st.view = "single"; render(); }
   else if (e.key === "?") showHelp();
 });
+
+/* A newer version is on this Mac: restart into it. The looks, edits, picks and stars are saved
+   and come back; only looks still being made would stop. */
+function restartApp() {
+  const making = st.slots.filter((s) => s.state === "wait" || s.state === "now").length;
+  const m = modal(`<header><h2>Restart with the new version?</h2></header><div class="body"><p style="margin:0;color:var(--muted)">
+    AllProPhoto closes and opens again in a few seconds. Your photos, looks, edits, picks and stars come back as they are.
+    ${making ? `<br><br><b style="color:var(--gold)">${plural(making, "look")} still being made will stop</b>: make them again after.` : ""}</p></div>
+    <footer><button class="btn ghost" data-close>Later</button><button class="btn primary" id="rs-go">Restart now</button></footer>`);
+  $("#rs-go", m).onclick = async () => {
+    closeModal();
+    $("#modal-root").innerHTML = `<div class="scrim"><div class="modal" style="width:auto;padding:26px 30px;display:flex;gap:14px;align-items:center"><span class="spin"></span><b>Restarting AllProPhoto…</b></div></div>`;
+    try { await fetch("/api/restart", { method: "POST" }); } catch { /* it is going down */ }
+    const back = async () => {
+      try { const r = await fetch("/api/looks", { cache: "no-store" }); if (r.ok) { location.reload(); return; } } catch { /* not yet */ }
+      setTimeout(back, 1000);
+    };
+    setTimeout(back, 2500);
+  };
+}
 
 function exportDefault() {
   const kept = keptSlots();

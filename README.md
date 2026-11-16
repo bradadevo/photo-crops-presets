@@ -231,6 +231,15 @@ nothing made, Undo with nothing to undo...). **Edit** works on any photo:
 with no look made, the photo itself opens for editing (as the look
 **Original**).
 
+**Nothing is lost when you quit**: your photos, the looks made, their edits,
+picks and stars, cut-out fixes and removals are saved as you go (looks at
+preview size in `~/.cache/photo-crops-presets/session-looks`) and are all
+there when the app opens again. **Remove all** (and removing a look) clears
+them. When a newer version of AllProPhoto is installed, a green **Restart to
+update** button appears at the top: the app closes and opens again in a few
+seconds, with everything as it was. (The app keeps using the version it
+started with until then, so it never mixes old and new.)
+
 Press **?** for every keyboard shortcut.
 
 **Tools** (top right) opens the preset editor, Lightroom presets and assets in

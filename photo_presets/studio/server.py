@@ -33,7 +33,6 @@ from queue import PriorityQueue
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from photo_crops import images
@@ -51,6 +50,8 @@ EXAMPLES = Path("~/.cache/photo-crops-presets/examples").expanduser()  # each lo
 WORK = Path(tempfile.mkdtemp(prefix="allprophoto-"))  # songs for reels
 ADDED = (STATE / "added") if STATE else Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted
 SESSION = (STATE or CONFIG) / "studio-session.json"  # the photos you are working on, kept for next time
+# the looks made, with their edits, picks and stars, kept for next time (pictures at preview size)
+LOOKS = (STATE / "looks") if STATE else Path("~/.cache/photo-crops-presets/session-looks").expanduser()
 DEFAULT_EXPORT = str(Path.home() / "Pictures" / "Photo Presets")
 THUMB, VIEW, SWATCH, TRY = 560, 1800, 420, 1400  # px: the strip and grid, a photo, a look's card, trying a look on
 ZOOM = 3600  # px: a look made again, sharper, when you zoom in
@@ -205,20 +206,41 @@ class Session:
             self.photos.pop(pid, None)
             self.save()
 
+    def saved(self) -> dict:
+        return {"photos": [str(p.path) for p in self.photos.values()],
+                "fixes": [[k[0], k[1], [[f.x, f.y, f.add] for f in v]] for k, v in E.fixes.items() if v],
+                "removals": E.removals}
+
     def save(self) -> None:
         try:
             SESSION.parent.mkdir(parents=True, exist_ok=True)
-            SESSION.write_text(json.dumps({"photos": [str(p.path) for p in self.photos.values()]}, indent=1))
+            SESSION.write_text(json.dumps(self.saved(), indent=1))
         except OSError:
             pass
 
     def restore(self) -> None:
-        """The photos from last time (those still there)."""
+        """The photos from last time (those still there), their cut-out fixes and removals,
+        and the looks made of them (with their edits, picks and stars)."""
         try:
-            paths = [Path(p) for p in json.loads(SESSION.read_text()).get("photos", [])]
-        except (OSError, ValueError, AttributeError):
+            data = json.loads(SESSION.read_text())
+        except (OSError, ValueError):
             return
-        self.add_photos([p for p in paths if p.is_file()])
+        for path, crop, fixes in data.get("fixes", []):
+            E.fixes[(path, crop)] = [Fix(float(x), float(y), bool(add)) for x, y, add in fixes]
+        for path, removals in (data.get("removals") or {}).items():
+            E.removals[path] = removals
+        looks = restore_looks()
+        if looks:
+            self.ids = itertools.count(max(m["id"] for m, _ in looks) + 1)
+        self.add_photos([Path(p) for p in data.get("photos", []) if Path(p).is_file()])
+        by_path = {str(p.path): p.id for p in self.photos.values()}
+        for meta, r in looks:
+            pid = by_path.get(meta["photo"])
+            if pid is None:
+                continue
+            self.slots[meta["id"]] = Slot(meta["id"], 0, pid, meta["look"], r.title, 0.0, state="done", result=r,
+                                          kept=bool(meta.get("kept")), rating=int(meta.get("rating", 0)),
+                                          crop=r.crop)
 
     def busy(self) -> bool:
         return any(s.state in ("wait", "now") for s in self.slots.values()) or any(
@@ -241,6 +263,118 @@ class Session:
 E = Engine()
 S = Session()
 W = Worker()
+
+
+# Keeping the session for next time ------------------------------------------------------------
+
+def _look_dir(sid: int) -> Path:
+    return LOOKS / str(sid)
+
+
+def save_look(s: Slot) -> None:
+    """The look's pictures (when they changed) and what it is."""
+    r = s.result
+    d = _look_dir(s.id)
+    d.mkdir(parents=True, exist_ok=True)
+    if not (d / "before.jpg").exists():
+        r.before.convert("RGB").save(d / "before.jpg", quality=94)
+    r.after.convert("RGB").save(d / "after.jpg", quality=94)
+    if r.look is not None and r.look is not r.after:
+        r.look.convert("RGB").save(d / "look.jpg", quality=94)
+    else:
+        (d / "look.jpg").unlink(missing_ok=True)
+    (d / "meta.json").write_text(json.dumps({
+        "id": s.id, "photo": str(r.source), "look": s.look, "crop": r.crop, "recipe": r.recipe, "seed": r.seed,
+        "frame": r.frame, "edits": r.edits, "notes": r.notes, "kept": s.kept, "rating": s.rating}, indent=1))
+
+
+def restore_looks() -> list[tuple[dict, Result]]:
+    out = []
+    for d in sorted(LOOKS.glob("*/meta.json"), key=lambda p: int(p.parent.name) if p.parent.name.isdigit() else 0):
+        try:
+            meta = json.loads(d.read_text())
+            before = Image.open(d.parent / "before.jpg").convert("RGB")
+            after = Image.open(d.parent / "after.jpg").convert("RGB")
+            look = Image.open(d.parent / "look.jpg").convert("RGB") if (d.parent / "look.jpg").exists() else None
+        except (OSError, ValueError):
+            continue
+        frame = tuple(meta["frame"]) if meta.get("frame") else None
+        out.append((meta, Result(Path(meta["photo"]), meta.get("crop", "none"), meta["recipe"], int(meta.get("seed", 0)),
+                                 before, after, meta.get("notes", []), None, look, frame, meta.get("edits") or {})))
+    return out
+
+
+class Keeper:
+    """Every couple of seconds, writes the looks that changed (and drops removed ones)."""
+
+    def __init__(self):
+        self.stamps: dict[int, tuple] = {}
+        self.session = ""
+        self.lock = threading.Lock()
+        self.started = False
+
+    def start(self):
+        if not self.started:
+            self.started = True
+            threading.Thread(target=self._loop, daemon=True, name="allprophoto-keeper").start()
+
+    def _loop(self):
+        while True:
+            time.sleep(2.0)
+            self.flush()
+
+    def flush(self) -> None:
+        with self.lock:
+            with S.lock:
+                done = [s for s in S.slots.values() if s.state == "done" and s.result is not None]
+                live = {str(s.id) for s in S.slots.values()}
+            for s in done:
+                stamp = (s.ver, id(s.result), s.kept, s.rating)
+                if self.stamps.get(s.id) != stamp:
+                    try:
+                        save_look(s)
+                        self.stamps[s.id] = stamp
+                    except OSError:
+                        pass
+            if LOOKS.exists():
+                for d in LOOKS.iterdir():
+                    if d.is_dir() and d.name not in live:
+                        shutil.rmtree(d, ignore_errors=True)
+            now = json.dumps(S.saved(), sort_keys=True)
+            if now != self.session:
+                S.save()
+                self.session = now
+
+
+K = Keeper()
+
+
+# Updates: the app serves the page it started with; a newer version on disk is offered as a restart
+
+def _snapshot() -> dict[str, bytes]:
+    return {p.name: p.read_bytes() for p in WEB.iterdir() if p.is_file()}
+
+
+PAGE = _snapshot()
+
+
+def _code_time() -> float:
+    root = Path(__file__).resolve().parents[1]
+    return max(p.stat().st_mtime for p in [*root.rglob("*.py"), *WEB.iterdir()] if p.is_file())
+
+
+STARTED_CODE = _code_time()
+_update = {"checked": 0.0, "ready": False}
+
+
+def update_ready() -> bool:
+    if time.time() - _update["checked"] > 10:
+        _update["checked"] = time.time()
+        try:
+            _update["ready"] = _code_time() > STARTED_CODE + 1
+        except OSError:
+            pass
+    return _update["ready"]
 
 
 # Pictures --------------------------------------------------------------------------------
@@ -437,9 +571,38 @@ def looks_list() -> list[dict]:
     return out
 
 
+TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png"}
+
+
 @app.get("/")
 def index():
-    return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-store"})
+    return Response(PAGE["index.html"], media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/static/{name}")
+def static(name: str):
+    if name not in PAGE:
+        raise HTTPException(404)
+    return Response(PAGE[name], media_type=TYPES.get(Path(name).suffix, "application/octet-stream"),
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/restart")
+def restart():
+    """Restarts the app with the newer version (the looks are saved first, and come back)."""
+    K.flush()
+
+    def go():
+        time.sleep(0.4)
+        exe = Path(sys.executable)
+        bundle = next((p for p in exe.parents if p.suffix == ".app"), None)
+        if bundle is not None:  # the Mac app: open it again once this one has quit
+            subprocess.Popen(["/bin/sh", "-c", f"sleep 1.2; open -n '{bundle}'"], start_new_session=True)
+            os._exit(0)
+        args = [a for a in sys.argv[1:] if a != "--no-browser"] + ["--no-browser"]
+        os.execv(sys.executable, [sys.executable, "-m", "photo_presets.studio.server", *args])
+    threading.Thread(target=go, daemon=True).start()
+    return {"ok": True}
 
 
 @app.get("/api/state")
@@ -450,6 +613,7 @@ def state():
         tasks = [t.public() for t in S.tasks.values() if t.state == "running" or time.time() - t.started < 600]
     credit = deliver.Credit.load()
     return {"photos": photos, "slots": slots, "tasks": tasks, "busy": S.busy(), "left": round(S.left()),
+            "update": update_ready(),
             "models_loaded": timing.models_loaded(), "credit": credit.__dict__,
             "prefs": {"folder": DEFAULT_EXPORT} | prefs()}
 
@@ -564,7 +728,7 @@ async def try_on(pid: int, name: str):
     S.photo(pid)
     try:
         data = await asyncio.wrap_future(try_future(pid, name))
-    except CancelledError:
+    except (CancelledError, asyncio.CancelledError):
         raise HTTPException(409, "Another look is being tried on")
     if data is None:
         raise HTTPException(404, "The AI looks are made with Make")
@@ -1154,7 +1318,6 @@ async def http_error(_, exc: HTTPException):
     return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
 
 
-app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 
 def _classic() -> None:
@@ -1222,6 +1385,7 @@ def main() -> int:
     url = f"http://127.0.0.1:{port}"
     _classic()
     S.restore()
+    K.start()
     if not window:
         if "--no-browser" not in sys.argv:
             threading.Timer(1.5, lambda: webbrowser.open(url)).start()

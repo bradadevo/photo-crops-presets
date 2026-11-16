@@ -581,3 +581,5 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .look .pic img.loading { opacity: .55; filter: saturate(.6); }
 .look .pic .ph-art + img { position: absolute; inset: 0; }
 .viewer:has(.frame-preview) .hint-line { display: none; }
+.btn.update { border-color: rgba(62, 207, 142, .5); color: var(--good); background: rgba(62, 207, 142, .08); }
+.btn.update:hover { background: rgba(62, 207, 142, .16) !important; }
