@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import io
 import itertools
+import os
 import json
 import re
 import shutil
@@ -39,15 +40,17 @@ from photo_crops import images
 from photo_crops.ui import choose_folder
 from photo_presets import deliver, edits, engine, pipeline, presets, reel, timing
 from photo_presets.engine import Engine, Job, Result
-from photo_presets.scene import Fix
+from photo_presets.scene import Fix, frame_boxes
 
 WEB = Path(__file__).parent / "web"
 CONFIG = Path("~/.config/photo-crops-presets").expanduser()
-PREFS = CONFIG / "studio.json"
+# ALLPROPHOTO_STATE: a folder of its own for the session, settings and added photos (a test copy of the app)
+STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_STATE") else None
+PREFS = (STATE or CONFIG) / "studio.json"
 EXAMPLES = Path("~/.cache/photo-crops-presets/examples").expanduser()  # each look's last picture, for the picker
 WORK = Path(tempfile.mkdtemp(prefix="allprophoto-"))  # songs for reels
-ADDED = Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted onto the page
-SESSION = CONFIG / "studio-session.json"  # the photos you are working on, kept for next time
+ADDED = (STATE / "added") if STATE else Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted
+SESSION = (STATE or CONFIG) / "studio-session.json"  # the photos you are working on, kept for next time
 DEFAULT_EXPORT = str(Path.home() / "Pictures" / "Photo Presets")
 THUMB, VIEW, SWATCH, TRY = 560, 1800, 420, 1400  # px: the strip and grid, a photo, a look's card, trying a look on
 ZOOM = 3600  # px: a look made again, sharper, when you zoom in
@@ -112,6 +115,7 @@ class Slot:
     ver: int = 0
     kept: bool = False
     rating: int = 0
+    crop: str = "none"
     started: float = 0.0
     extra: float = 0.0  # one-off work in this look's time (getting the photo ready, loading models)
     loading: bool = False
@@ -125,6 +129,7 @@ class Slot:
             pct = min(95, int(100 * (time.time() - self.started) / max(1.0, self.expect + self.extra)))
         out = {"id": self.id, "run": self.run, "photo": self.photo, "look": self.look, "title": self.title,
                "state": self.state, "ver": self.ver, "kept": self.kept, "rating": self.rating, "pct": pct,
+               "crop": self.crop,
                "secs": round(self.secs, 1),
                "error": self.error, "note": "Loading the AI models (once a session)"
                if self.state == "now" and self.loading and not timing.models_loaded() else ""}
@@ -202,7 +207,7 @@ class Session:
 
     def save(self) -> None:
         try:
-            CONFIG.mkdir(parents=True, exist_ok=True)
+            SESSION.parent.mkdir(parents=True, exist_ok=True)
             SESSION.write_text(json.dumps({"photos": [str(p.path) for p in self.photos.values()]}, indent=1))
         except OSError:
             pass
@@ -387,7 +392,8 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
         for pid, job in jobs:
             name = job.recipe.get("name", "")
             sid = next(S.ids)
-            S.slots[sid] = Slot(sid, run, pid, name or "Random look", job.title, timing.seconds(name, job.recipe))
+            S.slots[sid] = Slot(sid, run, pid, name or "Random look", job.title, timing.seconds(name, job.recipe),
+                                crop=crop)
             slots.append(S.slots[sid])
         order = range(len(jobs))
         if by_photo:
@@ -412,7 +418,7 @@ def prefs() -> dict:
 def save_prefs(update: dict) -> None:
     data = prefs() | update
     try:
-        CONFIG.mkdir(parents=True, exist_ok=True)
+        PREFS.parent.mkdir(parents=True, exist_ok=True)
         PREFS.write_text(json.dumps(data, indent=1))
     except OSError:
         pass
@@ -532,16 +538,25 @@ def photo_image(pid: int, size: str):
     return picture(PICTURES.get(("photo", pid, size), make))
 
 
-@app.get("/img/swatch/{pid}/{name}.jpg")
-async def swatch(pid: int, name: str):
+@app.post("/api/swatches/{pid}")
+async def swatches(pid: int, req: Request):
+    """{names: [...]}: starts making these looks' cards on the photo, and says which are ready
+    (the page asks again until all are; nothing waits on an open connection)."""
     S.photo(pid)
-    try:
-        data = await asyncio.wrap_future(swatch_future(pid, name))
-    except CancelledError:
-        raise HTTPException(409, "Another photo is previewed now")
-    if data is None:
-        return example(name)
-    return picture(data)
+    ready, failed = [], []
+    for name in (await req.json()).get("names", [])[:80]:
+        fut = swatch_future(pid, name)
+        if fut.done():
+            (failed if fut.cancelled() or fut.exception() or fut.result() is None else ready).append(name)
+    return {"ready": ready, "failed": failed}
+
+
+@app.get("/img/swatch/{pid}/{name}.jpg")
+def swatch(pid: int, name: str):
+    fut = SWATCHES.get((pid, name))
+    if fut is None or not fut.done() or fut.cancelled() or fut.exception() or fut.result() is None:
+        raise HTTPException(404, "Not made yet")
+    return picture(fut.result())
 
 
 @app.get("/img/try/{pid}/{name}.jpg")
@@ -589,6 +604,38 @@ async def run(req: Request):
         return {"slots": start_run(jobs, crop, by_photo=pids)}
     save_prefs({"crop": crop})
     return {"slots": start_run(jobs, crop)}
+
+
+FRAMES: dict[int, Future] = {}
+
+
+@app.get("/api/photos/{pid}/frames")
+async def frames(pid: int):
+    """Where Pro, Tight and Face would crop this photo (shares), for showing on it."""
+    path = S.photo(pid).path
+    with S.lock:
+        fut = FRAMES.get(pid)
+        if fut is None or fut.cancelled():
+            fut = FRAMES[pid] = W.submit(RUN, frame_boxes, path)
+    try:
+        return await asyncio.wrap_future(fut)
+    except Exception:
+        FRAMES.pop(pid, None)
+        return {"wide": None, "crop": None, "face": None}
+
+
+ORIGINAL = {"name": "Original", "description": "The photo as shot, to edit as it is", "steps": []}
+
+
+@app.post("/api/photos/{pid}/original")
+def original(pid: int):
+    """The photo itself as a picture to edit (no look): made once, then reused."""
+    S.photo(pid)
+    with S.lock:
+        for s in S.slots.values():
+            if s.photo == pid and s.look == "Original" and s.crop == "none" and s.state != "failed":
+                return {"slot": s.id}
+    return {"slot": start_run([(pid, Job(S.photo(pid).path, dict(ORIGINAL), 0))], "none")[0]}
 
 
 @app.post("/api/run/stop")

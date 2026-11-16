@@ -74,6 +74,13 @@ const SLIDERS = {
   look: [["strength", "Look strength", 0, 100, 5, "%"], ["subject", "Player brightness", -1, 1, 0.05, "ev"],
     ["background", "Background brightness", -2, 1, 0.05, "ev"]],
 };
+const SLIDER_TIPS = {
+  exposure: "Brighter or darker, all over", contrast: "Flatter (left) or punchier (right)",
+  highlights: "Left brings back bright areas: a white kit, the sky", shadows: "Right opens up dark areas: a shaded face",
+  warmth: "Cooler blue (left) or warmer amber (right)", tint: "Greener (left) or more magenta (right)",
+  saturation: "Less color (left, down to black and white) or more (right)", strength: "How much of the look shows: 0% is the photo as it was",
+  subject: "The player alone, brighter or darker", background: "Everything behind the player, brighter or darker",
+};
 const TEXT_STYLES = [["clean", "Clean"], ["bold", "Bold"], ["spaced", "Spaced"], ["banner", "Banner"]];
 const TEXT_COLORS = ["#ffffff", "#111111", "#f5c443", "#1f2a44", "#e63946", "#86d0d8"];
 const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
@@ -92,13 +99,13 @@ function renderEdit(cur) {
   const areas = e.areas || [], texts = e.texts || [];
   const pane = $("#pane-edit");
   const val = (k) => k === "strength" ? Math.round(a.strength * 100) : a[k];
-  const sliderRow = ([k, label, min, max, stp, unit, cls]) => `<div class="slider"><label for="e-${k}" title="Double-click the slider to reset">${label}</label>
+  const sliderRow = ([k, label, min, max, stp, unit, cls]) => `<div class="slider"><label for="e-${k}" title="${esc(SLIDER_TIPS[k])} · double-click the slider to reset">${label}</label>
     <output for="e-${k}">${fmtVal(k, val(k), unit)}</output><input type="range" class="${cls || ""}" id="e-${k}" data-k="${k}" data-unit="${unit || ""}" min="${min}" max="${max}" step="${stp}" value="${val(k)}"></div>`;
   const tool = (id, ic, label, tip) => `<button class="tool${st.tool === id || (id === "cutout" && st.fixing) ? " on" : ""}" data-tool="${id}" title="${esc(tip)}">${icon(ic)}<span>${label}</span></button>`;
   pane.innerHTML = `
     <div class="edit-head"><div class="adj-title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span></div>
-      <div class="undo-btns"><button class="icon-btn" id="e-undo" title="Undo (⌘Z)" ${hist.undo.length ? "" : "disabled"}>${icon("undo")}</button>
-      <button class="icon-btn" id="e-redo" title="Redo (⇧⌘Z)" ${hist.redo.length ? "" : "disabled"}>${icon("redo")}</button></div></div>
+      <div class="undo-btns"><button class="icon-btn" id="e-undo" title="Undo (⌘Z)" ${off(!hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.")}>${icon("undo")}</button>
+      <button class="icon-btn" id="e-redo" title="Redo (⇧⌘Z)" ${off(!hist.redo.length, "Nothing to redo: after an undo, this puts it back.")}>${icon("redo")}</button></div></div>
     <div class="tools">
       ${tool("crop", "crop", "Crop", "Crop and straighten (R)")}
       ${tool("remove", "eraser", "Remove", "Brush over a distraction to remove it")}
@@ -485,7 +492,7 @@ function renderBrush(v, cur) {
       <span class="angle">Size<input type="range" id="b-size" min="0.008" max="0.09" step="0.002" value="${b.r}"></span>
       <button id="b-undo" title="Take back the last stroke">${icon("undo")}</button>
       <button id="b-clear">Clear</button><span class="sep"></span>
-      <button id="b-go" class="on" ${b.strokes.length ? "" : "disabled"}>Remove it</button><button id="b-done">Done</button></div>`;
+      <button id="b-go" class="on" ${off(!b.strokes.length, "Brush over what should go first (drag on the picture).")}>Remove it</button><button id="b-done">Done</button></div>`;
   paintIcons(v);
   fitFrame(W, H);
   const f = $("#frame"), cv = $("#brush"), ring = $("#ring");
@@ -505,7 +512,7 @@ function renderBrush(v, cur) {
       if (s.pts.length === 1) { ctx.arc(s.pts[0][0] * w, s.pts[0][1] * h, s.r * w, 0, Math.PI * 2); ctx.fill(); } else ctx.stroke();
     }
   };
-  const go = () => { $("#b-go").disabled = !b.strokes.length; };
+  const go = () => setOff($("#b-go"), !b.strokes.length, "Brush over what should go first (drag on the picture).");
   requestAnimationFrame(size);
   const at = (e) => { const r = f.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
   const showRing = (e) => {

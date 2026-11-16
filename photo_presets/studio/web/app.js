@@ -44,6 +44,7 @@ const ICONS = {
   message: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
   mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
   photos: '<circle cx="12" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><circle cx="7" cy="12" r="3.2"/><circle cx="17" cy="12" r="3.2"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
 };
 const icon = (name) => `<i data-i="${name}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg></i>`;
@@ -86,9 +87,74 @@ const store = {
   set(k, v) { try { localStorage.setItem("app." + k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 
+// Help: a tip on hover for anything with a title, and the reason for anything not usable yet ---
+/* A control that cannot be used yet stays clickable: clicking (or hovering) it says why. */
+const off = (cond, why) => cond ? `aria-disabled="true" data-why="${esc(why)}"` : "";
+function setOff(el, cond, why) {
+  if (!el) return;
+  el.disabled = false;
+  if (cond) { el.setAttribute("aria-disabled", "true"); el.dataset.why = why; }
+  else { el.removeAttribute("aria-disabled"); delete el.dataset.why; }
+}
+let tipEl = null, tipTimer = null, tipFor = null;
+function hideTip() {
+  clearTimeout(tipTimer); tipFor = null;
+  if (tipEl) tipEl.hidden = true;
+}
+function showTip(el, { why = false } = {}) {
+  if (!el.isConnected) return;
+  tipEl ||= Object.assign(document.body.appendChild(document.createElement("div")), { className: "tip", role: "tooltip" });
+  const look = el.dataset.tipLook && lookByName(el.dataset.tipLook);
+  if (el.dataset.why && (why || !el.dataset.tip)) {
+    tipEl.innerHTML = `<span class="why-head">${icon("info")} Not yet</span>${esc(el.dataset.why)}`;
+  } else if (look) {
+    tipEl.innerHTML = `<b>${esc(look.name)}</b><p>${esc(look.about)}</p><small>${look.ai ? "Drawn by AI on this Mac" : look.cutout ? "Separates the player from the background" : "A color and light look"} · ${short(look.secs) === "instant" ? "instant" : "about " + short(look.secs) + " a photo"}</small>
+      <small class="dim">${look.ai ? "Its card shows an example" : "Rest here to try it on your photo"} · click to pick it</small>`;
+  } else tipEl.textContent = el.dataset.tip || "";
+  tipEl.className = "tip" + (el.dataset.why && (why || !el.dataset.tip) ? " why" : "") + (look ? " rich" : "");
+  tipEl.hidden = false;
+  paintIcons(tipEl);
+  const r = el.getBoundingClientRect(), t = tipEl.getBoundingClientRect(), pad = 8;
+  let x, y;
+  if (look) { x = r.left - t.width - 10; y = r.top + r.height / 2 - t.height / 2; }
+  else {
+    x = r.left + r.width / 2 - t.width / 2;
+    y = r.top - t.height - 8;
+    if (y < pad) y = r.bottom + 8;
+  }
+  tipEl.style.left = `${Math.max(pad, Math.min(innerWidth - t.width - pad, x))}px`;
+  tipEl.style.top = `${Math.max(pad, Math.min(innerHeight - t.height - pad, y))}px`;
+}
+document.addEventListener("pointerover", (e) => {
+  const el = e.target.closest?.("[title], [data-tip], [data-why], [data-tip-look]");
+  if (el?.hasAttribute("title")) { if (el.title) el.dataset.tip = el.title; el.removeAttribute("title"); }
+  if (el === tipFor) return;
+  hideTip();
+  if (!el || !(el.dataset.tip || el.dataset.why || el.dataset.tipLook)) return;
+  tipFor = el;
+  tipTimer = setTimeout(() => showTip(el), el.dataset.tipLook ? 550 : 320);
+});
+document.addEventListener("pointerout", (e) => { if (tipFor && !tipFor.contains(e.relatedTarget)) hideTip(); });
+document.addEventListener("keydown", hideTip, true);
+document.addEventListener("click", (e) => {
+  const el = e.target.closest?.('[aria-disabled="true"]');
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  explain(el);
+}, true);
+/* Says why a control cannot be used yet, next to it. */
+function explain(el) {
+  hideTip(); tipFor = el;
+  showTip(el, { why: true });
+  el.classList.remove("nudge"); void el.offsetWidth; el.classList.add("nudge");
+  tipTimer = setTimeout(hideTip, 4000);
+}
+
 // State ----------------------------------------------------------------------------------
-const CROPS = [["none", "Whole", "The whole photo"], ["wide", "Pro", "Pro crop, no zoom: places the players on a thirds line"],
-  ["crop", "Tight", "Zoomed in on the action"], ["face", "Face", "Head and shoulders"]];
+const CROPS = [["none", "Whole", "The photo as shot, nothing cut"],
+  ["wide", "Pro", "Its own shape, trimmed a little (at most 10%) so the players sit on a thirds line; keeps the scene"],
+  ["crop", "Tight", "Zoomed in on the action: the players in the play fill the picture"],
+  ["face", "Face", "A head-and-shoulders portrait of the main player"]];
 const MEASURE = { PHOTO_READY: 4, CUT_OUT: 18, MODEL_LOAD: 60 };
 
 const st = {
@@ -173,7 +239,10 @@ function renderTop() {
   const kept = keptSlots().length;
   const btn = $("#export-btn");
   const cur = slotById(st.current);
-  btn.disabled = !(kept || (cur && cur.state === "done"));
+  setOff(btn, !(kept || (cur && cur.state === "done")),
+    !doneSlots().length ? "Make a look first (pick looks on the right, then Make), then export it here."
+      : cur && cur.state !== "done" ? "This look is still being made. Export it when it's done, or open a finished one."
+        : "Open a look (click it in the strip below), or pick some with Space, to export them.");
   btn.querySelector("span").textContent = kept ? `Export ${plural(kept, "pick")}` : "Export";
   btn.title = kept ? "Export the pictures you picked (E)" : "Export this picture (E)";
 }
@@ -186,7 +255,7 @@ function renderRail() {
   reconcile($("#photo-list"), st.photos, (p) => p.id, (p) => {
     const b = document.createElement("button");
     b.className = "ph"; b.title = p.name;
-    b.innerHTML = `<img src="/img/photo/${p.id}/thumb.jpg" alt="${esc(p.name)}" loading="lazy" draggable="false"><span class="n" hidden></span><span class="x" role="button" aria-label="Remove ${esc(p.name)}">${icon("x")}</span>`;
+    b.innerHTML = `<img src="/img/photo/${p.id}/thumb.jpg" alt="${esc(p.name)}" loading="lazy" draggable="false"><span class="n" hidden></span><span class="x" role="button" aria-label="Remove ${esc(p.name)}" title="Take this photo out of the app (the file stays where it is)">${icon("x")}</span>`;
     b.onclick = (e) => {
       if (e.target.closest(".x")) { removePhoto(p.id); return; }
       st.activePhoto = p.id; st.current = null; st.fixing = false; st.view = "single"; render(); renderLooks(true);
@@ -348,10 +417,12 @@ function renderViewer() {
     const any = st.looks.length && pickedLooks().length;
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${p.id}/view.jpg" alt="${esc(p.name)}" draggable="false"></div></div>
       <div class="caption"><div class="toolbar"><span class="title"><b>${esc(p.name)}</b><span>original</span></span>
-      ${doneSlots().length ? `<span class="sep"></span><button id="back-to-looks">${icon("grid")} See looks made</button>` : ""}</div></div>
-      ${any ? "" : `<div class="hint-line">Pick looks on the right, then press <b>Make</b></div>`}`;
+      <span class="sep"></span><button id="edit-photo" title="Edit the photo itself: light, color, crop, remove distractions, text (A)">${icon("sun")} Edit</button>
+      ${doneSlots().length ? `<button id="back-to-looks" title="All the looks made so far (G)">${icon("grid")} Looks made</button>` : ""}</div></div>
+      ${any ? "" : `<div class="hint-line">Pick looks on the right and press <b>Make</b>, or <b>Edit</b> the photo as it is</div>`}`;
     fitPhotoFrame();
     $("#back-to-looks")?.addEventListener("click", () => { st.view = "grid"; render(); });
+    $("#edit-photo").onclick = () => editPhoto(p.id);
   }
   paintIcons(v);
 }
@@ -365,9 +436,9 @@ function toolbar(cur) {
   const done = cur.state === "done";
   const photo = st.photos.find((p) => p.id === cur.photo);
   return `<div class="toolbar">
-    <button data-nav="-1" title="Previous (←)" ${i <= 0 ? "disabled" : ""}>${icon("left")}</button>
+    <button data-nav="-1" title="Previous (←)" ${off(i <= 0, "This is the first look.")}>${icon("left")}</button>
     <span class="of">${i < 0 ? "–" : i + 1} / ${list.length}</span>
-    <button data-nav="1" title="Next (→)" ${i >= list.length - 1 ? "disabled" : ""}>${icon("right")}</button>
+    <button data-nav="1" title="Next (→)" ${off(i >= list.length - 1, "This is the last look.")}>${icon("right")}</button>
     <span class="sep"></span>
     <span class="title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span></span>
     <span class="sep"></span>
@@ -671,7 +742,7 @@ function openExport(ids) {
     $$("#x-sizes button", m).forEach((b) => b.classList.toggle("on", sel.sizes.has(b.dataset.v)));
     $("#x-kind-note", m).textContent = KIND_NOTE[sel.kind];
     $("#x-op-v", m).textContent = Math.round(sel.mark.opacity * 100) + "%";
-    $("#x-go", m).disabled = !sel.sizes.size;
+    setOff($("#x-go", m), !sel.sizes.size, "Choose at least one size above.");
   };
   $$("#x-how button", m).forEach((b) => b.onclick = () => { sel.how = b.dataset.v; paint(); });
   $$("#x-kind button", m).forEach((b) => b.onclick = () => { sel.kind = b.dataset.v; paint(); });
@@ -829,13 +900,16 @@ function tryOff() {
 }
 
 function lookCard(l) {
-  const art = l.example ? `<img src="/img/example/${enc(l.name)}.jpg" alt="" loading="lazy" draggable="false">`
-    : `<img alt="" hidden><span class="ph-art" style="background:${gradientFor(l.name)}">${esc(initials(l.name))}</span>`;
-  return `<button class="look" data-name="${esc(l.name)}" title="${esc(l.about)}">
+  // its latest picture (made whenever the look is used), until your photo's own is ready
+  const art = `<span class="ph-art" style="background:${gradientFor(l.name)}">${esc(initials(l.name))}</span>
+    <img src="/img/example/${enc(l.name)}.jpg?v=${pageStamp}" alt="" loading="lazy" draggable="false" onerror="this.hidden=true"
+      onload="this.previousElementSibling?.remove()"><span class="coming" hidden></span>`;
+  return `<button class="look" data-name="${esc(l.name)}" data-tip-look="${esc(l.name)}">
     <div class="pic">${art}<span class="check"></span>
       <span class="badge">${l.ai ? '<span class="ai">AI</span>' : ""}<span>${short(l.secs)}</span></span></div>
     <div class="label"><b>${esc(l.name)}</b><small>${esc(l.about)}</small></div></button>`;
 }
+const pageStamp = Date.now();
 const initials = (n) => n.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).slice(0, 2).map((w) => w[0]).join("");
 function gradientFor(name) {
   let h = 0;
@@ -843,32 +917,62 @@ function gradientFor(name) {
   return `linear-gradient(135deg, hsl(${h} 45% 22%), hsl(${(h + 50) % 360} 55% 14%))`;
 }
 
-/* Each quick look is previewed on the photo you are working on, as its card scrolls
-   into view (the AI looks show their latest picture instead: they take 20 s each). */
-let swatchObserver = null;
+/* Each quick look is shown on the photo you are working on, as its card scrolls into view
+   (the AI looks show their latest picture instead: they take 20 s each). The page asks the
+   app every second which are ready, then shows them; "preview coming" until then. */
+let swatchObserver = null, swatchWanted = new Map(), swatchTimer = null, swatchSince = 0;
 function watchSwatches() {
   swatchObserver?.disconnect();
+  swatchWanted = new Map(); clearTimeout(swatchTimer);
   const pid = st.activePhoto;
   if (!pid) return;
+  swatchSince = Date.now();
   swatchObserver = new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
       swatchObserver.unobserve(e.target);
       const card = e.target, l = lookByName(card.dataset.name);
       if (!l || l.ai) continue;
-      const img = card.querySelector("img");
-      img.classList.add("loading");
-      const live = new Image();
-      live.onload = () => {
-        if (st.activePhoto !== pid) return;
-        img.src = live.src; img.hidden = false; img.classList.remove("loading");
-        card.querySelector(".ph-art")?.remove();
-      };
-      live.onerror = () => img.classList.remove("loading");
-      live.src = `/img/swatch/${pid}/${enc(l.name)}.jpg`;
+      swatchWanted.set(l.name, card);
+      const coming = card.querySelector(".coming");
+      coming.hidden = false; coming.textContent = "Preview coming…";
+      card.querySelector("img").classList.add("loading");
     }
+    pollSwatches(pid);
   }, { root: $("#look-grid"), rootMargin: "200px" });
   $$("#look-grid .look").forEach((c) => swatchObserver.observe(c));
+}
+async function pollSwatches(pid) {
+  clearTimeout(swatchTimer);
+  if (!swatchWanted.size || st.activePhoto !== pid) return;
+  let r;
+  try {  // quietly: a hiccup here just means asking again
+    r = await fetch(`/api/swatches/${pid}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names: [...swatchWanted.keys()] }) }).then((x) => x.json());
+  } catch { r = {}; }
+  r.ready ||= []; r.failed ||= [];
+  if (st.activePhoto !== pid) return;
+  for (const name of [...r.ready, ...r.failed]) {
+    const card = swatchWanted.get(name);
+    swatchWanted.delete(name);
+    if (!card?.isConnected) continue;
+    const img = card.querySelector("img"), coming = card.querySelector(".coming");
+    if (r.failed.includes(name)) { img.classList.remove("loading"); coming.hidden = true; continue; }
+    const live = new Image();
+    live.onload = () => {
+      if (st.activePhoto !== pid || !card.isConnected) return;
+      img.src = live.src; img.hidden = false; img.classList.remove("loading"); coming.hidden = true;
+      card.querySelector(".ph-art")?.remove();
+    };
+    live.src = `/img/swatch/${pid}/${enc(name)}.jpg?t=${Date.now()}`;
+  }
+  if (Date.now() - swatchSince > 5000) {  // the looks that cut out the players wait for the cut-out
+    for (const card of swatchWanted.values()) {
+      const l = lookByName(card.dataset.name), c = card.querySelector(".coming");
+      if (l?.cutout && c) c.textContent = "Cutting out the players…";
+    }
+  }
+  if (swatchWanted.size) swatchTimer = setTimeout(() => pollSwatches(pid), 1000);
 }
 
 function estimate(looks, photos) {
@@ -888,18 +992,66 @@ function renderMake() {
   box.innerHTML = `
     ${many ? `<div class="row"><span>Photos</span><div class="seg full" id="m-scope">
       <button data-v="one" class="${st.scope === "one" ? "on" : ""}" title="Try looks on one photo first">This photo</button>
-      <button data-v="all" class="${st.scope === "all" ? "on" : ""}">All ${st.photos.length}</button></div></div>` : ""}
-    <div class="row"><span>Framing</span><div class="seg full" id="m-crop">${CROPS.map(([v, label, tip]) => `<button data-v="${v}" title="${esc(tip)}" class="${st.crop === v ? "on" : ""}">${label}</button>`).join("")}</div></div>
+      <button data-v="all" class="${st.scope === "all" ? "on" : ""}" title="Make the looks on every photo">All ${st.photos.length}</button></div></div>` : ""}
+    <div class="row"><span>Framing</span><div class="seg full" id="m-crop">${CROPS.map(([v, label]) => `<button data-v="${v}" class="${st.crop === v ? "on" : ""}">${label}</button>`).join("")}</div></div>
+    <p class="crop-hint" id="m-crop-hint">${esc(cropHint(st.crop))}</p>
     <div class="summary">${looks.length ? `<span><b>${plural(looks.length, "look")}</b> picked · <button id="m-clear">Clear</button></span><span>${n > 0 ? say(estimate(looks, photos)) : ""}</span>`
       : `<span>Tap looks to pick them</span>`}</div>
-    <div class="inline"><button class="btn primary big wide" id="m-go" ${can ? "" : "disabled"}>${n ? `Make ${plural(n, "look")}` : "Make looks"}</button>
-      <button class="btn big" id="m-random" title="Surprise me: six random looks, to discover new styles" ${st.photos.length ? "" : "disabled"}>${icon("dice")}</button></div>`;
+    <div class="inline"><button class="btn primary big wide" id="m-go" ${off(!can, !st.photos.length ? "Add a photo first: drop one on the window, paste it, or press + at the top left." : "Tap one or more looks above to pick them, then Make.")}>${n ? `Make ${plural(n, "look")}` : "Make looks"}</button>
+      <button class="btn big" id="m-random" title="Surprise me: six random looks, to discover new styles" ${off(!st.photos.length, "Add a photo first: drop one on the window, paste it, or press + at the top left.")}>${icon("dice")}</button></div>`;
   paintIcons(box);
   box.querySelectorAll("#m-scope button").forEach((b) => b.onclick = () => { st.scope = b.dataset.v; renderMake(); });
-  box.querySelectorAll("#m-crop button").forEach((b) => b.onclick = () => { st.crop = b.dataset.v; store.set("crop", st.crop); renderMake(); });
+  box.querySelectorAll("#m-crop button").forEach((b) => {
+    b.onclick = () => { st.crop = b.dataset.v; store.set("crop", st.crop); renderMake(); };
+    b.onmouseenter = () => { $("#m-crop-hint").textContent = cropHint(b.dataset.v); previewFrame(b.dataset.v); };
+    b.onmouseleave = () => { $("#m-crop-hint").textContent = cropHint(st.crop); previewFrame(null); };
+  });
   $("#m-clear", box)?.addEventListener("click", () => { st.picked.clear(); store.set("looks", []); renderLooks(); renderMake(); });
   $("#m-go", box).onclick = () => make({ looks: looks.map((l) => l.name) });
   $("#m-random", box).onclick = () => make({ random: 6 });
+}
+
+function cropHint(v) {
+  const [, label, tip] = CROPS.find((c) => c[0] === v) || CROPS[0];
+  return `${label}: ${tip}.`;
+}
+
+/* Hovering a framing choice draws where it would cut the photo, on the big picture. */
+const frameBoxes = {};
+async function previewFrame(kind) {
+  $("#frame .frame-preview")?.remove();
+  const f = $("#frame"), cur = slotById(st.current), pid = st.activePhoto;
+  if (!kind || !f || !pid || st.tool || st.fixing || st.view === "grid" || st.survey.length >= 2) return;
+  const plain = !cur || (cur.photo === pid && cur.state === "done" && cur.crop === "none" && !cur.edits?.crop && !cur.edits?.angle);
+  if (!plain) return;
+  const ov = document.createElement("div");
+  ov.className = "frame-preview"; ov.dataset.kind = kind;
+  f.appendChild(ov);
+  const label = (text) => `<span class="tag l">${text}</span>`;
+  if (kind === "none") { ov.innerHTML = label("<b>Whole</b> · the photo as shot"); return; }
+  if (!frameBoxes[pid]) {
+    ov.innerHTML = label('<span class="spin"></span> Finding the players…');
+    frameBoxes[pid] = api(`/api/photos/${pid}/frames`).catch(() => ({}));
+  }
+  const boxes = await frameBoxes[pid];
+  if (!ov.isConnected || ov.dataset.kind !== kind) return;
+  const box = boxes[kind], name = CROPS.find((c) => c[0] === kind)[1];
+  if (!box) {
+    ov.innerHTML = label(kind === "face" ? `<b>${name}</b> · no clear face found here: it keeps the whole photo` : `<b>${name}</b> · this photo is already well framed: it stays whole`);
+    return;
+  }
+  const [x0, y0, x1, y1] = box;
+  ov.innerHTML = `<div class="fp-box" style="left:${x0 * 100}%;top:${y0 * 100}%;width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%">
+    <i class="g1"></i><i class="g2"></i><i class="g3"></i><i class="g4"></i></div>${label(`<b>${name}</b> · what this framing keeps`)}`;
+}
+
+/* Edit works on any photo: with no look made, the photo itself opens for editing. */
+async function editPhoto(pid = st.activePhoto) {
+  if (!pid) return;
+  const r = await api(`/api/photos/${pid}/original`, {});
+  st.current = r.slot; st.tab = "edit"; st.view = "single"; st.survey = [];
+  await refresh();
+  if (slotById(r.slot)?.state !== "done") toast("Opening the photo for editing…", { small: "A moment while it's prepared" });
 }
 
 async function make(what) {
@@ -917,7 +1069,13 @@ function renderTabs() {
   if (!can && st.tab === "edit") st.tab = "looks";
   $$(".tabs button").forEach((b) => {
     b.classList.toggle("on", b.dataset.tab === st.tab);
-    if (b.dataset.tab === "edit") b.disabled = !can;
+    if (b.dataset.tab === "edit") {
+      setOff(b, !st.photos.length || (cur && !can),
+        !st.photos.length ? "Add a photo first, then edit it here."
+          : cur?.state === "failed" ? "This look could not be made, so there is nothing to edit. Open another one."
+            : "This look is still being made. It can be edited as soon as it's done.");
+      b.title = can ? "Edit this look: light, color, crop, remove, text (A)" : "Edit this photo: light, color, crop, remove, text (A)";
+    }
   });
   $("#pane-looks").hidden = st.tab !== "looks";
   $("#pane-edit").hidden = st.tab !== "edit";
@@ -946,7 +1104,7 @@ function renderReel(force = false) {
       <div><h1>Make an Instagram reel</h1></div>
       <p class="lead">A vertical video under a minute: each picture slowly pushes in, dissolves into the next, and cuts on the beat of your song.</p>
       <div class="fld"><label>Pictures</label>
-        <div class="seg full" id="r-src"><button data-v="kept" ${kept.length ? "" : "disabled"}>Picks (${kept.length})</button><button data-v="all">All looks (${all.length})</button></div>
+        <div class="seg full" id="r-src"><button data-v="kept" ${off(!kept.length, "Pick some looks first: open one and press Space (or the ✓ in the contact sheet).")}>Picks (${kept.length})</button><button data-v="all">All looks (${all.length})</button></div>
         <div class="reel-photos" id="r-order">${st.reelOrder.map((id, i) => { const s = slotById(id); const out = st.reelOut.has(id);
           return `<div class="rp${out ? " out" : ""}" draggable="true" data-id="${id}" title="${esc(s.title)}"><img src="${slotImg(s, "thumb")}" alt="" draggable="false"><span class="num">${out ? "" : use.indexOf(s) + 1}</span><button data-out="${id}" title="${out ? "Put back in the reel" : "Leave out of the reel"}">${icon(out ? "plus" : "x")}</button></div>`; }).join("") || `<span class="notes">Make some looks first.</span>`}</div>
         ${st.reelOrder.length > 1 ? `<small class="notes">Drag to change the order · × leaves one out</small>` : ""}</div>
@@ -958,7 +1116,7 @@ function renderReel(force = false) {
         <div class="slider"><label>Seconds a picture</label><output id="r-sec-v">${(+reelForm.sec).toFixed(1)} s</output><input type="range" id="r-sec" min="1.5" max="4" step="0.1" value="${reelForm.sec}"></div>
         <div class="slider"><label>Longest reel</label><output id="r-max-v">${reelForm.max} s</output><input type="range" id="r-max" min="15" max="59" step="1" value="${reelForm.max}"></div></div></div>
       <p class="notes" id="r-est">${n ? `${fit.keep} pictures × ${fit.sec.toFixed(1)} s = ${Math.round(fit.keep * fit.sec)} s reel${fit.keep < n ? ` · the last ${n - fit.keep} do not fit` : ""} · takes ${say(fit.keep * 1.5 + fit.keep * fit.sec * 0.4 + 15)}` : ""}</p>
-      <button class="btn primary big" id="r-go" ${n && !(task && task.state === "running") ? "" : "disabled"}>${icon("film")} ${task && task.state === "running" ? "Making the reel…" : "Make reel"}</button>
+      <button class="btn primary big" id="r-go" ${off(!n || (task && task.state === "running"), !n ? "Make some looks first, on the Looks tab: the reel is made from them." : "A reel is being made. This button comes back when it's done.")}>${icon("film")} ${task && task.state === "running" ? "Making the reel…" : "Make reel"}</button>
     </div>
     <div class="phone"><div class="screen">${task && task.state === "done" && task.video ? `<video src="${task.video}?t=${task.id}" controls autoplay playsinline loop></video>`
       : task && task.state === "running" ? `<div><div class="spin" style="width:28px;height:28px;margin:0 auto 12px"></div>${esc(task.now)}<br>${task.done} of ${task.total}</div>`
@@ -1133,6 +1291,8 @@ document.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (k === "arrowright" || k === "arrowleft") { e.preventDefault(); step(k === "arrowright" ? 1 : -1); }
   else if ((k === " " || k === "p") && cur?.state === "done") { e.preventDefault(); toggleKeep([cur.id]); }
+  else if ((k === " " || k === "p") && cur) { e.preventDefault(); toast("This look is still being made; pick it when it's done"); }
+  else if (k === " " || k === "p") { e.preventDefault(); toast("Nothing to pick yet", { small: "Make some looks, then press Space on the ones you like" }); }
   else if (k === "c" && cur?.state === "done") { st.compare = !st.compare; st.view = "single"; viewerSig = ""; render(); if (st.zoom.on) sharpen(cur); }
   else if (k === "b" && cur?.state === "done" && !e.repeat) {
     st.compare = true; st.split = 100; viewerSig = ""; renderViewer();
@@ -1142,6 +1302,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "g" && st.slots.length) { st.view = st.view === "grid" ? "single" : "grid"; render(); }
   else if (k === "e") exportDefault();
   else if (k === "a" && cur?.state === "done") { st.tab = "edit"; renderTabs(); }
+  else if (k === "a" && !cur && st.activePhoto) editPhoto();
   else if (k === "r" && cur?.state === "done") setTool("crop");
   else if (k === "t" && cur?.state === "done") setTool("text");
   else if (/^[0-5]$/.test(k) && cur?.state === "done") rate([cur.id], +k);
@@ -1154,6 +1315,7 @@ function exportDefault() {
   const kept = keptSlots();
   if (kept.length) openExport(kept.map((s) => s.id));
   else if (slotById(st.current)?.state === "done") openExport([st.current]);
+  else explain($("#export-btn"));
 }
 
 function init() {
@@ -1167,7 +1329,11 @@ function init() {
   });
   $("#export-btn").onclick = exportDefault;
   $$(".modes button").forEach((b) => b.onclick = () => { st.mode = b.dataset.mode; viewerSig = ""; render(); });
-  $$(".tabs button").forEach((b) => b.onclick = () => { if (!b.disabled) { st.tab = b.dataset.tab; editSig = ""; renderTabs(); } });
+  $$(".tabs button").forEach((b) => b.onclick = () => {
+    const cur = slotById(st.current);
+    if (b.dataset.tab === "edit" && !(cur && cur.state === "done")) { editPhoto(); return; }
+    st.tab = b.dataset.tab; editSig = ""; renderTabs();
+  });
   $("#look-search").oninput = (e) => { st.query = e.target.value; renderLooks(true); };
   $("#show").onchange = (e) => { st.show = e.target.value; render(); };
   $("#view-single").onclick = () => { st.view = "single"; render(); };

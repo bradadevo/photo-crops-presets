@@ -12,20 +12,20 @@
   <header class="top">
     <div class="brand"><span class="mark" aria-hidden="true"></span><span class="word">AllPro<b>Photo</b></span></div>
     <nav class="modes" role="tablist" aria-label="Mode">
-      <button role="tab" data-mode="edit" class="on">Looks</button>
-      <button role="tab" data-mode="reel">Reel</button>
+      <button role="tab" data-mode="edit" class="on" title="Make, compare and edit looks">Looks</button>
+      <button role="tab" data-mode="reel" title="Make an Instagram reel from your looks">Reel</button>
     </nav>
     <div class="top-right">
       <div id="run-pill" class="run-pill" hidden></div>
       <div class="menu-wrap">
-        <button id="tools-btn" class="btn ghost" aria-haspopup="menu">Tools <i data-i="chev"></i></button>
+        <button id="tools-btn" class="btn ghost" aria-haspopup="menu" title="Preset editor, Lightroom presets, assets, shortcuts">Tools <i data-i="chev"></i></button>
         <div id="tools-menu" class="menu" role="menu" hidden>
           <a role="menuitem" href="/classic/" target="_blank" rel="noopener">Preset editor<small>Build and change looks</small></a>
           <a role="menuitem" href="/classic/" target="_blank" rel="noopener">Lightroom presets &amp; assets<small>LUTs, textures, overlays</small></a>
           <button role="menuitem" id="help-btn">Keyboard shortcuts<small>Press ?</small></button>
         </div>
       </div>
-      <button id="export-btn" class="btn primary" disabled><i data-i="export"></i><span>Export</span></button>
+      <button id="export-btn" class="btn primary"><i data-i="export"></i><span>Export</span></button>
     </div>
   </header>
 
@@ -33,7 +33,7 @@
     <div class="rail-head">
       <h2>Photos <span id="photo-count" class="count"></span></h2>
       <div class="menu-wrap">
-        <button id="add-btn" class="icon-btn" aria-label="Add photos" aria-haspopup="menu"><i data-i="plus"></i></button>
+        <button id="add-btn" class="icon-btn" aria-label="Add photos" title="Add photos or a whole folder" aria-haspopup="menu"><i data-i="plus"></i></button>
         <div id="add-menu" class="menu" role="menu" hidden>
           <button role="menuitem" data-add="files">Add photos…<small>JPG, HEIC or RAW</small></button>
           <button role="menuitem" data-add="folder">Add a folder…<small>A whole game</small></button>
@@ -54,13 +54,13 @@
       <div class="strip-head">
         <span id="strip-count" class="strip-count"></span>
         <div class="strip-tools">
-          <select id="show" class="show" aria-label="Show"></select>
-          <button id="keep-all" class="chip-btn">Pick all</button>
-          <button id="keep-none" class="chip-btn">Clear picks</button>
-          <button id="clear-looks" class="chip-btn">Remove all</button>
+          <select id="show" class="show" aria-label="Show" title="Show every look, only your picks, or by stars"></select>
+          <button id="keep-all" class="chip-btn" title="Pick every finished look">Pick all</button>
+          <button id="keep-none" class="chip-btn" title="Un-pick them all">Clear picks</button>
+          <button id="clear-looks" class="chip-btn" title="Take every look out of this session (your photos and exports stay)">Remove all</button>
           <div class="seg small" role="group" aria-label="View">
-            <button id="view-single" class="on" title="One at a time (E… or Enter)"><i data-i="single"></i></button>
-            <button id="view-grid" title="Contact sheet (G)"><i data-i="grid"></i></button>
+            <button id="view-single" class="on" title="One at a time"><i data-i="single"></i></button>
+            <button id="view-grid" title="Contact sheet: every look big (G)"><i data-i="grid"></i></button>
           </div>
         </div>
       </div>
@@ -71,8 +71,8 @@
 
   <aside class="inspector" id="inspector" aria-label="Looks and adjustments">
     <div class="tabs" role="tablist">
-      <button role="tab" data-tab="looks" class="on">Looks</button>
-      <button role="tab" data-tab="edit" disabled>Edit</button>
+      <button role="tab" data-tab="looks" class="on" title="Looks to pick, shown on your photo">Looks</button>
+      <button role="tab" data-tab="edit">Edit</button>
     </div>
     <div id="pane-looks" class="pane looks-pane">
       <div class="looks-head">

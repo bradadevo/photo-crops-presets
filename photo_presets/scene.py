@@ -420,6 +420,29 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
                  subject_box=sb, other_faces=other_faces, other_hands=other_hands)
 
 
+def frame_boxes(path: Path, colors: dict[str, str] | None = None, goalie_first: bool = True,
+                shape: str = "best") -> dict[str, tuple[float, float, float, float] | None]:
+    """Where each crop-first choice would cut this photo (shares of it): "wide"
+    (pro crop, no zoom), "crop" (zoomed in on the action) and "face"; None when
+    it would keep the whole photo or finds no one. Shown on the photo before a
+    look is made."""
+    colors = colors or {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}
+    img = images.preview_image(path, 2400)
+    people, balls = detector().find(img, focus.focus_point(path, img.size), colors)
+    plan = framing.choose(people, balls, img.size, goalie_first)
+    W, H = img.size
+
+    def shares(box):
+        if not box or (box[2] - box[0]) * (box[3] - box[1]) >= 0.92 * W * H:  # (nearly) the whole photo
+            return None
+        return (max(0.0, box[0] / W), max(0.0, box[1] / H), min(1.0, box[2] / W), min(1.0, box[3] / H))
+    face = None
+    if plan.face_person:
+        face = framing.face_box(plan.face_person, img.size, "sharp", framing.crop_box(plan, img.size, shape))
+    return {"wide": shares(framing.wide_box(plan, img.size)), "crop": shares(framing.crop_box(plan, img.size, shape)),
+            "face": shares(face)}
+
+
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,
             goalie_first: bool = True, shape: str = "best", retouch=None) -> Prepared:
     """Loads a photo (RAW in the camera's look), finds its scene and, if

@@ -221,6 +221,16 @@ photos show about half their width, centered on the players, on a blurred copy
 of themselves; portrait photos fill the screen. The reel plays in the phone on
 the right, and is saved in `Reels` inside your export folder.
 
+**Help as you go**: rest the pointer on any button, slider or choice for a
+short explanation (on a look's card: its full description, how long it takes
+and whether it is drawn by AI). Resting on **Pro**, **Tight** or **Face**
+draws where that framing would cut your photo, on the photo itself. Nothing
+is ever silently greyed out: a button you cannot use yet says why, and what
+to do, when you click or point at it (Make with no look picked, Export with
+nothing made, Undo with nothing to undo...). **Edit** works on any photo:
+with no look made, the photo itself opens for editing (as the look
+**Original**).
+
 Press **?** for every keyboard shortcut.
 
 **Tools** (top right) opens the preset editor, Lightroom presets and assets in
