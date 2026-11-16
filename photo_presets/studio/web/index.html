@@ -33,6 +33,7 @@
   <aside class="rail" aria-label="Photos">
     <div class="rail-head">
       <h2>Photos <span id="photo-count" class="count"></span></h2>
+      <button id="find-btn" class="icon-btn" title="Find a player: click them once, and every photo with them is found, the best first"><i data-i="person"></i></button>
       <div class="menu-wrap">
         <button id="add-btn" class="icon-btn" aria-label="Add photos" title="Add photos or a whole folder" aria-haspopup="menu"><i data-i="plus"></i></button>
         <div id="add-menu" class="menu" role="menu" hidden>
@@ -41,6 +42,8 @@
         </div>
       </div>
     </div>
+    <div id="player-panel" class="player-panel" hidden></div>
+    <div id="chosen-bar" class="chosen-bar" hidden></div>
     <div id="photo-list" class="photo-list"></div>
     <div id="rail-empty" class="rail-empty">
       <p>Drop photos anywhere, paste with <kbd>⌘V</kbd>, or</p>
@@ -93,5 +96,6 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 <script src="/static/edit.js"></script>
+<script src="/static/find.js"></script>
 </body>
 </html>

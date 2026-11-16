@@ -71,6 +71,20 @@ and a photo added twice is added once. Your photos are still there next time
 you open the app (dropped and pasted ones are kept in
 `~/.cache/photo-crops-presets/added`). Click a photo to work on it.
 
+**Find a player** (the person button above your photos): click your player
+once on a photo, and every photo with them is found: by their face (a free
+face-recognition model run on this Mac: OpenCV's YuNet and SFace, about 40 MB,
+downloaded once to `~/.cache/photo-crops`), their jersey number when it shows
+(the Mac's own text reading) and their kit (a player of the other team is
+never taken for them). Kids' faces at a distance look alike, so close calls
+are asked, **Is this your player?** with ✓ and ✗, and each answer sharpens the
+rest. **Theirs** shows only their photos, best first; **Best** one per moment
+(of a burst a moment apart, the sharpest, biggest, facing the camera, near the
+ball); **Choose the best N** chooses them, so the looks are made on just those
+(**Photos: Chosen N**). Each photo is looked at once (remembered in
+`~/.cache/photo-crops/players`). Any photo can be chosen by hand too: the ✓ on
+it, or ⌘-click.
+
 **2. Pick looks**: every look is a card showing **your own photo in that
 look** (the quick looks are made on it in the background, a fraction of a
 second each, once the players are cut out). Rest the pointer on a card to

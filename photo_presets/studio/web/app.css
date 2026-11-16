@@ -630,3 +630,36 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .corners { display: flex; gap: 6px; }
 .corners button { flex: 1; height: 26px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); }
 .corners button:hover { border-color: var(--accent); }
+
+/* finding a player */
+.rail-head { gap: 4px; } .rail-head h2 { flex: 1; }
+.frame.finding .people { position: absolute; inset: 0; z-index: 3; }
+.frame.finding .who { position: absolute; border: 2px solid rgba(255, 255, 255, .55); border-radius: 6px; background: transparent;
+  cursor: pointer; transition: background .12s, border-color .12s; }
+.frame.finding .who:hover { border-color: var(--accent); background: rgba(79, 139, 255, .18); }
+.frame.finding .people .tag { top: 10px; left: 10px; display: flex; gap: 6px; align-items: center; }
+.player-panel { margin: 0 10px 10px; padding: 10px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 8px; }
+.pp-head { display: flex; align-items: center; gap: 9px; }
+.pp-head img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; object-position: top; }
+.pp-head div { flex: 1; min-width: 0; } .pp-head b { display: block; } .pp-head small { color: var(--muted); }
+.btn.wide { width: 100%; }
+.pp-ask { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pp-ask > span { grid-column: 1 / -1; font-weight: 600; font-size: 12px; }
+.pp-q { position: relative; border-radius: 8px; overflow: hidden; background: #000; }
+.pp-q img { width: 100%; aspect-ratio: 1; object-fit: cover; object-position: top; display: block; }
+.pp-q div { position: absolute; left: 0; right: 0; bottom: 0; display: flex; }
+.pp-q button { flex: 1; height: 26px; border: 0; color: #fff; display: flex; align-items: center; justify-content: center; }
+.pp-q .yes { background: rgba(62, 207, 142, .85); } .pp-q .no { background: rgba(255, 93, 93, .85); }
+.pp-q.answered { opacity: .35; pointer-events: none; }
+.ph .badge-best { position: absolute; right: 5px; bottom: 5px; font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border-radius: 9px; background: rgba(245, 196, 67, .95); color: #111; }
+.ph .ck { position: absolute; left: 4px; top: 4px; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid #fff;
+  background: rgba(0, 0, 0, .35); display: none; padding: 3px; color: transparent; }
+.ph:hover .ck { display: inline-flex; }
+.ph.chosen .ck { display: inline-flex; background: var(--accent); border-color: var(--accent); color: #fff; }
+.ph.chosen { outline-color: rgba(79, 139, 255, .6); }
+.chosen-bar { margin: 0 10px 8px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.chosen-bar b { color: var(--text); }
+.seg.full button { padding: 0 6px; white-space: nowrap; min-width: 0; }
+.seg.full button { overflow: hidden; text-overflow: ellipsis; }

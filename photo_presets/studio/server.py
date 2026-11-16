@@ -39,7 +39,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import brand, deliver, edits, engine, pipeline, presets, reel, timing
+from photo_presets import brand, deliver, edits, engine, pipeline, players, presets, reel, timing
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
 
@@ -630,7 +630,7 @@ def state():
         tasks = [t.public() for t in S.tasks.values() if t.state == "running" or time.time() - t.started < 600]
     credit = deliver.Credit.load()
     return {"photos": photos, "slots": slots, "tasks": tasks, "busy": S.busy(), "left": round(S.left()),
-            "update": update_ready(),
+            "update": update_ready(), "player": FIND.public(),
             "models_loaded": timing.models_loaded(), "credit": credit.__dict__,
             "prefs": {"folder": DEFAULT_EXPORT} | prefs()}
 
@@ -1288,6 +1288,142 @@ def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo
         task.state = "done"
     except Exception as e:
         task.state, task.message = "failed", f"Export failed: {e}"
+
+
+# Finding a player in every photo --------------------------------------------------------------
+
+class Finder:
+    """The player you clicked, the photos with them, and your answers to "Is this your player?"."""
+
+    def __init__(self):
+        self.target: tuple[str, int] | None = None  # (photo path, person)
+        self.yes: list[tuple[str, int]] = []
+        self.no: list[tuple[str, int]] = []
+        self.scans: dict[str, "players.Scan"] = {}
+        self.results: list[dict] = []
+
+    def sighting(self, key):
+        sc = self.scans.get(key[0])
+        return sc.people[key[1]] if sc and key[1] < len(sc.people) else None
+
+    def run(self) -> list[dict]:
+        if not self.target:
+            return []
+        t = self.sighting(self.target)
+        faces = lambda keys: [f for f in (getattr(self.sighting(k), "face", None) for k in keys) if f is not None]
+        found = players.find(list(self.scans.values()), t, faces(self.yes), faces(self.no))
+        by_path = {str(p.path): p.id for p in S.photos.values()}
+        answered = {tuple(k): "yes" for k in self.yes} | {tuple(k): "no" for k in self.no}
+        out = []
+        for h in found:
+            key = (h["path"], h["person"])
+            if answered.get(key) == "no":
+                continue
+            if answered.get(key) == "yes" or key == self.target:
+                h["status"] = "sure"
+            if h["path"] in by_path:
+                out.append(h | {"photo": by_path[h["path"]]})
+        self.results = out
+        return out
+
+    def public(self) -> dict | None:
+        if not self.target:
+            return None
+        pid = next((p.id for p in S.photos.values() if str(p.path) == self.target[0]), None)
+        return {"photo": pid, "person": self.target[1], "results": self.results,
+                "sure": sum(h["status"] == "sure" for h in self.results),
+                "ask": sum(h["status"] == "maybe" for h in self.results),
+                "best": [h["photo"] for h in self.results if h["status"] == "sure" and h["best"]]}
+
+
+FIND = Finder()
+
+
+@app.get("/api/players/people/{pid}")
+async def people_in_photo(pid: int):
+    """Everyone the app sees in this photo (boxes, shares), to click your player."""
+    path = S.photo(pid).path
+    sc = await asyncio.wrap_future(W.submit(FIX, players.scan, path))
+    FIND.scans[str(path)] = sc
+    return {"people": [{"person": i, "box": s.box, "face": s.face is not None, "number": s.number}
+                       for i, s in enumerate(sc.people)]}
+
+
+@app.post("/api/players/find")
+async def find_player(req: Request):
+    """{photo, person}: looks at every photo for this player (each photo once), then lists them."""
+    body = await req.json()
+    path = str(S.photo(int(body["photo"])).path)
+    FIND.target, FIND.yes, FIND.no, FIND.results = (path, int(body["person"])), [], [], []
+    todo = [p for p in S.photos.values() if str(p.path) not in FIND.scans]
+    task = Task(next(S.ids), "find", len(todo), now="Looking at the photos")
+    S.tasks[task.id] = task
+
+    def go():
+        try:
+            for i, p in enumerate(todo):
+                task.now = p.name
+                try:
+                    FIND.scans[str(p.path)] = players.scan(p.path)
+                except Exception:
+                    pass
+                task.done = i + 1
+            FIND.run()
+            sure = sum(h["status"] == "sure" for h in FIND.results)
+            task.message = f"Found them in {plural_s(sure, 'photo')}" + (
+                f"; {plural_s(sum(h['status'] == 'maybe' for h in FIND.results), 'more')} to check" if any(
+                    h["status"] == "maybe" for h in FIND.results) else "")
+            task.state = "done"
+        except Exception as e:
+            task.state, task.message = "failed", f"Could not look through the photos: {e}"
+    W.submit(RUN, go)
+    return task.public()
+
+
+def plural_s(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 or word.endswith("more") else "s")
+
+
+@app.post("/api/players/answer")
+async def answer(req: Request):
+    """{photo, person, yes}: is this your player? The list is worked out again with it."""
+    body = await req.json()
+    key = (str(S.photo(int(body["photo"])).path), int(body["person"]))
+    for lst in (FIND.yes, FIND.no):
+        if key in lst:
+            lst.remove(key)
+    (FIND.yes if body.get("yes") else FIND.no).append(key)
+    await asyncio.to_thread(FIND.run)
+    return FIND.public()
+
+
+@app.get("/api/players")
+def player_state():
+    return FIND.public() or {}
+
+
+@app.post("/api/players/clear")
+def clear_player():
+    FIND.target, FIND.results = None, []
+    return {"ok": True}
+
+
+@app.get("/img/person/{pid}/{person}.jpg")
+async def person_face(pid: int, person: int):
+    """A close-up of one person's head and shoulders, for asking about them."""
+    path = S.photo(pid).path
+    sc = FIND.scans.get(str(path)) or await asyncio.wrap_future(W.submit(FIX, players.scan, path))
+    if person >= len(sc.people):
+        raise HTTPException(404)
+    x0, y0, x1, y1 = sc.people[person].box
+
+    def crop():
+        img = images.preview_image(path, 2048)
+        W, H = img.size
+        bh = (y1 - y0) * H
+        box = (int(x0 * W), int(y0 * H), int(x1 * W), int(y0 * H + max(bh * 0.5, (x1 - x0) * W)))
+        return jpeg(img.crop(box), 320, 86)
+    return picture(PICTURES.get(("person", pid, person), crop))
 
 
 # The brand kit: logos kept ready to put on pictures

@@ -44,6 +44,7 @@ const ICONS = {
   message: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
   mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
   photos: '<circle cx="12" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><circle cx="7" cy="12" r="3.2"/><circle cx="17" cy="12" r="3.2"/>',
+  person: '<circle cx="10" cy="8" r="4"/><path d="M3 21v-1a7 7 0 0 1 11-5.7"/><circle cx="17.5" cy="17.5" r="3"/><path d="m21 21-1.4-1.4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   badge: '<path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5z"/><path d="m9 12 2 2 4-4"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -170,6 +171,7 @@ const st = {
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
   tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [], points: [], order: [] }, areaSel: null, textSel: null,
   show: "all", kit: [], logoSel: null,
+  player: null, finding: false, railShow: "all", chosen: new Set(),
 };
 const slotById = (id) => st.slots.find((s) => s.id === id);
 const doneSlots = () => st.slots.filter((s) => s.state === "done");
@@ -189,6 +191,10 @@ async function refresh() {
   const wasActive = st.activePhoto;
   st.photos = data.photos; st.slots = data.slots; st.tasks = data.tasks; st.busy = data.busy; st.left = data.left;
   st.modelsLoaded = data.models_loaded; st.credit = data.credit; st.prefs = data.prefs; st.update = data.update;
+  st.player = data.player;
+  if (!st.player) st.railShow = "all";
+  for (const id of [...st.chosen]) if (!data.photos.some((p) => p.id === id)) st.chosen.delete(id);
+  if (st.scope === "chosen" && !st.chosen.size) st.scope = "one";
   if (st.activePhoto && !st.photos.some((p) => p.id === st.activePhoto)) st.activePhoto = null;
   if (!st.activePhoto && st.photos.length) st.activePhoto = st.photos.find((p) => !before.has(p.id))?.id ?? st.photos[0].id;
   if (st.current && !slotById(st.current)) st.current = null;
@@ -258,19 +264,36 @@ function renderRail() {
   $("#rail-empty").hidden = st.photos.length > 0;
   const counts = {};
   for (const s of st.slots) if (s.state === "done") counts[s.photo] = (counts[s.photo] || 0) + 1;
-  reconcile($("#photo-list"), st.photos, (p) => p.id, (p) => {
+  renderPlayerPanel();
+  const hits = new Map((st.player?.results || []).map((h) => [h.photo, h]));
+  const shown = st.railShow === "with" ? st.photos.filter((p) => hits.get(p.id)?.status === "sure")
+    .sort((a, b) => st.player.results.findIndex((h) => h.photo === a.id) - st.player.results.findIndex((h) => h.photo === b.id))
+    : st.railShow === "best" ? st.photos.filter((p) => st.player?.best.includes(p.id))
+      .sort((a, b) => st.player.best.indexOf(a.id) - st.player.best.indexOf(b.id)) : st.photos;
+  $("#chosen-bar").hidden = !st.chosen.size;
+  $("#chosen-bar").innerHTML = `<span><b>${st.chosen.size}</b> chosen</span><button class="chip-btn" id="chosen-clear" title="Un-choose them">Clear</button>`;
+  $("#chosen-clear").onclick = () => { st.chosen.clear(); if (st.scope === "chosen") st.scope = "one"; render(); };
+  reconcile($("#photo-list"), shown, (p) => p.id, (p) => {
     const b = document.createElement("button");
     b.className = "ph"; b.title = p.name;
-    b.innerHTML = `<img src="/img/photo/${p.id}/thumb.jpg" alt="${esc(p.name)}" loading="lazy" draggable="false"><span class="n" hidden></span><span class="x" role="button" aria-label="Remove ${esc(p.name)}" title="Take this photo out of the app (the file stays where it is)">${icon("x")}</span>`;
+    b.innerHTML = `<img src="/img/photo/${p.id}/thumb.jpg" alt="${esc(p.name)}" loading="lazy" draggable="false"><span class="n" hidden></span><span class="badge-best" hidden>★ Best</span><span class="ck" role="checkbox" title="Choose this photo (to make looks on the chosen ones)">${icon("check")}</span><span class="x" role="button" aria-label="Remove ${esc(p.name)}" title="Take this photo out of the app (the file stays where it is)">${icon("x")}</span>`;
     b.onclick = (e) => {
       if (e.target.closest(".x")) { removePhoto(p.id); return; }
+      if (e.target.closest(".ck") || e.metaKey || e.shiftKey) {
+        st.chosen.has(p.id) ? st.chosen.delete(p.id) : st.chosen.add(p.id);
+        if (st.chosen.size && st.scope !== "all") st.scope = "chosen";
+        render(); return;
+      }
       st.activePhoto = p.id; st.current = null; st.fixing = false; st.view = "single"; render(); renderLooks(true);
     };
     return b;
   }, (b, p) => {
     b.classList.toggle("on", p.id === st.activePhoto);
+    b.classList.toggle("chosen", st.chosen.has(p.id));
     const n = b.querySelector(".n");
     n.hidden = !counts[p.id]; n.textContent = counts[p.id] ? plural(counts[p.id], "look") : "";
+    const h = hits.get(p.id);
+    b.querySelector(".badge-best").hidden = !(h && h.best && h.status === "sure");
   });
 }
 
@@ -397,6 +420,7 @@ function renderViewer() {
   v.classList.remove("survey-mode");
   if (sig === viewerSig) return updateViewerLive(cur);
   viewerSig = sig;
+  if (st.finding) { renderFindPick(v); return; }
   if (cur && cur.state === "done" && st.tool) { renderTool(v, cur); return; }
   if (cur && cur.state === "done") {
     const src = st.fixing ? `/img/slot/${cur.id}/0/fix.jpg?v=${st.fixVer}` : slotImg(cur);
@@ -436,7 +460,7 @@ function renderViewer() {
 }
 
 const viewerSignature = (cur) => JSON.stringify([cur?.id, cur?.ver, cur?.state, st.compare, st.fixing, st.fixVer,
-  st.activePhoto, st.tool, st.areaSel]);
+  st.activePhoto, st.tool, st.areaSel, st.finding]);
 
 function toolbar(cur) {
   const list = visibleSlots();
@@ -850,13 +874,14 @@ function renderTasks() {
   for (const task of st.tasks) {
     let t = taskToasts.get(task.id);
     if (t === "finished") continue;
-    const what = { reel: "Making the reel", share: "Getting it ready to share" }[task.kind] || "Exporting full size";
+    const what = { reel: "Making the reel", share: "Getting it ready to share", find: "Looking for your player" }[task.kind] || "Exporting full size";
     if (task.state === "running") {
       if (!t) { t = toast(what, { sticky: true, spin: true }); taskToasts.set(task.id, t); }
       t.update(`${what} · ${task.done} of ${task.total}`, task.now, task.total ? task.done / task.total : 0);
     } else {
       if (!t) { taskToasts.set(task.id, "finished"); continue; }  // finished before this page saw it
       if (task.state === "done" && task.kind === "share") t.done(task.message);
+      else if (task.state === "done" && task.kind === "find") { t.done(task.message); st.railShow = "with"; refresh(); }
       else if (task.state === "done") {
         t.done(task.message, "", { label: "Show in Finder", run: () => api("/api/reveal", { path: task.path }) });
         notify(task.kind === "reel" ? "Your reel is ready" : "Export finished", task.message);
@@ -1030,12 +1055,13 @@ function renderMake() {
   const box = $("#make");
   const looks = pickedLooks();
   const many = st.photos.length > 1;
-  const photos = st.scope === "all" ? st.photos.length : 1;
+  const photos = st.scope === "all" ? st.photos.length : st.scope === "chosen" ? st.chosen.size : 1;
   const n = looks.length * photos;
   const can = st.photos.length && n;
   box.innerHTML = `
     ${many ? `<div class="row"><span>Photos</span><div class="seg full" id="m-scope">
       <button data-v="one" class="${st.scope === "one" ? "on" : ""}" title="Try looks on one photo first">This photo</button>
+      ${st.chosen.size ? `<button data-v="chosen" class="${st.scope === "chosen" ? "on" : ""}" title="The photos you chose (✓ on them)">Chosen ${st.chosen.size}</button>` : ""}
       <button data-v="all" class="${st.scope === "all" ? "on" : ""}" title="Make the looks on every photo">All ${st.photos.length}</button></div></div>` : ""}
     <div class="row"><span>Framing</span><div class="seg full" id="m-crop">${CROPS.map(([v, label]) => `<button data-v="${v}" class="${st.crop === v ? "on" : ""}">${label}</button>`).join("")}</div></div>
     <p class="crop-hint" id="m-crop-hint">${esc(cropHint(st.crop))}</p>
@@ -1099,7 +1125,7 @@ async function editPhoto(pid = st.activePhoto) {
 }
 
 async function make(what) {
-  const photos = st.scope === "all" ? st.photos.map((p) => p.id) : [st.activePhoto];
+  const photos = st.scope === "all" ? st.photos.map((p) => p.id) : st.scope === "chosen" ? [...st.chosen] : [st.activePhoto];
   const r = await api("/api/run", { photos, crop: st.crop, ...what });
   if (r.slots?.length) { st.current = r.slots[0]; st.view = "single"; st.compare = false; }
   await refresh();
@@ -1355,6 +1381,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "z" && cur?.state === "done") toggleZoom(st.zoom.x, st.zoom.y);
   else if (k === "enter" && st.view === "grid" && cur) { st.view = "single"; render(); }
   else if (e.key === "?") showHelp();
+  else if (k === "escape" && st.finding) { st.finding = false; render(); }
 });
 
 /* A newer version is on this Mac: restart into it. The looks, edits, picks and stars are saved
