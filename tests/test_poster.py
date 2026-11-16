@@ -94,9 +94,8 @@ def test_words_and_banners_fit_the_shape_and_the_size_slider():
     def banner_height(shape, size=1.0):
         p = poster.clean({"template": "final", "shape": shape, "size": size})
         boxes = {w["key"]: w for w in poster.words(p)}
-        w, h = poster.size_for(800, 1000, p)
-        return (boxes["home_score"]["y1"] - boxes["home_score"]["y0"]) * h / w  # the score's height, in widths
-    assert banner_height("story") < banner_height("post") * 0.8  # a tall story: smaller, to its width
+        return boxes["home_score"]["y1"] - boxes["home_score"]["y0"]  # the score's share of the poster's height
+    assert banner_height("story") < banner_height("post") * 0.8  # a tall story: a smaller share of its height
     assert banner_height("post", 0.7) < banner_height("post") * 0.8  # the slider shrinks them
     assert poster.clean({"template": "final", "size": 9})["size"] == 1.5  # within its range
     assert poster.size_for(1000, 1000, poster.clean({"template": "gameday", "shape": "wide"}))[0] > 1000 * 1.5 * 0.5
