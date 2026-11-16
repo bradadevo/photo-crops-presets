@@ -74,6 +74,7 @@ class Scene:
     # (a child holding the main player's hand is drawn with them, so needs their real face too)
     other_faces: list[tuple[float, float, float]] = field(default_factory=list)
     other_hands: list[tuple[float, float, float]] = field(default_factory=list)
+    team: bool = False  # a team photo: the players are one group
 
     def take_in(self, matte: np.ndarray) -> None:
         """Everyone else whose head is inside the cut-out becomes a player in the
@@ -120,7 +121,7 @@ class Scene:
             sb = (a0, b0, a1, b1)
         return Scene(keep(self.faces), keep(self.balls), feet, min(1.0, self.subject_height * h / ch),
                      cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands), sb,
-                     keep(self.other_faces), keep(self.other_hands))
+                     keep(self.other_faces), keep(self.other_hands), self.team)
 
 
 def resized(mask: np.ndarray | None, h: int, w: int) -> np.ndarray | None:
@@ -157,6 +158,8 @@ class Prepared:
                         self.scene.take_in(matte)
                         matte = refine_heads(self.image, matte, self.scene.faces)
                     matte = with_balls(matte, self.scene.balls) if matte is not None else None
+                    if matte is not None and self.scene.team:
+                        matte = fill_group(matte)
                 self._auto = (matte, self.scene.subject_mask)
             self.scene.matte, self.scene.subject_mask = self._fixed()
         return self.scene.matte
@@ -383,6 +386,35 @@ def cutout(img: Image.Image, subject_mask: np.ndarray) -> np.ndarray | None:
     return full
 
 
+def fill_group(alpha: np.ndarray) -> np.ndarray:
+    """A team photo's cut-out as one group: the gaps enclosed by the players (a child half
+    hidden behind the others, a dark kit the cut-out missed, the grass between them) are
+    taken in, so no look puts smoke or blur inside the group."""
+    h, w = alpha.shape
+    solid = (alpha > 0.4).astype(np.uint8)
+    k = max(5, int(0.05 * h)) | 1
+    closed = cv2.morphologyEx(solid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    # what is outside the group: reachable from the picture's edge
+    outside = np.zeros((h + 2, w + 2), np.uint8)
+    flood = closed.copy()
+    for x in range(0, w, max(1, w // 64)):
+        for y in (0, h - 1):
+            if flood[y, x] == 0:
+                cv2.floodFill(flood, outside, (x, y), 2)
+    for y in range(0, h, max(1, h // 64)):
+        for x in (0, w - 1):
+            if flood[y, x] == 0:
+                cv2.floodFill(flood, outside, (x, y), 2)
+    group = (flood == 1) | (flood == 0)  # the group and everything it encloses
+    # only what lies deep inside the group: its outline (between heads, between feet) stays the players' own
+    depth = cv2.distanceTransform(group.astype(np.uint8), cv2.DIST_L2, 5)
+    add = (group & (solid == 0) & (depth > k * 0.6)).astype(np.uint8)
+    add = cv2.dilate(add, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k // 3 | 1, k // 3 | 1)))  # up to the players
+    add = (add > 0) & group
+    soft = cv2.GaussianBlur(add.astype(np.float32), (0, 0), 1.5)
+    return np.maximum(alpha, soft).astype(np.float32)
+
+
 def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
     masks = [p.mask for p in people if p.mask is not None]
     if not masks:
@@ -441,7 +473,7 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
     height = (subject.height / h) if subject else 0.5
     sb = (subject.box[0] / w, subject.box[1] / h, subject.box[2] / w, subject.box[3] / h) if subject else None
     return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size), hands=hands,
-                 subject_box=sb, other_faces=other_faces, other_hands=other_hands)
+                 subject_box=sb, other_faces=other_faces, other_hands=other_hands, team=plan.team_photo)
 
 
 def frame_boxes(path: Path, colors: dict[str, str] | None = None, goalie_first: bool = True,
