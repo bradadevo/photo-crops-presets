@@ -98,35 +98,70 @@ shows how many are done and about how long is left (**Stop** keeps what is
 made). When you are in another app, the tab title shows the progress and a
 Mac notification says when the looks (or an export, or a reel) are ready.
 
-**4. Look, compare, star the keepers**:
-- **← →** go through the looks; **Space** stars (keeps) one. **G** switches to
-  the **contact sheet** (every look big, ★ and ⬇ on each).
+**4. Look, compare, pick the keepers**:
+- **← →** go through the looks; **Space** (or **P**) **picks** one; **1**–**5** rate
+  it in stars (**0** clears). The strip's **Show** menu narrows it to the picks
+  or to 3 stars and up, for big batches. **G** switches to the **contact sheet**
+  (every look big, pick and ⬇ on each).
 - **Compare** (**C**) puts a before/after slider on the picture; hold **B** to
   see the original.
 - **Zoom** (**Z** or double-click; drag to move) to check faces and focus: the
   look is made again at 3600 px for it, so it is sharp. Compare works zoomed
   in too.
-- **⌘-click** 2 to 6 pictures to see them **side by side**, each with its ★.
-- **⌘C** copies the picture, to paste into Messages, Mail or a post.
+- **⌘-click** 2 to 6 pictures to see them **side by side**, each with its pick.
+- **Share** (the arrow-out-of-a-box button): **AirDrop** (to your iPhone, full
+  size), **Messages**, **Mail**, **Add to Photos** (it reaches your iPhone
+  through iCloud Photos), or **Copy** (**⌘C**). What is shared is the finished
+  picture, full size, with its edits, text, your name and copyright.
 - **Remove** a look you do not want, or **Remove all**.
 
-**5. Adjust** (the **Adjust** tab, or **A**) changes the picture instantly, as
-you drag, without making the look again:
-- **Look strength**, **Warmth**, **Player brightness** and **Background
+**5. Edit** (the **Edit** tab, or **A**). Everything changes the picture as you
+drag, and **⌘Z** / **⇧⌘Z** undo and redo every step (the arrows at the top of
+the tab too). Tools used on the picture itself:
+- **Crop** (**R**): drag the box or its handles, in **Free**, **Original**,
+  **4:5**, **1:1**, **9:16** or **16:9**; **straighten** with the dial (up to
+  20°; the picture is enlarged so no corner is empty), or **Auto**, which
+  levels it from the field lines, the horizon and the goal posts. **Apply**.
+- **Remove**: brush over a distraction (a bottle, a bag, a pole, a parent on
+  the sideline) and press **Remove it**: LaMa, a free object-removal model run
+  on this Mac, fills it from what is around it (it is downloaded once, about
+  200 MB, to `~/.cache/photo-crops`, or reused from ai-versions). It is
+  removed from the photo itself, full size, so every look of that photo is
+  made again without it; **⌘Z** puts it back.
+- **Adjust a part**: click a face, the player, the sky or the grass; the part
+  is traced (with SAM 2.1, as for the cut-out) and shown in blue, and gets its
+  own **Brightness**, **Warmth** and **Saturation**, with a soft edge. Several
+  parts can be adjusted; each is listed in the tab.
+- **White balance**: click something that should be white or gray (a white
+  kit, a line); Warmth and Tint are set so it is.
+- **Text** (**T**): a name, a score or a date, dragged into place (it snaps
+  to the middle), typed in the tab (two lines are fine), in **Clean**,
+  **Bold**, **Spaced** or **Banner** (on a dark bar), its size and color.
+  The page draws it with the same font as the export, so what you place is
+  what you get; every export size has it in the same place.
+- **Cut-out**: fix what counts as the player (below).
+
+Sliders:
+- **Light**: **Exposure**, **Contrast**, **Highlights** (bring back a white kit
+  or the sky), **Shadows** (open up a shaded face).
+- **Color**: **Warmth**, **Tint**, **Saturation**.
+- **The look**: **Look strength**, **Player brightness** and **Background
   brightness** (stops, using the player's cut-out), **Auto fill light** (lifts
   a player darker than the scene around them, backlit or in shade, up to +0.75
   stops; it compares the player with their own background, so it corrects the
   light, not anyone's skin tone or kit). Double-click a slider to reset it.
-- **Reset**, and **Use on all N "<look>"** (these settings on every picture
-  with this look).
-- **Fix the player cut-out**: the picture shows in blue what the app treats as
-  the player. With **Add**, click a teammate, the ball or a flag to make it
-  part of the player; with **Take out**, click a pole or a sign. Each click is
-  traced with SAM 2.1 (Meta's free Segment Anything model, run on this Mac;
-  about 1 s, 160 MB downloaded once to `~/.cache/photo-crops`). **Undo**,
-  **Automatic**, and **Remake this photo's looks**. Fixes stay with the photo
-  for all its looks and the full-size export, and are listed in the export's
-  `.json` (`cutout_fixes`).
+- **Reset all**, and **Use on all N** (these sliders on every picture with
+  this look; crops, parts and text stay with each picture).
+
+And for the photo:
+- **Fix the player cut-out** (**Cut-out**): the picture shows in blue what the
+  app treats as the player. With **Add**, click a teammate, the ball or a flag
+  to make it part of the player; with **Take out**, click a pole or a sign.
+  Each click is traced with SAM 2.1 (Meta's free Segment Anything model, run
+  on this Mac; about 1 s, 160 MB downloaded once to `~/.cache/photo-crops`).
+  **Undo**, **Automatic**, and **Remake this photo's looks**. Fixes stay with
+  the photo for all its looks and the full-size export, and are listed in the
+  export's `.json` (`cutout_fixes`).
 - **Use this look on all N photos** (with its fine-tuning).
 - **Match every photo's light to this one**: evens out exposure and white
   balance across the set, so a gallery looks like one shoot. Each photo is
@@ -136,13 +171,16 @@ you drag, without making the look again:
   difference, at most 0.75 stops and 8% per color), then its looks are made
   again. The correction is in each recipe as `"match"`. **Undo matching**
   puts every photo back as shot.
-- **Save as a preset**: the look with its fine-tuning, under **Mine**.
+- **Save as a preset**: the look with its sliders, under **Mine** (crops,
+  parts, text and removals belong to the picture and are not saved in it).
 
-Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when you
-export, make a reel, or save the look as a preset.
+The sliders are part of the look's recipe (`"adjust"`); crops, parts and text
+are the picture's `"edits"`, and removals the photo's (`"removed"`). All are
+kept when you export, share, zoom or make a reel, and written in each
+export's `.json`.
 
-**6. Export**: **Export N kept** (top right, or **E**) exports the starred
-pictures; with none starred, the one you are looking at. ⬇ on a picture
+**6. Export**: **Export N picks** (top right, or **E**) exports the picked
+pictures; with none picked, the one you are looking at. ⬇ on a picture
 exports just that one. The export window:
 - **Save to**: your export folder (default `~/Pictures/Photo Presets`;
   **Change…**). Each picture is saved with its recipe beside it as `.json`.
@@ -173,7 +211,7 @@ The window remembers your choices. A progress note shows the export; when it
 is done, **Show in Finder**.
 
 **7. Reel** (the **Reel** tab): a vertical MP4 (1080 x 1920, 30 fps) under a
-minute, ready to post, from your **★ Kept** pictures or **All looks**. Drag the
+minute, ready to post, from your **Picks** or **All looks**. Drag the
 pictures into the order you want; × leaves one out. Every picture is on screen
 for 2 seconds (shortened so the reel fits; never under 1.5 s), slowly pushes in
 and dissolves into the next. With a song, the cuts land on its beat (it can
@@ -531,8 +569,11 @@ photo_crops/          photo-crops (see its README)
 photo_presets/
   studio/             The AllProPhoto app
     server.py         Its local server: the session (photos, looks made, kept), the worker, the page's API
-    web/              The page: index.html, app.css, app.js (plain JavaScript, no build step)
+    web/              The page: index.html, app.css, app.js, edit.js (plain JavaScript, no build step)
     macapp.py         allprophoto-install-app: AllProPhoto.app in ~/Applications
+    share.py          AirDrop, Messages and Mail, the Mac's own share windows
+  edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling
+  retouch.py          Removing distractions with LaMa
   app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
   cli.py              allprophoto-batch
   engine.py           Random and preset modes, previews, full-size export

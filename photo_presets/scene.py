@@ -142,6 +142,7 @@ class Prepared:
     fine: np.ndarray | None = None  # the image in 16 bits (uint16), from RAW and 16-bit TIFF photos
     fixes: list[Fix] = field(default_factory=list)
     frame: tuple[float, float, float, float] | None = None  # framed for a look: its box in the photo (shares)
+    box: tuple[float, float, float, float] | None = None  # cropped first ("crop", "wide", "face"): its box in the photo (shares)
     _auto: tuple | None = field(default=None, repr=False)  # the cut-out and players' outline before fixes
     _pieces: dict = field(default_factory=dict, repr=False)  # each click's traced object
 
@@ -420,12 +421,15 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
 
 
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,
-            goalie_first: bool = True, shape: str = "best") -> Prepared:
+            goalie_first: bool = True, shape: str = "best", retouch=None) -> Prepared:
     """Loads a photo (RAW in the camera's look), finds its scene and, if
     asked, crops it the photo-crops way: "crop" (pro crop, zoomed in on the
-    action), "wide" (pro crop without zooming) or "face"."""
+    action), "wide" (pro crop without zooming) or "face". retouch: a function
+    cleaning the loaded photo first (distractions removed, see retouch.py)."""
     colors = colors or {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}
     photo = images.load(path)
+    if retouch is not None:
+        photo = retouch(photo)
     img = photo.image
     people, balls = detector().find(img, focus.focus_point(path, img.size), colors)
     plan = framing.choose(people, balls, img.size, goalie_first)
@@ -447,5 +451,7 @@ def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None
             fine = np.zeros((cropped.height, cropped.width, 3), np.uint16)
             part = photo.fine[max(t, 0):t + cropped.height, max(l, 0):l + cropped.width]
             fine[max(-t, 0):max(-t, 0) + part.shape[0], max(-l, 0):max(-l, 0) + part.shape[1]] = part
-        return Prepared(path, cropped, scene.in_crop(box, img.size), photo.exif, fine)
+        W, H = img.size
+        return Prepared(path, cropped, scene.in_crop(box, img.size), photo.exif, fine,
+                        box=(box[0] / W, box[1] / H, box[2] / W, box[3] / H))
     return Prepared(path, img, scene, photo.exif, photo.fine)

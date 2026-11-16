@@ -54,8 +54,9 @@
       <div class="strip-head">
         <span id="strip-count" class="strip-count"></span>
         <div class="strip-tools">
-          <button id="keep-all" class="chip-btn">Keep all</button>
-          <button id="keep-none" class="chip-btn">Clear keeps</button>
+          <select id="show" class="show" aria-label="Show"></select>
+          <button id="keep-all" class="chip-btn">Pick all</button>
+          <button id="keep-none" class="chip-btn">Clear picks</button>
           <button id="clear-looks" class="chip-btn">Remove all</button>
           <div class="seg small" role="group" aria-label="View">
             <button id="view-single" class="on" title="One at a time (E… or Enter)"><i data-i="single"></i></button>
@@ -71,7 +72,7 @@
   <aside class="inspector" id="inspector" aria-label="Looks and adjustments">
     <div class="tabs" role="tablist">
       <button role="tab" data-tab="looks" class="on">Looks</button>
-      <button role="tab" data-tab="adjust" disabled>Adjust</button>
+      <button role="tab" data-tab="edit" disabled>Edit</button>
     </div>
     <div id="pane-looks" class="pane looks-pane">
       <div class="looks-head">
@@ -81,7 +82,7 @@
       <div id="look-grid" class="look-grid"></div>
       <div class="make" id="make"></div>
     </div>
-    <div id="pane-adjust" class="pane adjust-pane" hidden></div>
+    <div id="pane-edit" class="pane adjust-pane" hidden></div>
   </aside>
 </div>
 
@@ -89,5 +90,6 @@
 <div id="modal-root"></div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <script src="/static/app.js"></script>
+<script src="/static/edit.js"></script>
 </body>
 </html>

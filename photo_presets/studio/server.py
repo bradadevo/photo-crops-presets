@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 import zipfile
+import dataclasses
 from collections import OrderedDict
 from concurrent.futures import CancelledError, Future
 from dataclasses import dataclass, field
@@ -36,7 +37,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import deliver, engine, pipeline, presets, reel, timing
+from photo_presets import deliver, edits, engine, pipeline, presets, reel, timing
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix
 
@@ -110,6 +111,7 @@ class Slot:
     result: Result | None = None
     ver: int = 0
     kept: bool = False
+    rating: int = 0
     started: float = 0.0
     extra: float = 0.0  # one-off work in this look's time (getting the photo ready, loading models)
     loading: bool = False
@@ -122,15 +124,18 @@ class Slot:
         if self.state == "now":
             pct = min(95, int(100 * (time.time() - self.started) / max(1.0, self.expect + self.extra)))
         out = {"id": self.id, "run": self.run, "photo": self.photo, "look": self.look, "title": self.title,
-               "state": self.state, "ver": self.ver, "kept": self.kept, "pct": pct, "secs": round(self.secs, 1),
+               "state": self.state, "ver": self.ver, "kept": self.kept, "rating": self.rating, "pct": pct,
+               "secs": round(self.secs, 1),
                "error": self.error, "note": "Loading the AI models (once a session)"
                if self.state == "now" and self.loading and not timing.models_loaded() else ""}
         if self.result is not None:
             r = self.result
+            w, h = edits.final_size(r.after.width, r.after.height, r.edits)
             out.update(adjust=pipeline.adjustments(r.recipe), about=presets.describe(r.name, r.recipe)
                        if r.name else "", notes=r.notes, matched="match" in r.recipe,
-                       width=r.after.width, height=r.after.height, ai=timing.uses_ai(r.recipe),
-                       cutout=pipeline.needs_cutout(r.recipe), fixes=len(E.fixes_for(r)))
+                       width=w, height=h, base_width=r.after.width, base_height=r.after.height,
+                       edits=r.edits, ai=timing.uses_ai(r.recipe), cutout=pipeline.needs_cutout(r.recipe),
+                       fixes=len(E.fixes_for(r)), removed=len(E.removals.get(str(r.source), [])))
         return out
 
 
@@ -628,17 +633,55 @@ async def keep(req: Request):
     return {"ok": True}
 
 
+async def traced(r: Result) -> None:
+    """The parts the result's edits adjust, traced (on the worker: it uses the AI model)."""
+    for a in (r.edits or {}).get("areas", []):
+        await asyncio.wrap_future(W.submit(FIX, E.part, r, a["x"], a["y"], 8, 8))
+
+
+def _variant(r: Result, kind: str) -> bytes:
+    """after: the picture as edited, without its text (the page draws the text, to move it);
+    thumb, full: with its text; before: the original, straightened and cropped the same;
+    base: parts adjusted, not yet straightened or cropped (for cropping and brushing);
+    area-N: base with part N shown in blue."""
+    arr = pipeline.to_array(r.after)
+    if kind == "before":
+        return jpeg(pipeline.to_image(edits.geometry(pipeline.to_array(r.before), r.edits)), quality=90)
+    if kind == "base":
+        return jpeg(pipeline.to_image(E.finalize(r, arr, geometry=False, texts=False)), quality=90)
+    if kind.startswith("area-"):
+        base = E.finalize(r, arr, geometry=False, texts=False)
+        areas = (r.edits or {}).get("areas", [])
+        i = int(kind[5:])
+        if 0 <= i < len(areas):
+            m = E.part(r, areas[i]["x"], areas[i]["y"], *base.shape[:2])[..., None] * 0.5
+            base = base * (1 - m) + engine.CUTOUT_TINT * m
+        return jpeg(pipeline.to_image(base), quality=88)
+    if kind == "thumb":
+        return jpeg(pipeline.to_image(E.finalize(r, arr)), THUMB, 84)
+    if kind == "full":
+        return jpeg(pipeline.to_image(E.finalize(r, arr)), quality=92)
+    return jpeg(pipeline.to_image(E.finalize(r, arr, texts=False)), quality=90)
+
+
 @app.get("/img/slot/{sid}/{ver}/{kind}.jpg")
-def slot_image(sid: int, ver: int, kind: str):
+async def slot_image(sid: int, ver: int, kind: str):
     s = S.slot(sid)
     r = s.result
-    if kind == "before":
-        return picture(PICTURES.get(("before", sid), lambda: jpeg(r.before, quality=90)))
-    if kind == "thumb":
-        return picture(PICTURES.get(("thumb", sid, s.ver), lambda: jpeg(r.after, THUMB, 84)))
     if kind == "fix":
-        return picture(jpeg(E.fix_view(r), quality=88))
-    return picture(PICTURES.get(("after", sid, s.ver), lambda: jpeg(r.after, quality=90)))
+        return picture(jpeg(await asyncio.to_thread(E.fix_view, r), quality=88))
+    if kind not in ("after", "thumb", "full", "before", "base") and not re.fullmatch(r"area-\d+", kind):
+        raise HTTPException(404)
+    if not edits.edited(r.edits):  # nothing to work out
+        if kind == "before":
+            return picture(PICTURES.get(("before", sid), lambda: jpeg(r.before, quality=90)))
+        if kind == "thumb":
+            return picture(PICTURES.get(("thumb", sid, s.ver), lambda: jpeg(r.after, THUMB, 84)))
+        if kind in ("after", "full", "base"):
+            return picture(PICTURES.get(("after", sid, s.ver), lambda: jpeg(r.after, quality=90)))
+    await traced(r)
+    data = await asyncio.to_thread(PICTURES.get, (kind, sid, s.ver), lambda: _variant(r, kind))
+    return picture(data)
 
 
 def _zoomed(r: Result) -> tuple[bytes, bytes]:
@@ -649,6 +692,9 @@ def _zoomed(r: Result) -> tuple[bytes, bytes]:
     img.thumbnail((ZOOM, ZOOM))
     after, _ = pipeline.render(img, r.recipe, E.library, p.scene, r.seed, E.drawings,
                                E.memo_key(r.source, r.crop, r.recipe, p.frame))
+    if edits.edited(r.edits):
+        after = pipeline.to_image(E.finalize(r, pipeline.to_array(after), texts=False))
+        img = pipeline.to_image(edits.geometry(pipeline.to_array(img), r.edits))
     return jpeg(after, quality=90), jpeg(img, quality=90)
 
 
@@ -666,9 +712,8 @@ async def zoom_image(sid: int, ver: int, kind: str):
 
 
 def _adj(body: dict) -> dict:
-    return {"strength": float(body.get("strength", 1)), "subject": float(body.get("subject", 0)),
-            "background": float(body.get("background", 0)), "warmth": float(body.get("warmth", 0)),
-            "auto_fill": bool(body.get("auto_fill", False))}
+    """The sliders from the page (any left out stay at their default)."""
+    return {k: type(v)(body.get(k, v)) for k, v in pipeline.ADJUST.items()}
 
 
 @app.post("/api/slots/{sid}/adjust")
@@ -680,6 +725,96 @@ async def adjust(sid: int, req: Request):
     with S.lock:
         s.result, s.ver = r, s.ver + 1
     return s.public()
+
+
+@app.post("/api/slots/{sid}/edit")
+async def edit(sid: int, req: Request):
+    """{adjust: {...}, edits: {...}}: the picture's sliders and its edits (each one given is replaced whole)."""
+    s = S.slot(sid)
+    body = await req.json()
+    r = s.result
+    if "adjust" in body:
+        r = await asyncio.to_thread(E.adjust, r, _adj(body["adjust"]))
+    if "edits" in body:
+        r = dataclasses.replace(r, edits=edits.clean(body["edits"]))
+    await traced(r)
+    with S.lock:
+        s.result, s.ver = r, s.ver + 1
+    return s.public()
+
+
+@app.post("/api/slots/{sid}/whitebalance")
+async def white_balance(sid: int, req: Request):
+    """{x, y}: a click on something that should be white or gray (shares of the picture shown)."""
+    s = S.slot(sid)
+    body = await req.json()
+    r = s.result
+    await traced(r)
+    shown = await asyncio.to_thread(E.finalize, r, pipeline.to_array(r.after), True, True, False)
+    adj = pipeline.adjustments(r.recipe)
+    adj["warmth"], adj["tint"] = edits.white_balance(shown, float(body["x"]), float(body["y"]), adj["warmth"], adj["tint"])
+    r = await asyncio.to_thread(E.adjust, r, adj)
+    with S.lock:
+        s.result, s.ver = r, s.ver + 1
+    return s.public()
+
+
+@app.get("/api/slots/{sid}/level")
+async def level(sid: int):
+    """The turn that levels the picture (from its field lines, horizon and posts)."""
+    r = S.slot(sid).result
+    return {"angle": await asyncio.to_thread(edits.level_angle, pipeline.to_array(r.before))}
+
+
+@app.post("/api/slots/rate")
+async def rate(req: Request):
+    body = await req.json()
+    with S.lock:
+        for sid in body.get("ids", []):
+            if sid in S.slots:
+                S.slots[sid].rating = int(max(0, min(5, int(body.get("rating", 0)))))
+    return {"ok": True}
+
+
+async def _remake_photo(source: Path) -> int:
+    """Every look of this photo made again (after a removal), keeping each one's tuning and edits."""
+    same = [o for o in S.slots.values() if o.result is not None and o.result.source == source]
+    for o in same:
+        o.state, o.started, o.extra, o.loading = "now", time.time(), 0.0, False
+    for o in same:
+        try:
+            r = await asyncio.wrap_future(W.submit(RUN, E.remake, o.result))
+            o.result, o.ver = r, o.ver + 1
+        finally:
+            o.state = "done"
+    return len(same)
+
+
+@app.post("/api/slots/{sid}/remove")
+async def remove_distraction(sid: int, req: Request):
+    """{strokes: [{pts: [[x, y]...], r}]} brushed on the picture (shares, before straightening and
+    cropping): what is under them is removed from the photo, and its looks are made again."""
+    s = S.slot(sid)
+    r = s.result
+    strokes = (await req.json()).get("strokes", [])
+    if not strokes:
+        raise HTTPException(400, "Brush over what should go")
+    scale = E.photo_scale(r)
+    removal = [{"pts": [list(E.to_photo(r, float(x), float(y))) for x, y in st.get("pts", [])],
+                "r": float(st.get("r", 0.02)) * scale} for st in strokes]
+    removals = E.removals.get(str(r.source), []) + [removal]
+    await asyncio.wrap_future(W.submit(FIX, E.set_removals, r.source, removals))
+    count = await _remake_photo(r.source)
+    return {"photo": s.photo, "removals": removals, "count": count}
+
+
+@app.post("/api/photos/{pid}/removals")
+async def set_removals(pid: int, req: Request):
+    """{removals: [...]}: the photo's removals as given (undo and redo)."""
+    path = S.photo(pid).path
+    removals = (await req.json()).get("removals", [])
+    await asyncio.wrap_future(W.submit(FIX, E.set_removals, path, removals))
+    return {"removals": removals, "count": await _remake_photo(path)}
 
 
 @app.post("/api/slots/{sid}/adjust_look")
@@ -824,6 +959,48 @@ def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark) -> N
         task.state = "done"
     except Exception as e:
         task.state, task.message = "failed", f"Export failed: {e}"
+
+
+SHARES = ("airdrop", "messages", "mail", "photos")
+
+
+@app.post("/api/slots/{sid}/share")
+async def share(sid: int, req: Request):
+    """{service: airdrop | messages | mail | photos}: the picture full size (a JPEG with your
+    name and copyright, its edits and text), sent the Mac way, or added to Photos (and so to
+    your iPhone through iCloud)."""
+    s = S.slot(sid)
+    service = (await req.json()).get("service")
+    if service not in SHARES:
+        raise HTTPException(400, "Unknown way to share")
+    task = Task(next(S.ids), "share", 1, now=s.result.title)
+    S.tasks[task.id] = task
+    W.submit(OUTPUT, _share, task, s.result, service)
+    return task.public()
+
+
+def _share(task: Task, r: Result, service: str) -> None:
+    try:
+        folder = WORK / "share" / str(task.id)
+        saved, _ = E.export([r], folder, None, engine.JPEG, [deliver.FULL], deliver.Credit.load(), None)
+        path = saved[0]
+        task.done, task.path = 1, str(path)
+        if service == "photos":
+            script = f'tell application "Photos" to import POSIX file "{path}" skip check duplicates true'
+            out = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            if out.returncode != 0:
+                raise RuntimeError(out.stderr.strip() or "Photos did not take it")
+            task.message = "Added to Photos (it reaches your iPhone through iCloud Photos)"
+        else:
+            import os
+            env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+            subprocess.Popen([sys.executable, "-m", "photo_presets.studio.share", service, str(path)], env=env)
+            task.message = {"airdrop": "AirDrop is open: pick your iPhone",
+                            "messages": "Messages is open with the picture",
+                            "mail": "Mail is open with the picture"}[service]
+        task.state = "done"
+    except Exception as e:
+        task.state, task.message = "failed", f"Could not share: {e}"
 
 
 @app.post("/api/folder/choose")

@@ -23,9 +23,9 @@ import numpy as np
 from PIL import Image
 
 from photo_crops import images
-from photo_presets import deliver, explore, match, pipeline, presets, reel
+from photo_presets import deliver, edits, explore, match, pipeline, presets, reel, retouch
 from photo_presets.assets import Library
-from photo_presets.scene import Fix, Prepared, prepare, resized
+from photo_presets.scene import Fix, Prepared, prepare, resized, segment
 
 # Export file types: JPEG (web, Instagram, clients), 16-bit TIFF (print and further editing), or both
 JPEG, TIFF, BOTH = "jpeg", "tiff", "both"
@@ -50,6 +50,7 @@ class Result:
     exif: bytes | None = None  # the photo's camera data (date taken, camera, lens), for saved copies
     look: Image.Image | None = None  # the look before its quick adjustments
     frame: tuple[float, float, float, float] | None = None  # framed by its look: the box in the photo (shares)
+    edits: dict = field(default_factory=dict)  # made on the picture after its look (see edits.py)
 
     @property
     def name(self) -> str:
@@ -82,19 +83,105 @@ class Engine:
         self.fixes: dict[tuple[str, str], list[Fix]] = {}
         # AI drawings, kept so a look's export (and reel) reuse its preview's drawing
         self.drawings: OrderedDict = OrderedDict()
+        # distractions removed from each photo: a list of removals, each a list of brush strokes
+        self.removals: dict[str, list[list[dict]]] = {}
+        self._cleaned: OrderedDict = OrderedDict()  # (photo, removals): its cleaned image and 16-bit copy
+        self._parts: OrderedDict = OrderedDict()  # traced parts of pictures, for adjusting them on their own
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
         if key in self._prepared:
             self._prepared.move_to_end(key)
             return self._prepared[key]
-        p = prepare(path, crop)
+        p = prepare(path, crop, retouch=self._retouched) if self.removals.get(str(path)) else prepare(path, crop)
         if self.fixes.get(key):
             p.set_fixes(self.fixes[key])
         self._prepared[key] = p
         while len(self._prepared) > PREPARED_CACHE:
             self._prepared.popitem(last=False)
         return p
+
+    # Removing distractions ------------------------------------------------------------------
+
+    def _retouched(self, photo):
+        """The loaded photo with its removals filled in (kept, so each is done once)."""
+        removals = self.removals.get(str(photo.path))
+        if not removals:
+            return photo
+        key = (str(photo.path), json.dumps(removals))
+        if key not in self._cleaned:
+            done = retouch.apply(photo, removals)
+            self._cleaned[key] = (done.image, done.fine)
+            while len(self._cleaned) > 3:
+                self._cleaned.popitem(last=False)
+        photo.image, photo.fine = self._cleaned[key]
+        return photo
+
+    def set_removals(self, path: Path, removals: list[list[dict]]) -> None:
+        """These removals on the photo; everything made from it is made again."""
+        key = str(path)
+        if removals:
+            self.removals[key] = [list(r) for r in removals]
+        else:
+            self.removals.pop(key, None)
+        for k in [k for k in self._prepared if k[0] == key]:
+            del self._prepared[k]
+        for k in [k for k in self._cutouts if k[0] == key]:
+            del self._cutouts[k]
+        for k in [k for k in self._parts if k[0] == key]:
+            del self._parts[k]
+
+    def to_photo(self, r: "Result", x: float, y: float) -> tuple[float, float]:
+        """A point on the result's picture (shares) as shares of the whole photo."""
+        x, y = from_frame(r.frame, x, y)
+        box = self.prepared(r.source, r.crop).box
+        if box:
+            x, y = box[0] + x * (box[2] - box[0]), box[1] + y * (box[3] - box[1])
+        return x, y
+
+    def photo_scale(self, r: "Result") -> float:
+        """The result's picture width as a share of the photo's width."""
+        w = 1.0 if not r.frame else r.frame[2] - r.frame[0]
+        box = self.prepared(r.source, r.crop).box
+        return w * (1.0 if not box else box[2] - box[0])
+
+    # Edits after the look --------------------------------------------------------------------
+
+    def part(self, r: "Result", x: float, y: float, h: int, w: int) -> np.ndarray:
+        """The part of the result's picture at x, y (a face, the player, the sky), traced (0-1, h x w)."""
+        p = self.ready(r.source, r.crop, r.recipe)
+        key = (str(r.source), r.crop, r.frame, json.dumps(self.removals.get(str(r.source), [])), round(x, 4), round(y, 4))
+        if key not in self._parts:
+            scale = min(1.0, edits.AREA_EDGE / max(p.image.size))
+            size = (max(1, round(p.image.height * scale)), max(1, round(p.image.width * scale)))
+            self._parts[key] = segment(p.image, x, y, size)
+            while len(self._parts) > 64:
+                self._parts.popitem(last=False)
+        m = self._parts[key]
+        return cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR) if m.shape != (h, w) else m
+
+    def finalize(self, r: "Result", arr: np.ndarray, areas: bool = True, geometry: bool = True,
+                 texts: bool = True) -> np.ndarray:
+        """The result's picture (floats 0-1, any size) with its edits: parts
+        adjusted, straightened and cropped, and its text."""
+        e = r.edits or {}
+        if not edits.edited(e):
+            return arr
+        out = arr
+        if areas:
+            for a in e.get("areas", []):
+                out = edits.adjust_part(out, self.part(r, a["x"], a["y"], *out.shape[:2]), a)
+        if geometry:
+            out = edits.geometry(out, e)
+        if texts:
+            out = edits.draw_texts(out, e.get("texts"))
+        return out
+
+    def finished(self, r: "Result", texts: bool = True) -> Image.Image:
+        """The result's preview with its edits."""
+        if not edits.edited(r.edits):
+            return r.after
+        return pipeline.to_image(self.finalize(r, pipeline.to_array(r.after), texts=texts))
 
     def ready(self, path: Path, crop: str, recipe: dict) -> Prepared:
         """The photo ready for this look: cut out if the look needs it, and
@@ -125,7 +212,8 @@ class Engine:
         fixes = tuple((f.x, f.y, f.add) for f in self.fixes.get((str(path), crop), []))
         while len(self.drawings) > DRAWINGS_KEPT:
             self.drawings.popitem(last=False)
-        return str(path), crop, frame, look, fixes
+        cleaned = json.dumps(self.removals.get(str(path), []))
+        return str(path), crop, frame, look, fixes, cleaned
 
     def _one(self, path: Path, crop: str, recipe: dict, seed: int) -> Result:
         p = self.ready(path, crop, recipe)
@@ -205,8 +293,8 @@ class Engine:
         return Image.fromarray(img)
 
     def remake(self, r: Result) -> Result:
-        """The look made again (after its photo's cut-out was fixed), keeping its fine-tuning."""
-        return self._one(r.source, r.crop, r.recipe, r.seed)
+        """The look made again (after its photo's cut-out was fixed or cleaned), keeping its fine-tuning and edits."""
+        return dataclasses.replace(self._one(r.source, r.crop, r.recipe, r.seed), edits=r.edits)
 
     def cutout_view(self, r: Result) -> Image.Image:
         """The result with the player tinted blue and outlined: what the app
@@ -282,7 +370,11 @@ class Engine:
             img.thumbnail((REEL_EDGE, REEL_EDGE))
             look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed, self.drawings,
                                       self.memo_key(r.source, r.crop, r.recipe, p.frame))
-            shots.append(reel.Shot(look, focus(p.scene), r.title))
+            where = focus(p.scene)
+            if edits.edited(r.edits):
+                where = edits.map_point(*where, look.width, look.height, r.edits)
+                look = pipeline.to_image(self.finalize(r, pipeline.to_array(look)))
+            shots.append(reel.Shot(look, where, r.title))
             if progress:
                 progress(i + 1, len(results), r.title)
         return shots
@@ -306,7 +398,8 @@ class Engine:
             recipe = {k: v for k, v in r.recipe.items() if k != "match"}
             if m:
                 recipe["match"] = m
-            out.append(r if recipe == r.recipe else self._one(r.source, r.crop, recipe, r.seed))
+            out.append(r if recipe == r.recipe
+                       else dataclasses.replace(self._one(r.source, r.crop, recipe, r.seed), edits=r.edits))
             if progress:
                 progress(i + 1, len(results), r.title)
         return out, sum(1 for m in by_photo.values() if m)
@@ -315,7 +408,8 @@ class Engine:
         out = []
         for i, r in enumerate(results):
             if "match" in r.recipe:
-                r = self._one(r.source, r.crop, {k: v for k, v in r.recipe.items() if k != "match"}, r.seed)
+                r = dataclasses.replace(self._one(r.source, r.crop, {k: v for k, v in r.recipe.items() if k != "match"},
+                                                  r.seed), edits=r.edits)
             out.append(r)
             if progress:
                 progress(i + 1, len(results), r.title)
@@ -344,6 +438,12 @@ class Engine:
             full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
                                                self.library, p.scene, r.seed, self.drawings,
                                                self.memo_key(r.source, r.crop, r.recipe, p.frame))
+            fh, fw = full.shape[:2]
+            where, players = focus(p.scene), players_box(p.scene)
+            if edits.edited(r.edits):
+                where = edits.map_point(*where, fw, fh, r.edits)
+                players = edits.map_box(players, fw, fh, r.edits)
+                full = self.finalize(r, full, texts=False)  # text is drawn on each size
             taken = images.taken_at(p.exif)
             exif = deliver.credited_exif(p.exif, credit, taken.year if taken else None)
             xmp = deliver.xmp(credit, taken.year if taken else None)
@@ -352,11 +452,12 @@ class Engine:
                 arr, name = full, stem
                 if key != deliver.FULL:
                     size = deliver.SIZES[key]
-                    arr, grow = deliver.sized(full, size, focus(p.scene), players_box(p.scene))
+                    arr, grow = deliver.sized(full, size, where, players)
                     name = f"{stem}_{deliver.SHORT[key]}"
                     if grow > 1.05:
                         notes_out.append(f"{r.source.name} {size.label.split(' (')[0]}: enlarged {grow:.1f}x "
                                          "(the photo has fewer pixels than this print size)")
+                arr = edits.draw_texts(arr, (r.edits or {}).get("texts"))
                 if mark is not None:
                     arr = deliver.watermark(arr, mark)
                 dest = _unique(folder / f"{name}.jpg")
@@ -371,6 +472,7 @@ class Engine:
                     images.save_tiff16(arr, dest.with_suffix(".tif"), exif, xmp)
                 dest.with_suffix(".json").write_text(json.dumps(
                     {"source": str(r.source), "crop": r.crop, "seed": r.seed, "size": key, "recipe": r.recipe,
+                     "edits": r.edits, "removed": self.removals.get(str(r.source), []),
                      "notes": notes, "cutout_fixes": [[f.x, f.y, f.add] for f in self.fixes_for(r)]},
                     indent=1))
                 saved.append(dest)

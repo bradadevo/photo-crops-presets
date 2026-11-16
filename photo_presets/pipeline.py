@@ -121,6 +121,12 @@ ADJUST = {
     "background": 0.0,   # the background's brightness, in stops
     "warmth": 0.0,       # -1 cooler (blue) to +1 warmer (amber)
     "auto_fill": False,  # lift a player who is darker than the scene around them
+    "exposure": 0.0,     # the whole picture's brightness, in stops
+    "contrast": 0.0,     # -1 flatter to +1 punchier
+    "highlights": 0.0,   # -1 brings back bright areas (a white kit, the sky), +1 brightens them
+    "shadows": 0.0,      # +1 opens up dark areas, -1 deepens them
+    "saturation": 0.0,   # -1 black and white to +1 twice as colorful
+    "tint": 0.0,         # -1 greener to +1 more magenta (with warmth: the white balance)
 }
 FILL_MAX = 0.75  # the most the automatic fill light adds, in stops
 FILL_RATIO = 0.85  # it lifts a player until they are this bright next to the background
@@ -185,10 +191,40 @@ def finish(before: np.ndarray, look: np.ndarray, recipe: dict, alpha: np.ndarray
         else:
             a = alpha[..., None]
             out = _brighten(out, background) * (1 - a) + _brighten(out, subject) * a
+    out = tone(out, adj)
     if adj["warmth"]:
         k = 0.08 * adj["warmth"]
         out = out * np.array([1 + k, 1 + k * 0.25, 1 - k], np.float32)
+    if adj["tint"]:
+        k = 0.06 * adj["tint"]
+        out = out * np.array([1 + k * 0.5, 1 - k, 1 + k * 0.5], np.float32)
+    if adj["saturation"]:
+        lum = (out[..., 0] * 0.299 + out[..., 1] * 0.587 + out[..., 2] * 0.114)[..., None]
+        out = lum + (out - lum) * (1 + adj["saturation"])
     return np.clip(out, 0, 1).astype(np.float32), notes
+
+
+def tone(out: np.ndarray, adj: dict) -> np.ndarray:
+    """Exposure, contrast, highlights and shadows, on brightness (colors keep their hue)."""
+    ev, con, hi, sh = adj["exposure"], adj["contrast"], adj["highlights"], adj["shadows"]
+    if not (ev or con or hi or sh):
+        return out
+    if ev:
+        out = _brighten(out, ev)
+    lum = np.clip(out[..., 0] * 0.299 + out[..., 1] * 0.587 + out[..., 2] * 0.114, 0, 1)
+    new = lum.copy()
+    if sh or hi:
+        # on the brightness of the area (not each pixel), so detail is kept
+        area = cv2.GaussianBlur(lum, (0, 0), max(2.0, lum.shape[1] / 300))
+        dark = np.clip(1 - area / 0.5, 0, 1) ** 1.5
+        bright = np.clip((area - 0.5) / 0.5, 0, 1) ** 1.5
+        new = new + sh * 0.35 * dark * (1 - new) * np.clip(new / 0.04, 0, 1) + hi * 0.3 * bright * np.where(hi < 0, new, 1 - new)
+    if con:
+        mid = 0.5
+        curve = mid + (new - mid) * (1 + con * 0.6)
+        new = np.where(con > 0, new + (np.clip(curve, 0, 1) - new) * (4 * new * (1 - new)) ** 0.5, curve)
+    ratio = np.clip(new, 0, 1.2) / np.maximum(lum, 0.004)
+    return out * np.clip(ratio, 0, 4)[..., None]
 
 
 DITHER_TILE = 256

@@ -64,3 +64,43 @@ def test_a_run_needs_photos_and_looks(client):
     pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
     r = client.post("/api/run", json={"photos": [pid], "looks": []})
     assert r.status_code == 400 and "look" in r.json()["error"]
+
+
+def _made(client, monkeypatch):
+    """A photo with one finished look in the session (made without the models)."""
+    import dataclasses
+    from pathlib import Path
+    from photo_presets.engine import Result
+    pid = client.post("/api/photos/upload", files=[("files", ("d.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    img = Image.new("RGB", (320, 240), (40, 90, 160))
+    r = Result(Path(server.S.photo(pid).path), "none", {"name": "Clean Pro", "steps": []}, 0, img, img.copy())
+    slot = server.Slot(999, 1, pid, "Clean Pro", r.title, 1.0, state="done", result=r)
+    server.S.slots[999] = slot
+    return slot
+
+
+def test_editing_a_picture(client, monkeypatch):
+    slot = _made(client, monkeypatch)
+    s = client.post("/api/slots/999/edit", json={"adjust": {"exposure": 0.5},
+                                                 "edits": {"crop": [0, 0, 0.5, 1], "texts": [{"text": "GO"}]}}).json()
+    assert s["adjust"]["exposure"] == 0.5 and s["width"] == 160 and s["base_width"] == 320
+    for kind in ("after", "thumb", "full", "before", "base"):
+        r = client.get(f"/img/slot/999/{s['ver']}/{kind}.jpg")
+        assert r.status_code == 200, kind
+    assert Image.open(io.BytesIO(client.get(f"/img/slot/999/{s['ver']}/after.jpg").content)).size == (160, 240)
+    assert client.post("/api/slots/rate", json={"ids": [999], "rating": 4}).status_code == 200
+    assert slot.rating == 4
+
+
+def test_sharing_exports_then_hands_over(client, monkeypatch, tmp_path):
+    slot = _made(client, monkeypatch)
+    calls = []
+    out = tmp_path / "pic.jpg"
+    out.write_bytes(_jpeg())
+    monkeypatch.setattr(server.E, "export", lambda *a, **k: ([out], []))
+    monkeypatch.setattr(server.subprocess, "Popen", lambda args, **k: calls.append(args))
+    monkeypatch.setattr(server.W, "submit", lambda prio, fn, *a: fn(*a))  # at once, in the test
+    task = client.post("/api/slots/999/share", json={"service": "airdrop"}).json()
+    assert server.S.tasks[task["id"]].state == "done"
+    assert calls and calls[0][-2:] == ["airdrop", str(out)]
+    assert client.post("/api/slots/999/share", json={"service": "fax"}).status_code == 400

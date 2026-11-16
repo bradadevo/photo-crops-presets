@@ -30,6 +30,20 @@ const ICONS = {
   film: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/>',
   zoom: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8 11h6M11 8v6"/>',
   clip: '<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/>',
+  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+  crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  eraser: '<path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21z"/><path d="M22 21H7M5 11l9 9"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+  pipette: '<path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3z"/>',
+  type: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
+  level: '<path d="M2 12h20"/><path d="M5 8l14 8" opacity=".5"/>',
+  share: '<path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
+  pick: '<circle cx="12" cy="12" r="9.5" fill="currentColor" stroke="none"/><path d="m7.5 12.2 3 3 6-6.2" stroke="#111" stroke-width="2.4"/>',
+  pickO: '<circle cx="12" cy="12" r="9"/><path d="m7.5 12.2 3 3 6-6.2"/>',
+  airdrop: '<path d="M8.5 15.5a5 5 0 1 1 7 0"/><path d="M5.6 18.4a9 9 0 1 1 12.8 0"/><path d="m12 13-3 9h6z"/>',
+  message: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+  photos: '<circle cx="12" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><circle cx="7" cy="12" r="3.2"/><circle cx="17" cy="12" r="3.2"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
 };
 const icon = (name) => `<i data-i="${name}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg></i>`;
@@ -85,10 +99,15 @@ const st = {
   scope: "one", crop: "none", compare: false, split: 50, fixing: false, fixAdd: true, fixVer: 0,
   reelSource: "kept", reelTask: null, reelOrder: [], reelOut: new Set(),
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
+  tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [] }, areaSel: null, textSel: null,
+  show: "all",
 };
 const slotById = (id) => st.slots.find((s) => s.id === id);
 const doneSlots = () => st.slots.filter((s) => s.state === "done");
 const keptSlots = () => st.slots.filter((s) => s.state === "done" && s.kept);
+/* The looks shown in the strip and the contact sheet: all, the picks, or those rated at least N stars. */
+const visibleSlots = () => st.show === "all" ? st.slots
+  : st.show === "picks" ? st.slots.filter((s) => s.kept) : st.slots.filter((s) => (s.rating || 0) >= +st.show);
 const lookByName = (n) => st.looks.find((l) => l.name === n);
 const slotImg = (s, kind = "after") => `/img/slot/${s.id}/${s.ver}/${kind}.jpg`;
 
@@ -155,8 +174,8 @@ function renderTop() {
   const btn = $("#export-btn");
   const cur = slotById(st.current);
   btn.disabled = !(kept || (cur && cur.state === "done"));
-  btn.querySelector("span").textContent = kept ? `Export ${kept} kept` : "Export";
-  btn.title = kept ? "Export the pictures you starred (E)" : "Export this picture (E)";
+  btn.querySelector("span").textContent = kept ? `Export ${plural(kept, "pick")}` : "Export";
+  btn.title = kept ? "Export the pictures you picked (E)" : "Export this picture (E)";
 }
 
 function renderRail() {
@@ -208,8 +227,8 @@ function tileCreate(sheet) {
   return (s) => {
     const b = document.createElement("button");
     b.className = "tile"; b.setAttribute("role", "option");
-    b.innerHTML = `<img alt="" draggable="false" hidden><div class="ring" hidden><span></span></div><span class="name"></span><span class="star">${icon("star")}</span>`
-      + (sheet ? `<span class="acts"><span class="k" data-act="keep" title="Keep (Space)">${icon("star")}</span><span data-act="export" title="Export this one">${icon("export")}</span></span>` : "");
+    b.innerHTML = `<img alt="" draggable="false" hidden><div class="ring" hidden><span></span></div><span class="name"></span><span class="star">${icon("pick")}</span><span class="stars"></span>`
+      + (sheet ? `<span class="acts"><span class="k" data-act="keep" title="Pick (Space)">${icon("pickO")}</span><span data-act="export" title="Export this one">${icon("export")}</span></span>` : "");
     b.onclick = (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "keep") { toggleKeep([s.id]); return; }
@@ -234,6 +253,7 @@ function tileUpdate(node, s0) {
   const img = node.querySelector("img");
   const ring = node.querySelector(".ring");
   node.querySelector(".name").textContent = s.look;
+  node.querySelector(".stars").textContent = s.rating ? "★".repeat(s.rating) : "";
   if (done) {
     const src = slotImg(s, "thumb");
     if (img.getAttribute("src") !== src) img.src = src;
@@ -251,17 +271,20 @@ function renderStrip() {
   wrap.hidden = !st.slots.length || st.mode !== "edit";
   if (wrap.hidden) return;
   const done = doneSlots().length, kept = keptSlots().length, waiting = st.slots.length - done;
-  $("#strip-count").innerHTML = `<b>${plural(done, "look")}</b>${waiting ? ` · ${waiting} on the way` : ""}${kept ? ` · <span style="color:var(--gold)">★ ${kept} kept</span>` : ""}`;
+  $("#strip-count").innerHTML = `<b>${plural(done, "look")}</b>${waiting ? ` · ${waiting} on the way` : ""}${kept ? ` · <span style="color:var(--gold)">${plural(kept, "pick")}</span>` : ""}`;
+  const show = $("#show");
+  show.innerHTML = [["all", "All"], ["picks", `Picks (${kept})`], ...[1, 2, 3, 4, 5].map((n) => [String(n), "★".repeat(n) + (n < 5 ? " and up" : "")])]
+    .map(([v, l]) => `<option value="${v}" ${st.show === v ? "selected" : ""}>${l}</option>`).join("");
   $("#keep-none").hidden = !kept;
   $("#keep-all").hidden = !done || kept === done;
   wrap.classList.toggle("grid", st.view === "grid");
   $("#view-single").classList.toggle("on", st.view === "single");
   $("#view-grid").classList.toggle("on", st.view === "grid");
-  reconcile($("#strip"), st.slots, (s) => s.id, tileCreate(false), tileUpdate);
+  reconcile($("#strip"), visibleSlots(), (s) => s.id, tileCreate(false), tileUpdate);
 }
 
 function select(id, keepGrid) {
-  st.current = id; st.fixing = false; st.zoom.on = false;
+  st.current = id; st.fixing = false; st.zoom.on = false; st.tool = null; st.cropDraft = null; st.areaSel = null; st.textSel = null;
   const s = slotById(id);
   if (s) st.activePhoto = s.photo;
   if (!keepGrid) st.view = "single";
@@ -289,25 +312,28 @@ function renderViewer() {
       <h1>Start with your game photos</h1>
       <p>Drop them anywhere on this window, paste with <kbd>⌘V</kbd>, or choose them. JPG, HEIC and RAW all work, and your originals are never changed.</p>
       <div class="row"><button class="btn primary big" data-add="files">${icon("plus")} Add photos…</button><button class="btn big" data-add="folder">${icon("folder")} Add a folder…</button></div>
-      <div class="steps"><span><b>1</b>Add photos</span><span><b>2</b>Pick looks</span><span><b>3</b>Star the best</span><span><b>4</b>Export</span></div></div>`;
+      <div class="steps"><span><b>1</b>Add photos</span><span><b>2</b>Pick looks</span><span><b>3</b>Edit the best</span><span><b>4</b>Share</span></div></div>`;
     bindAdd(v);
     return;
   }
-  const sig = JSON.stringify([cur?.id, cur?.ver, cur?.state, st.compare, st.fixing, st.fixVer, st.activePhoto]);
+  const sig = viewerSignature(cur);
   v.classList.remove("survey-mode");
   if (sig === viewerSig) return updateViewerLive(cur);
   viewerSig = sig;
+  if (cur && cur.state === "done" && st.tool) { renderTool(v, cur); return; }
   if (cur && cur.state === "done") {
     const src = st.fixing ? `/img/slot/${cur.id}/0/fix.jpg?v=${st.fixVer}` : slotImg(cur);
     v.innerHTML = `<div class="frame${st.fixing ? " fixing" : ""}${st.zoom.on ? " zoomed" : ""}" id="frame" style="--split:${st.split}%;${zoomVars()}">
-        <div class="layer"><img class="after" src="${src}" alt="${esc(cur.title)}" draggable="false"></div>
+        <div class="layer"><img class="after" src="${src}" alt="${esc(cur.title)}" draggable="false" data-base="${st.fixing ? "" : `${cur.width}x${cur.height}`}"></div>
+        ${st.fixing || st.zoom.on || st.compare ? "" : `<div class="texts" id="texts"></div>`}
         ${st.compare && !st.fixing ? `<div class="layer before-layer"><img class="before" src="${slotImg(cur, "before")}" alt="Original" draggable="false"></div>
         <div class="handle"><span>${icon("compare")}</span></div><span class="tag l">Before</span><span class="tag r">After</span>` : ""}
         ${st.zoom.on ? `<span class="tag zoom-tag">${icon("zoom")}<span> Zoomed · double-click or Z to fit</span></span>` : ""}
       </div>
       ${st.fixing ? fixBar() : ""}
       <div class="caption">${toolbar(cur)}</div>`;
-    fitFrame(cur.width, cur.height);
+    if (st.fixing) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
+    paintTexts(cur);
     bindViewer(cur);
   } else if (cur) {
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${cur.photo}/view.jpg" alt="" draggable="false"></div>
@@ -330,23 +356,28 @@ function renderViewer() {
   paintIcons(v);
 }
 
+const viewerSignature = (cur) => JSON.stringify([cur?.id, cur?.ver, cur?.state, st.compare, st.fixing, st.fixVer,
+  st.activePhoto, st.tool, st.areaSel]);
+
 function toolbar(cur) {
-  const list = st.slots;
+  const list = visibleSlots();
   const i = list.findIndex((s) => s.id === cur.id);
   const done = cur.state === "done";
   const photo = st.photos.find((p) => p.id === cur.photo);
   return `<div class="toolbar">
     <button data-nav="-1" title="Previous (←)" ${i <= 0 ? "disabled" : ""}>${icon("left")}</button>
-    <span class="of">${i + 1} / ${list.length}</span>
+    <span class="of">${i < 0 ? "–" : i + 1} / ${list.length}</span>
     <button data-nav="1" title="Next (→)" ${i >= list.length - 1 ? "disabled" : ""}>${icon("right")}</button>
     <span class="sep"></span>
     <span class="title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span></span>
     <span class="sep"></span>
-    ${done ? `<button data-act="compare" class="${st.compare ? "on" : ""}" title="Compare with the original (C, or hold B)">${icon("compare")} Compare</button>
-    <button data-act="adjust" title="Fine-tune this look">${icon("sun")} Adjust</button>
+    ${done ? `<button data-act="compare" class="${st.compare ? "on" : ""}" title="Compare with the original (C, or hold B)">${icon("compare")}</button>
+    <button data-act="edit" title="Edit: light, crop, remove, text (A)">${icon("sun")} Edit</button>
     <span class="sep"></span>
-    <button data-act="keep" class="${cur.kept ? "kept" : ""}" title="Keep (Space)">${icon(cur.kept ? "star" : "starO")} ${cur.kept ? "Kept" : "Keep"}</button>
-    <button data-act="copy" title="Copy, to paste into Messages or Mail (⌘C)">${icon("clip")}</button>
+    <span class="rating" title="Rate it (1 to 5)">${[1, 2, 3, 4, 5].map((n) => `<button data-rate="${n}" class="${(cur.rating || 0) >= n ? "on" : ""}">${icon("star")}</button>`).join("")}</span>
+    <button data-act="keep" class="${cur.kept ? "kept" : ""}" title="Pick it (Space)">${icon(cur.kept ? "pick" : "pickO")} ${cur.kept ? "Picked" : "Pick"}</button>
+    <span class="sep"></span>
+    <button data-act="share" title="AirDrop, Messages, Mail, Photos, Copy">${icon("share")}</button>
     <button data-act="export" title="Export this picture">${icon("export")}</button>`
     : `<button data-act="remove" title="Remove">${icon("trash")} Remove</button>`}
   </div>`;
@@ -382,6 +413,7 @@ function fitFrame(w, h) {
   const ah = v.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   const k = Math.min(aw / w, ah / h);
   f.style.width = `${Math.floor(w * k)}px`; f.style.height = `${Math.floor(h * k)}px`;
+  f.style.setProperty("--fw", `${Math.floor(w * k)}px`);
   f.dataset.w = w; f.dataset.h = h;
 }
 function fitPhotoFrame() {
@@ -394,12 +426,14 @@ window.addEventListener("resize", () => { const f = $("#frame"); if (f?.dataset.
 function bindViewer(cur) {
   const v = $("#viewer");
   v.querySelectorAll("[data-nav]").forEach((b) => b.onclick = () => step(+b.dataset.nav));
+  v.querySelectorAll("[data-rate]").forEach((b) => b.onclick = () => rate([cur.id], +b.dataset.rate === cur.rating ? 0 : +b.dataset.rate));
   v.querySelectorAll("[data-act]").forEach((b) => b.onclick = () => {
     const a = b.dataset.act;
     if (a === "compare") { st.compare = !st.compare; renderViewer(); if (st.zoom.on) sharpen(cur); }
     if (a === "keep") toggleKeep([cur.id]);
     if (a === "export") openExport([cur.id]);
-    if (a === "adjust") { st.tab = "adjust"; renderTabs(); }
+    if (a === "edit") { st.tab = "edit"; renderTabs(); }
+    if (a === "share") shareMenu(cur, b);
     if (a === "remove") api("/api/slots/remove", { ids: [cur.id] }).then(refresh);
     if (a === "copy") copyPicture(cur);
   });
@@ -483,9 +517,35 @@ function sharpen(cur) {
   });
 }
 
+function shareMenu(cur, anchor) {
+  closeMenus();
+  $("#share-menu")?.remove();
+  const m = document.createElement("div");
+  m.className = "share-menu menu-like"; m.id = "share-menu";
+  m.innerHTML = [["airdrop", "airdrop", "AirDrop", "To your iPhone, full size"], ["messages", "message", "Messages", ""],
+    ["mail", "mail", "Mail", ""], ["photos", "photos", "Add to Photos", "Reaches your iPhone through iCloud"], ["copy", "clip", "Copy", "⌘C"]]
+    .map(([k, ic, l, sub]) => `<button data-share="${k}">${icon(ic)}<span>${l}${sub ? `<small>${sub}</small>` : ""}</span></button>`).join("");
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  Object.assign(m.style, { position: "fixed", left: `${Math.min(r.left, innerWidth - 260)}px`, right: "auto", width: "250px", top: "auto", bottom: `${innerHeight - r.top + 8}px` });
+  m.querySelectorAll("[data-share]").forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation(); m.remove();
+    if (b.dataset.share === "copy") return copyPicture(cur);
+    await api(`/api/slots/${cur.id}/share`, { service: b.dataset.share });
+    refresh();
+  });
+  setTimeout(() => document.addEventListener("click", () => m.remove(), { once: true }), 0);
+}
+
+async function rate(ids, rating) {
+  ids.forEach((id) => { const s = slotById(id); if (s) s.rating = rating; });
+  viewerSig = ""; render();
+  await api("/api/slots/rate", { ids, rating });
+}
+
 async function copyPicture(s) {
   try {
-    const blob = await fetch(slotImg(s)).then((r) => r.blob());
+    const blob = await fetch(slotImg(s, "full")).then((r) => r.blob());
     const bmp = await createImageBitmap(blob);
     const c = document.createElement("canvas");
     c.width = bmp.width; c.height = bmp.height;
@@ -514,13 +574,13 @@ function renderSurvey(v) {
   const cols = ids.length <= 3 ? ids.length : ids.length === 4 ? 2 : 3;
   v.innerHTML = `<div class="survey" style="--cols:${cols}">${ids.map((id) => {
     const s = slotById(id), photo = st.photos.find((p) => p.id === s.photo);
-    return `<div class="cell${s.kept ? " kept" : ""}" data-id="${id}"><img src="${slotImg(s)}" alt="${esc(s.title)}" draggable="false">
+    return `<div class="cell${s.kept ? " kept" : ""}" data-id="${id}"><img src="${slotImg(s, "full")}" alt="${esc(s.title)}" draggable="false">
       <div class="cell-bar"><span><b>${esc(s.look)}</b> ${esc(photo?.name || "")}</span>
-        <button data-k="${id}" class="${s.kept ? "kept" : ""}" title="Keep">${icon(s.kept ? "star" : "starO")}</button>
+        <button data-k="${id}" class="${s.kept ? "kept" : ""}" title="Pick">${icon(s.kept ? "pick" : "pickO")}</button>
         <button data-x="${id}" title="Take out of the comparison">${icon("x")}</button></div></div>`;
   }).join("")}</div>
   <div class="caption"><div class="toolbar"><span class="title"><b>Comparing ${ids.length}</b><span>⌘-click pictures to add or take out · click one to open it</span></span>
-    <span class="sep"></span><button id="sv-keep">${icon("star")} Keep all ${ids.length}</button><button id="sv-done">Done</button></div></div>`;
+    <span class="sep"></span><button id="sv-keep">${icon("pick")} Pick all ${ids.length}</button><button id="sv-done">Done</button></div></div>`;
   paintIcons(v);
   v.querySelectorAll(".cell").forEach((c) => c.onclick = (e) => {
     const id = +c.dataset.id;
@@ -539,7 +599,7 @@ function notify(title, body) {
 }
 
 function step(d) {
-  const list = st.slots;
+  const list = visibleSlots();
   const i = list.findIndex((s) => s.id === st.current);
   const next = list[Math.max(0, Math.min(list.length - 1, (i < 0 ? 0 : i + d)))];
   if (next) select(next.id, st.view === "grid");
@@ -553,7 +613,7 @@ function renderSheet(v) {
   }
   const done = doneSlots().length;
   v.querySelector(".sheet-head span").textContent = done
-    ? `${plural(done, "look")} · ★ the keepers · ⌘-click to compare side by side · double-click to open` : "Your looks appear here as they are made";
+    ? `${plural(done, "look")} · pick the keepers · ⌘-click to compare side by side · double-click to open` : "Your looks appear here as they are made";
   let cmp = v.querySelector("#sheet-compare");
   if (!cmp) {
     cmp = document.createElement("button"); cmp.id = "sheet-compare"; cmp.className = "btn primary";
@@ -562,7 +622,7 @@ function renderSheet(v) {
   }
   cmp.hidden = st.survey.length < 2;
   cmp.textContent = `Compare ${st.survey.length} side by side`;
-  reconcile($("#sheet"), st.slots, (s) => s.id, tileCreate(true), tileUpdate);
+  reconcile($("#sheet"), visibleSlots(), (s) => s.id, tileCreate(true), tileUpdate);
   paintIcons(v);
 }
 
@@ -675,13 +735,14 @@ function renderTasks() {
   for (const task of st.tasks) {
     let t = taskToasts.get(task.id);
     if (t === "finished") continue;
-    const what = task.kind === "reel" ? "Making the reel" : "Exporting full size";
+    const what = { reel: "Making the reel", share: "Getting it ready to share" }[task.kind] || "Exporting full size";
     if (task.state === "running") {
       if (!t) { t = toast(what, { sticky: true, spin: true }); taskToasts.set(task.id, t); }
       t.update(`${what} · ${task.done} of ${task.total}`, task.now, task.total ? task.done / task.total : 0);
     } else {
       if (!t) { taskToasts.set(task.id, "finished"); continue; }  // finished before this page saw it
-      if (task.state === "done") {
+      if (task.state === "done" && task.kind === "share") t.done(task.message);
+      else if (task.state === "done") {
         t.done(task.message, "", { label: "Show in Finder", run: () => api("/api/reveal", { path: task.path }) });
         notify(task.kind === "reel" ? "Your reel is ready" : "Export finished", task.message);
       }
@@ -849,118 +910,18 @@ async function make(what) {
   $(`#strip [data-key="${r.slots?.[0]}"]`)?.scrollIntoView({ block: "nearest", inline: "start" });
 }
 
-// Adjust ------------------------------------------------------------------------------------
+// The right panel's tabs -------------------------------------------------------------------------
 function renderTabs() {
   const cur = slotById(st.current);
   const can = cur && cur.state === "done";
-  if (!can && st.tab === "adjust") st.tab = "looks";
+  if (!can && st.tab === "edit") st.tab = "looks";
   $$(".tabs button").forEach((b) => {
     b.classList.toggle("on", b.dataset.tab === st.tab);
-    if (b.dataset.tab === "adjust") b.disabled = !can;
+    if (b.dataset.tab === "edit") b.disabled = !can;
   });
   $("#pane-looks").hidden = st.tab !== "looks";
-  $("#pane-adjust").hidden = st.tab !== "adjust";
-  if (st.tab === "adjust") renderAdjust(cur);
-}
-
-let adjustSig = "";
-function renderAdjust(cur) {
-  const sig = `${cur.id}:${cur.ver}:${st.photos.length}:${cur.matched}:${cur.fixes}`;
-  if (sig === adjustSig) return;
-  adjustSig = sig;
-  const a = cur.adjust;
-  const same = doneSlots().filter((s) => s.look === cur.look).length;
-  const photo = st.photos.find((p) => p.id === cur.photo);
-  const anyMatched = doneSlots().some((s) => s.matched);
-  const pane = $("#pane-adjust");
-  pane.innerHTML = `
-    <div class="adj-title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span>${cur.about ? `<p>${esc(cur.about)}</p>` : ""}</div>
-    <div class="section"><h3>Fine-tune</h3>
-      ${slider("strength", "Look strength", 0, 100, 5, Math.round(a.strength * 100), (v) => v + "%")}
-      ${slider("warmth", "Warmth", -1, 1, 0.05, a.warmth, (v) => (v > 0 ? "+" : "") + (+v).toFixed(2), "warm")}
-      ${slider("subject", "Player brightness", -1, 1, 0.05, a.subject, (v) => (v > 0 ? "+" : "") + (+v).toFixed(2) + " ev")}
-      ${slider("background", "Background brightness", -2, 1, 0.05, a.background, (v) => (v > 0 ? "+" : "") + (+v).toFixed(2) + " ev")}
-      <label class="toggle"><input type="checkbox" id="a-fill" ${a.auto_fill ? "checked" : ""}><span><b>Auto fill light</b><small>Lifts a backlit or shaded player</small></span></label>
-      <div class="inline"><button class="btn" id="a-reset">Reset</button>${same > 1 ? `<button class="btn" id="a-all" style="flex:1">${icon("copy")} Use on all ${same} “${esc(cur.look)}”</button>` : ""}</div>
-    </div>
-    <div class="section"><h3>This photo</h3><div class="actions">
-      <button class="btn" id="a-fix">${icon("wand")} Fix the player cut-out${cur.fixes ? ` · ${cur.fixes} fix${cur.fixes > 1 ? "es" : ""}` : ""}</button>
-      ${st.photos.length > 1 ? `<button class="btn" id="a-useall">${icon("layers")} Use this look on all ${st.photos.length} photos</button>
-      <button class="btn" id="a-match">${icon("sun")} Match every photo's light to this one</button>` : ""}
-      ${anyMatched ? `<button class="btn ghost" id="a-unmatch">${icon("undo")} Undo matching</button>` : ""}
-    </div></div>
-    <div class="section"><h3>Save as a preset</h3><div class="inline"><input class="field" id="a-name" placeholder="Preset name" value="">
-      <button class="btn" id="a-save">${icon("save")} Save</button></div></div>
-    ${cur.notes?.length ? `<p class="notes">${esc(cur.notes.join("; "))}</p>` : ""}`;
-  paintIcons(pane);
-  const vals = { strength: a.strength, warmth: a.warmth, subject: a.subject, background: a.background, auto_fill: a.auto_fill };
-  pane.querySelectorAll("input[type=range]").forEach((r) => {
-    const out = pane.querySelector(`output[for=${r.id}]`);
-    const fmt = SLIDER_FMT[r.id];
-    r.oninput = () => {
-      out.textContent = fmt(r.value);
-      vals[r.dataset.k] = r.dataset.k === "strength" ? r.value / 100 : +r.value;
-      sendAdjust(cur.id, vals);
-    };
-    r.ondblclick = () => { r.value = r.dataset.k === "strength" ? 100 : 0; r.oninput(); };
-  });
-  $("#a-fill", pane).onchange = (e) => { vals.auto_fill = e.target.checked; sendAdjust(cur.id, vals); };
-  $("#a-reset", pane).onclick = () => {
-    Object.assign(vals, { strength: 1, warmth: 0, subject: 0, background: 0, auto_fill: false });
-    adjustSig = ""; sendAdjust(cur.id, vals, true);
-  };
-  $("#a-all", pane)?.addEventListener("click", async () => {
-    const r = await api(`/api/slots/${cur.id}/adjust_look`, vals);
-    toast(`Used on all ${r.count} “${cur.look}” pictures`); refresh();
-  });
-  $("#a-fix", pane).onclick = () => { st.fixing = true; st.compare = false; st.view = "single"; render(); };
-  $("#a-useall", pane)?.addEventListener("click", async () => {
-    const r = await api(`/api/slots/${cur.id}/use_on_all`, {});
-    toast(`Making “${cur.look}” on ${plural(r.slots.length, "more photo")}`); refresh();
-  });
-  $("#a-match", pane)?.addEventListener("click", async () => {
-    const t = toast("Matching every photo's light to this one…", { sticky: true, spin: true });
-    try { const r = await api(`/api/slots/${cur.id}/match`, {}); t.done(`Matched ${plural(r.changed, "photo")} to this one`); } catch { t.close(); }
-    adjustSig = ""; refresh();
-  });
-  $("#a-unmatch", pane)?.addEventListener("click", async () => { await api("/api/match/clear", {}); toast("Matching undone"); adjustSig = ""; refresh(); });
-  $("#a-save", pane).onclick = async () => {
-    const name = $("#a-name", pane).value.trim();
-    if (!name) { $("#a-name", pane).focus(); return; }
-    await api(`/api/slots/${cur.id}/save_preset`, { name });
-    toast(`Saved “${name}” under Mine`); loadLooks();
-  };
-}
-const SLIDER_FMT = {};
-function slider(k, label, min, max, stepv, value, fmt, cls = "") {
-  const id = "a-" + k;
-  SLIDER_FMT[id] = fmt;
-  return `<div class="slider"><label for="${id}" title="Double-click the slider to reset">${label}</label><output for="${id}">${fmt(value)}</output>
-    <input type="range" class="${cls}" id="${id}" data-k="${k}" min="${min}" max="${max}" step="${stepv}" value="${value}"></div>`;
-}
-
-let adjustBusy = false, adjustNext = null;
-async function sendAdjust(id, vals, reset = false) {
-  adjustNext = { id, vals: { ...vals } };
-  if (adjustBusy) return;
-  adjustBusy = true;
-  while (adjustNext) {
-    const job = adjustNext; adjustNext = null;
-    try {
-      const s = await api(`/api/slots/${job.id}/adjust`, job.vals);
-      const i = st.slots.findIndex((x) => x.id === s.id);
-      if (i >= 0) st.slots[i] = s;
-      if (st.current === s.id && !st.fixing) {
-        const img = $("#frame img.after");
-        if (img) { const pre = new Image(); pre.onload = () => { img.src = pre.src; }; pre.src = slotImg(s); }
-        viewerSig = JSON.stringify([s.id, s.ver, s.state, st.compare, st.fixing, st.fixVer, st.activePhoto]);
-      }
-      adjustSig = `${s.id}:${s.ver}:${st.photos.length}:${s.matched}:${s.fixes}`;
-      renderStrip();
-    } catch { break; }
-  }
-  adjustBusy = false;
-  if (reset) { adjustSig = ""; renderTabs(); }
+  $("#pane-edit").hidden = st.tab !== "edit";
+  if (st.tab === "edit") renderEdit(cur);
 }
 
 // Reel ---------------------------------------------------------------------------------------
@@ -985,7 +946,7 @@ function renderReel(force = false) {
       <div><h1>Make an Instagram reel</h1></div>
       <p class="lead">A vertical video under a minute: each picture slowly pushes in, dissolves into the next, and cuts on the beat of your song.</p>
       <div class="fld"><label>Pictures</label>
-        <div class="seg full" id="r-src"><button data-v="kept" ${kept.length ? "" : "disabled"}>★ Kept (${kept.length})</button><button data-v="all">All looks (${all.length})</button></div>
+        <div class="seg full" id="r-src"><button data-v="kept" ${kept.length ? "" : "disabled"}>Picks (${kept.length})</button><button data-v="all">All looks (${all.length})</button></div>
         <div class="reel-photos" id="r-order">${st.reelOrder.map((id, i) => { const s = slotById(id); const out = st.reelOut.has(id);
           return `<div class="rp${out ? " out" : ""}" draggable="true" data-id="${id}" title="${esc(s.title)}"><img src="${slotImg(s, "thumb")}" alt="" draggable="false"><span class="num">${out ? "" : use.indexOf(s) + 1}</span><button data-out="${id}" title="${out ? "Put back in the reel" : "Leave out of the reel"}">${icon(out ? "plus" : "x")}</button></div>`; }).join("") || `<span class="notes">Make some looks first.</span>`}</div>
         ${st.reelOrder.length > 1 ? `<small class="notes">Drag to change the order · × leaves one out</small>` : ""}</div>
@@ -1139,9 +1100,10 @@ document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) clos
 
 function showHelp() {
   closeMenus();
-  const keys = [["← →", "Previous / next look"], ["Space", "Keep (star) this look"], ["C", "Compare with the original"],
-    ["B (hold)", "Show the original"], ["G", "Contact sheet / one at a time"], ["E", "Export the kept looks (or this one)"],
-    ["A", "Adjust this look"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
+  const keys = [["← →", "Previous / next look"], ["Space or P", "Pick this look"], ["C", "Compare with the original"],
+    ["B (hold)", "Show the original"], ["G", "Contact sheet / one at a time"], ["E", "Export the picks (or this one)"],
+    ["A", "Edit this look"], ["R", "Crop and straighten"], ["T", "Add text"], ["1 – 5, 0", "Rate it, or clear the rating"],
+    ["⌘Z, ⇧⌘Z", "Undo, redo"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
     ["⌘-click", "Compare pictures side by side"], ["⌘C", "Copy the picture (paste into Messages or Mail)"],
     ["⌘V", "Paste a photo"], ["Esc", "Close, or go back"]];
   modal(`<header><h2>Keyboard shortcuts</h2></header><div class="body"><div class="help-list">${keys.map(([k, t]) => `<kbd>${k}</kbd><span>${t}</span>`).join("")}</div></div>
@@ -1150,6 +1112,7 @@ function showHelp() {
 
 document.addEventListener("keydown", (e) => {
   if (e.target.closest?.("input, textarea, select")) return;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { e.preventDefault(); (e.shiftKey ? redo : undo)(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !String(window.getSelection())) {
     const cur = slotById(st.current);
     if (cur?.state === "done" && st.mode === "edit") { e.preventDefault(); copyPicture(cur); }
@@ -1158,6 +1121,7 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Escape") {
     if (modalOpen()) closeModal();
+    else if (st.tool) setTool(st.tool);
     else if (st.survey.length) { st.survey = []; viewerSig = ""; render(); }
     else if (st.zoom.on) toggleZoom();
     else if (st.fixing) { st.fixing = false; renderViewer(); }
@@ -1177,7 +1141,10 @@ document.addEventListener("keydown", (e) => {
   }
   else if (k === "g" && st.slots.length) { st.view = st.view === "grid" ? "single" : "grid"; render(); }
   else if (k === "e") exportDefault();
-  else if (k === "a" && cur?.state === "done") { st.tab = "adjust"; renderTabs(); }
+  else if (k === "a" && cur?.state === "done") { st.tab = "edit"; renderTabs(); }
+  else if (k === "r" && cur?.state === "done") setTool("crop");
+  else if (k === "t" && cur?.state === "done") setTool("text");
+  else if (/^[0-5]$/.test(k) && cur?.state === "done") rate([cur.id], +k);
   else if (k === "z" && cur?.state === "done") toggleZoom(st.zoom.x, st.zoom.y);
   else if (k === "enter" && st.view === "grid" && cur) { st.view = "single"; render(); }
   else if (e.key === "?") showHelp();
@@ -1200,8 +1167,9 @@ function init() {
   });
   $("#export-btn").onclick = exportDefault;
   $$(".modes button").forEach((b) => b.onclick = () => { st.mode = b.dataset.mode; viewerSig = ""; render(); });
-  $$(".tabs button").forEach((b) => b.onclick = () => { if (!b.disabled) { st.tab = b.dataset.tab; adjustSig = ""; renderTabs(); } });
+  $$(".tabs button").forEach((b) => b.onclick = () => { if (!b.disabled) { st.tab = b.dataset.tab; editSig = ""; renderTabs(); } });
   $("#look-search").oninput = (e) => { st.query = e.target.value; renderLooks(true); };
+  $("#show").onchange = (e) => { st.show = e.target.value; render(); };
   $("#view-single").onclick = () => { st.view = "single"; render(); };
   $("#view-grid").onclick = () => { st.view = "grid"; render(); };
   $("#keep-all").onclick = () => { const ids = doneSlots().filter((s) => !s.kept).map((s) => s.id); toggleKeep(ids); };
