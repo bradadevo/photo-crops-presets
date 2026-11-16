@@ -533,7 +533,7 @@ function dragLogo(cur, el, e, f) {
 }
 
 // Posters ---------------------------------------------------------------------------------------------
-const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], ["spotlight", "Spotlight", "The player breaking out of a card, their number behind"],
+const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], ["spotlight", "Spotlight", "The player breaking out of a card, their number on a badge"],
   ["final", "Final Score", "The score on a clean panel"], ["mvp", "MVP", "A cover title behind the player"],
   ["name", "Name Stack", "Their name three times, big, behind them"], ["goal", "Goal", "GOAL behind the scorer, their name and the minute"],
   ["teamcolor", "Team Color", "The background in your team color, the player in full color"],
@@ -546,14 +546,21 @@ const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]]
   teamcolor: [["title", "Name or title"], ["line", "Line under it"]],
   matchday: [["title", "Small title"], ["away", "Opponent"], ["line", "When and where"]],
   champions: [["title", "Title"], ["line", "The event"]] };
+const WORD_COLORS = ["#ffffff", "#111111", "#d4af37", "#c8102e", "#0b3d91", "#1f2a44", "#0f5f3a", "#d97706", "#5b2a86", "#7dd3fc"];
 const TEAM_COLORS = ["#1f2a44", "#0b3d91", "#b3121a", "#0f5f3a", "#5b2a86", "#d97706", "#111111"];
 function posterSection(e) {
   const p = e.poster;
   return `<div class="section"><h3>Poster</h3>
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
     ${p ? `<div class="seg full small" id="pp-shape"><button data-v="post" class="${p.shape === "post" ? "on" : ""}" title="Instagram post, 4:5">Post</button><button data-v="story" class="${p.shape === "story" ? "on" : ""}" title="Instagram story or reel cover, 9:16">Story</button></div>
+      ${p.template === "spotlight" ? `<div class="fld"><label>Number</label><div class="seg full small" id="pp-numstyle">
+        <button data-v="badge" class="${(p.number_style || "badge") === "badge" ? "on" : ""}" title="A solid badge on the card's corner, in front">Badge</button>
+        <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
       ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><div class="fld-row"><input class="field poster-in" data-pk="${k}" value="${esc(p[k] ?? "")}" placeholder="(left off the poster)">
-        <button class="icon-btn" data-clear-pk="${k}" title="Take this off the poster" ${off(!(p[k] ?? ""), "It's already off the poster: type in the box to put it back.")}>${icon("x")}</button></div></div>`).join("")}
+        ${k === "away_score" ? "" : `<button class="color-dot${p.colors?.[k] ? "" : " auto"}" data-color-pk="${k}" style="${p.colors?.[k] ? `background:${p.colors[k]}` : ""}" title="Its color" aria-label="Color of ${esc(l)}"></button>`}
+        <button class="icon-btn" data-clear-pk="${k}" title="Take this off the poster" ${off(!(p[k] ?? ""), "It's already off the poster: type in the box to put it back.")}>${icon("x")}</button></div>
+        ${st.colorPk === k ? `<div class="swatches word-colors" data-word-colors="${k}"><button data-v="" class="auto${p.colors?.[k] ? "" : " on"}" title="As the layout has it" aria-label="As the layout has it">A</button>${WORD_COLORS.map((c) => `<button data-v="${c}" class="${p.colors?.[k] === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}
+          <label class="pick-own" title="Any color"><input type="color" data-own-color="${k}" value="${p.colors?.[k] || "#ffffff"}"></label></div>` : ""}</div>`).join("")}
       <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
       ${(st.kit || []).length ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
         <button class="kit-logo${!p.logo ? " on" : ""}" data-v="" title="No logo">${icon("x")}</button>${st.kit.map((k) => `<button class="kit-logo${p.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>` : ""}
@@ -567,7 +574,7 @@ function bindPosterSection(cur, pane) {
   const s0 = () => slotById(cur.id);
   const set = (fn) => changeEdits(s0(), (ed) => { ed.poster ||= { template: "gameday", shape: "post", color: "#1f2a44" }; fn(ed.poster); });
   pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => set((p) => {
-    const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || "") };
+    const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || ""), ...(p.colors ? { colors: p.colors } : {}) };
     for (const k of Object.keys(p)) delete p[k];
     Object.assign(p, keep, { template: b.dataset.poster });
   }));
@@ -588,6 +595,13 @@ function bindPosterSection(cur, pane) {
     await loadPosters(); editSig = ""; renderTabs();
     toast(`Deleted the saved poster “${b.dataset.delPoster}”`);
   });
+  pane.querySelectorAll("[data-color-pk]").forEach((b) => b.onclick = () => {  // its palette opens under it
+    st.colorPk = st.colorPk === b.dataset.colorPk ? null : b.dataset.colorPk; editSig = ""; renderTabs();
+  });
+  const wordColor = (k, c) => set((p) => { p.colors ||= {}; if (c) p.colors[k] = c; else delete p.colors[k]; });
+  pane.querySelectorAll("[data-word-colors] button").forEach((b) => b.onclick = () => wordColor(b.parentElement.dataset.wordColors, b.dataset.v));
+  pane.querySelectorAll("[data-own-color]").forEach((inp) => inp.onchange = () => wordColor(inp.dataset.ownColor, inp.value));
+  pane.querySelectorAll("#pp-numstyle button").forEach((b) => b.onclick = () => set((p) => { p.number_style = b.dataset.v; }));
   pane.querySelectorAll("[data-clear-pk]").forEach((b) => b.onclick = () => {
     const k = b.dataset.clearPk;
     set((p) => { p[k] = ""; });

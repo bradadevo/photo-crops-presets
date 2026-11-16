@@ -52,7 +52,17 @@ def clean(p: dict | None) -> dict | None:
     for k in ("title", "line", "number", "home", "away", "home_score", "away_score", "name", "minute"):
         if k in p or k in DEFAULTS[p["template"]]:
             out[k] = str(p.get(k, DEFAULTS[p["template"]].get(k, "")))[:40]
+    colors = {k: v for k, v in (p.get("colors") or {}).items()
+              if isinstance(v, str) and len(v) == 7 and v.startswith("#") and k in WORD_KEYS}
+    if colors:
+        out["colors"] = colors  # each word's own color (else the layout's)
+    if p["template"] == "spotlight":
+        out["number_style"] = p.get("number_style") if p.get("number_style") in NUMBER_STYLES else "badge"
     return out
+
+
+WORD_KEYS = ("title", "line", "number", "home", "away", "home_score", "name", "minute")
+NUMBER_STYLES = ("badge", "behind")  # Spotlight's number: a solid badge on the card's corner, or big behind it
 
 
 def size_for(w: int, h: int, p: dict) -> tuple[int, int]:
@@ -138,6 +148,14 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
     """Draws one of the poster's words (nothing when it was cleared), noting where (for words())."""
     if not text:
         return
+    own = (getattr(_NOTE, "colors", None) or {}).get(key)
+    if own:  # its own color: the letters (or, for outlined words, their outline), the same see-through
+        rgb = tuple(int(own[i:i + 2], 16) for i in (1, 3, 5))
+        fill = kw.get("fill", (255, 255, 255, 255))
+        if len(fill) == 4 and fill[3] <= 40 and "stroke_fill" in kw:
+            kw["stroke_fill"] = rgb + (kw["stroke_fill"][3] if len(kw["stroke_fill"]) == 4 else 255,)
+        else:
+            kw["fill"] = rgb + ((fill[3],) if len(fill) == 4 else (255,))
     d.text(xy, text, font=font, **kw)
     boxes = getattr(_NOTE, "boxes", None)
     if boxes is not None:
@@ -163,6 +181,20 @@ def words(p: dict, has_logo: bool = False) -> list[dict]:
 def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np.ndarray:
     """The poster (floats 0-1). arr: the picture as edited; matte: its players (0-1, same size);
     logo: an RGBA logo (or None)."""
+    _NOTE.colors = p.get("colors")
+    try:
+        return _compose(arr, matte, p, logo)
+    finally:
+        _NOTE.colors = None
+
+
+def word_color(key: str, default: tuple) -> tuple:
+    """A decoration that goes with a word (Champions' rules with its title): the word's own color."""
+    own = (getattr(_NOTE, "colors", None) or {}).get(key)
+    return tuple(int(own[i:i + 2], 16) for i in (1, 3, 5)) if own else default
+
+
+def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np.ndarray:
     ih, iw = arr.shape[:2]
     W, H = size_for(iw, ih, p)
     fx, fy, box = _focus(matte)
@@ -234,16 +266,17 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
 
 
 def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
-    """Team color, a big number behind, the picture in a card, the player breaking out of its top."""
+    """Team color, the picture in a card, the player breaking out of its top, their number on a badge (or big behind)."""
     y = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
     dark = color * 0.35
     out = np.broadcast_to(dark * (1 - y) * 0.6 + color * 0.55 * (1 - y) + 0.04, (H, W, 3)).astype(np.float32).copy()
     lay, d = _layer((W, H))
     num = p.get("number", "")
-    if num:
-        f = _fit_font(num, HEAVY, W * 0.5, H * 0.34)  # an outlined number behind the card's top right corner
-        _say(d, "number", (W * 0.74, H * 0.2), num, font=f, fill=(255, 255, 255, 22), anchor="mm", stroke_width=max(2, int(W * 0.004)),
-               stroke_fill=(255, 255, 255, 110))
+    badge = p.get("number_style", "badge") == "badge"
+    if num and not badge:
+        f = _fit_font(num, HEAVY, W * 0.5, H * 0.34)  # big behind the card's top right corner
+        _say(d, "number", (W * 0.74, H * 0.2), num, font=f, fill=(255, 255, 255, 70), anchor="mm", stroke_width=max(2, int(W * 0.005)),
+               stroke_fill=(255, 255, 255, 220))
     out = _over(out, lay)
     # the card: the picture, cut so the player's head sits at the card's top edge
     cx0, cx1, cy0, cy1 = int(W * 0.09), int(W * 0.91), int(H * 0.2), int(H * 0.8)
@@ -291,8 +324,19 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
     line = p.get("line", "")
     if line:
         lf = _font(DEMI, H * 0.026)
-        _say(d, "line", (W / 2, H * 0.935), line + (f"  ·  #{num}" if num else ""), font=lf, fill=(255, 255, 255, 200), anchor="mm")
-    return _over(out, lay)
+        _say(d, "line", (W / 2, H * 0.935), line + (f"  ·  #{num}" if num and not badge else ""), font=lf,
+             fill=(255, 255, 255, 200), anchor="mm")
+    out = _over(out, lay)
+    if num and badge:  # a solid badge on the card's top left corner, in front of everything
+        lay, d = _layer((W, H))
+        r = W * 0.095
+        cx, cy = cx0 + r * 0.55, cy0 + r * 0.55
+        ring = max(3, int(W * 0.008))
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_c255(color), outline=(255, 255, 255, 255), width=ring)
+        f = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
+        _say(d, "number", (cx, cy + r * 0.04), num, font=f, fill=(255, 255, 255, 255), anchor="mm")
+        out = _over(out, _shadowed(lay, W * 0.012, 0.5))
+    return out
 
 
 # More layouts --------------------------------------------------------------------------------
@@ -421,7 +465,7 @@ def _champions(pic, m, p, W, H, color, has_logo):
         _say(d, "line", (W / 2, y), line, font=lf, fill=(255, 255, 255, 245), anchor="mm")
         for x0, x1 in ((W * 0.08, W / 2 - half), (W / 2 + half, W * 0.92)):
             if x1 > x0:
-                d.rectangle((x0, y - max(1, H * 0.0015), x1, y + max(1, H * 0.0015)), fill=GOLD + (230,))
+                d.rectangle((x0, y - max(1, H * 0.0015), x1, y + max(1, H * 0.0015)), fill=word_color("title", GOLD) + (230,))
     return _over(out, _shadowed(lay, H * 0.008, 0.6))
 
 

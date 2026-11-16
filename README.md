@@ -277,6 +277,13 @@ picture (GAME DAY, the line under it, a number) and its box opens in the
 panel with the words selected, ready to type over. The **×** beside a box
 takes those words off the poster (type in the box to put them back).
 
+**Any word, any color**: the round dot beside each poster word opens its
+colors (white, black, gold, red, blue, navy, green, orange, purple, sky, or
+any color with the rainbow dot); **A** puts back the layout's own color.
+Champions' gold lines follow its title's color. Spotlight's number is a solid
+badge on the card's corner by default (**Number: Big, behind** for the large
+number behind the card).
+
 **The edit panel puts what you are working on first**: with Poster, Text,
 Logo or Adjust a part open, its options sit right under the tools, and
 Light, Color and The look fold away below (click one to open it).

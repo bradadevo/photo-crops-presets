@@ -64,3 +64,26 @@ def test_each_poster_word_can_be_found_even_when_asked_at_once():
     assert all([w["key"] for w in f] == ["title", "line"] for f in found)
     assert poster.words({"template": "gameday", "line": ""})[0]["key"] == "title"  # a word taken off is not there
     assert len(poster.words({"template": "gameday", "line": ""})) == 1
+
+
+def test_any_poster_word_takes_its_own_color():
+    import numpy as np
+    from photo_presets import poster
+    arr = np.full((400, 300, 3), 0.3, np.float32)
+    p = poster.clean({"template": "champions", "colors": {"title": "#c8102e", "nope": "#000000", "line": "red"}})
+    assert p["colors"] == {"title": "#c8102e"}  # only real words, only real colors
+    out = poster.compose(arr, None, p, None)
+    w = poster.words(p)[0]
+    H, W = out.shape[:2]
+    top = out[int(w["y0"] * H):int(w["y1"] * H), int(w["x0"] * W):int(w["x1"] * W)].reshape(-1, 3)
+    red = top[(top[:, 0] > 0.6) & (top[:, 1] < 0.2)]
+    assert len(red) > 50  # the title is drawn red, not gold
+
+
+def test_spotlight_number_is_a_solid_badge_in_front_by_default():
+    from photo_presets import poster
+    p = poster.clean({"template": "spotlight"})
+    assert p["number_style"] == "badge"
+    keys = [w["key"] for w in poster.words(p)]
+    assert keys[-1] == "number"  # drawn last: in front of everything
+    assert poster.clean({"template": "spotlight", "number_style": "behind"})["number_style"] == "behind"
