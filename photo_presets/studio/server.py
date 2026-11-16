@@ -119,6 +119,8 @@ class Slot:
     kept: bool = False
     rating: int = 0
     crop: str = "none"
+    cut: bool = False  # the look cuts out the players (once per photo)
+    ai: bool = False  # drawn by the AI models (loaded once per session)
     started: float = 0.0
     extra: float = 0.0  # one-off work in this look's time (getting the photo ready, loading models)
     loading: bool = False
@@ -178,6 +180,7 @@ class Session:
         self.pace: list[tuple[float, float]] = []  # (took, expected) of clean looks: how this Mac runs today
         self.future: dict[int, list[dict]] = {}  # removed from every look of a photo: also from looks made later
         self.trash: dict[int, tuple[float, Slot]] = {}  # looks just removed, for undo
+        self.cutting: dict[tuple[str, str], float] = {}  # when each photo's cut-out began (for the countdown)
 
     def photo(self, pid: int) -> Photo:
         p = self.photos.get(pid)
@@ -256,17 +259,55 @@ class Session:
             t.state == "running" for t in self.tasks.values())
 
     def left(self) -> float:
-        """About how many seconds the looks still waiting take."""
+        """About how many seconds the looks still waiting take, the one-off work included from the
+        start (getting each photo ready, cutting out its players, loading the AI models), so the
+        estimate does not jump up as it meets them."""
+        return self.progress()[0]
+
+    def progress(self) -> tuple[float, str]:
+        """(seconds left, what is being done now)."""
         pace = 1.0
         if self.pace:
             pace = min(2.5, max(0.5, sum(t for t, _ in self.pace) / max(1e-6, sum(x for _, x in self.pace))))
-        total = 0.0
+        total, phase = 0.0, ""
+        ready, cut, models = set(), set(), timing.models_loaded()
         for s in self.slots.values():
-            if s.state == "wait":
-                total += s.expect * pace
-            elif s.state == "now":
-                total += max(0.0, (s.expect + s.extra) * pace - (time.time() - s.started))
-        return total
+            if s.state == "now":
+                whole = (s.expect + s.extra) * pace
+                spent = time.time() - s.started
+                # running over: a little more, not "nearly done" (which would then jump back up)
+                total += max(whole - spent, 0.15 * whole, 2.0)
+                key = (s.photo, s.crop)
+                ready.add(key)
+                cut.add(key)
+                if s.ai:
+                    models = True
+                if s.loading and not timing.models_loaded():
+                    phase = "Loading the AI models (once a session)"
+                elif s.extra >= timing.cut_out() * 0.9 and spent < s.extra * pace:
+                    phase = "Cutting out the players (once a photo)"
+                else:
+                    phase = f"Making {s.look}"
+        for s in self.slots.values():
+            if s.state != "wait":
+                continue
+            total += s.expect * pace
+            key = (s.photo, s.crop)
+            p = self.photos.get(s.photo)
+            if p is not None and key not in ready and not E.is_prepared(p.path, s.crop):
+                total += timing.PHOTO_READY * pace
+                ready.add(key)
+            if s.cut and p is not None and key not in cut and not E.is_cut_out(p.path, s.crop):
+                began = self.cutting.get((str(p.path), s.crop))
+                whole = timing.cut_out()
+                total += max(whole - (time.time() - began), 0.15 * whole, 2.0) if began else whole
+                cut.add(key)
+            if s.ai and not models:
+                total += timing.MODEL_LOAD
+                models = True
+        if not phase and any(s.state == "wait" for s in self.slots.values()):
+            phase = "Getting the photo ready"
+        return total, phase
 
 
 E = Engine()
@@ -446,6 +487,8 @@ def _swatch(pid: int, name: str) -> bytes | None:
         return None  # the AI looks take 20 s each: shown by their example instead
     recipe = dict(recipe, name=name)
     path = S.photo(pid).path
+    if pipeline.needs_cutout(recipe) and not E.is_cut_out(path, "none"):
+        S.cutting.setdefault((str(path), "none"), time.time())
     p = E.ready(path, "none", recipe)
     small = p.image.copy()
     small.thumbnail((SWATCH, SWATCH))
@@ -505,8 +548,10 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
     """One look, on the worker."""
     fresh = not E.is_prepared(job.path, crop)
     extra = timing.PHOTO_READY if fresh else 0.0
-    if pipeline.needs_cutout(job.recipe) and not E.is_cut_out(job.path, crop):
-        extra += timing.CUT_OUT
+    cutting = pipeline.needs_cutout(job.recipe) and not E.is_cut_out(job.path, crop)
+    if cutting:
+        began = S.cutting.setdefault((str(job.path), crop), time.time())
+        extra += max(timing.cut_out() - (time.time() - began), 2.0)  # (it may have begun for the look previews)
         fresh = True
     loading = timing.uses_ai(job.recipe) and not timing.models_loaded()
     if loading:
@@ -522,6 +567,8 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
     if not fresh and not loading:
         timing.learn(name, took)
         S.pace.append((took, slot.expect))
+    elif cutting and not loading:  # how long the cut-out itself took, for the next estimates
+        timing.learn("__cut_out__", max(5.0, took - slot.expect - (timing.PHOTO_READY if extra > timing.cut_out() else 0)))
     if name in presets.load_all():
         keep_example(name, r.after)
     future = S.future.get(slot.photo)
@@ -544,7 +591,7 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
             name = job.recipe.get("name", "")
             sid = next(S.ids)
             S.slots[sid] = Slot(sid, run, pid, name or "Random look", job.title, timing.seconds(name, job.recipe),
-                                crop=crop)
+                                crop=crop, cut=pipeline.needs_cutout(job.recipe), ai=timing.uses_ai(job.recipe))
             slots.append(S.slots[sid])
         order = range(len(jobs))
         if by_photo:
@@ -629,7 +676,8 @@ def state():
         slots = [s.public() for s in S.slots.values()]
         tasks = [t.public() for t in S.tasks.values() if t.state == "running" or time.time() - t.started < 600]
     credit = deliver.Credit.load()
-    return {"photos": photos, "slots": slots, "tasks": tasks, "busy": S.busy(), "left": round(S.left()),
+    left, phase = S.progress()
+    return {"photos": photos, "slots": slots, "tasks": tasks, "busy": S.busy(), "left": round(left), "phase": phase,
             "update": update_ready(), "player": FIND.public(),
             "models_loaded": timing.models_loaded(), "credit": credit.__dict__,
             "prefs": {"folder": DEFAULT_EXPORT} | prefs()}

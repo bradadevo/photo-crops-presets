@@ -61,6 +61,12 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const enc = encodeURIComponent;
 const plural = (n, word, many = word + "s") => `${n} ${n === 1 ? word : many}`;
+/* A countdown that reads like a clock: 2:35, 0:42, 8 s. */
+function clock(sec) {
+  sec = Math.round(sec);
+  if (sec < 60) return `${sec} s`;
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
 function say(sec) {
   if (sec < 10) return `about ${Math.max(1, Math.round(sec))} s`;
   if (sec < 90) return `about ${Math.round(sec / 5) * 5} s`;
@@ -160,7 +166,7 @@ const CROPS = [["none", "Whole", "The photo as shot, nothing cut"],
   ["wide", "Pro", "Its own shape, trimmed a little (at most 10%) so the players sit on a thirds line; keeps the scene"],
   ["crop", "Tight", "Zoomed in on the action: the players in the play fill the picture"],
   ["face", "Face", "A head-and-shoulders portrait of the main player"]];
-const MEASURE = { PHOTO_READY: 4, CUT_OUT: 18, MODEL_LOAD: 60 };
+const MEASURE = { PHOTO_READY: 4, CUT_OUT: 28, MODEL_LOAD: 60 };
 
 const st = {
   photos: [], slots: [], tasks: [], looks: [], groups: [], sizes: [], prefs: {}, credit: {}, busy: false, left: 0,
@@ -191,6 +197,13 @@ async function refresh() {
   const before = new Set(st.photos.map((p) => p.id));
   const wasActive = st.activePhoto;
   st.photos = data.photos; st.slots = data.slots; st.tasks = data.tasks; st.busy = data.busy; st.left = data.left;
+  st.phase = data.phase;
+  // time left, smoothed: the finish time moves gently toward each new estimate, and counts down by itself
+  if (st.busy && data.left > 0) {
+    const target = Date.now() + data.left * 1000;
+    st.eta = st.eta ? st.eta + (target - st.eta) * 0.35 : target;
+    st.runStart ||= Date.now();
+  } else { st.eta = null; st.runStart = null; }
   st.modelsLoaded = data.models_loaded; st.credit = data.credit; st.prefs = data.prefs; st.update = data.update;
   st.player = data.player;
   if (!st.player) st.railShow = "all";
@@ -204,6 +217,7 @@ async function refresh() {
   if (st.activePhoto !== wasActive) renderLooks(true);  // the looks previewed on this photo
   schedule();
 }
+setInterval(() => { if (st.busy && st.eta) renderTop(); }, 1000);  // the countdown ticks between updates
 function schedule() {
   clearTimeout(pollTimer);
   pollTimer = setTimeout(refresh, st.busy ? 700 : 30000);  // when idle, now and then: a newer version, say
@@ -241,9 +255,13 @@ function renderTop() {
     const now = making.find((s) => s.state === "now");
     const frac = (done + (now ? now.pct / 100 : 0)) / inRuns.length;
     pill.hidden = false;
-    document.title = `(${done}/${inRuns.length}) Making looks · AllProPhoto`;
-    pill.innerHTML = `<span class="spin"></span><span><b>Making looks</b> · ${done} of ${inRuns.length}${st.left >= 1 ? " · " + say(st.left) + " left" : ""}</span>
-      <button class="btn ghost" id="stop-run">Stop</button><span class="bar" style="width:${(frac * 100).toFixed(1)}%"></span>`;
+    const left = st.eta ? Math.max(1, (st.eta - Date.now()) / 1000) : 0;
+    const spent = st.runStart ? (Date.now() - st.runStart) / 1000 : 0;
+    const pct = left ? Math.min(99, Math.round(100 * spent / (spent + left))) : Math.round(frac * 100);
+    document.title = `(${pct}%) Making looks · AllProPhoto`;
+    pill.innerHTML = `<span class="spin"></span><span><b>${pct}%</b> · ${done} of ${plural(inRuns.length, "look")}${left ? " · " + clock(left) + " left" : ""}
+      <small class="phase">${esc(st.phase || "")}</small></span>
+      <button class="btn ghost" id="stop-run">Stop</button><span class="bar" style="width:${pct}%"></span>`;
     $("#stop-run").onclick = async () => { await api("/api/run/stop", {}); toast("Stopped. The looks already made are kept."); refresh(); };
   } else pill.hidden = true;
   const up = $("#update-btn");

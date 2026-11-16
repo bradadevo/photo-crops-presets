@@ -296,11 +296,24 @@ def lens_blur(a, p, ctx):
     cut out), so a bright shirt does not smear into a halo around them."""
     sigma = max(0.5, float(p["radius"]) * max(a.shape[:2]))
     if ctx.alpha is None or p.get("layer", "background") != "background":
-        return cv2.GaussianBlur(a, (0, 0), sigma)
+        return _soft_blur(a, sigma)
     keep = 1 - ctx.alpha
-    blurred = cv2.GaussianBlur(a * keep[..., None], (0, 0), sigma)
-    weight = cv2.GaussianBlur(keep, (0, 0), sigma)[..., None]
+    blurred = _soft_blur(a * keep[..., None], sigma)
+    weight = _soft_blur(keep, sigma)
+    weight = weight[..., None] if weight.ndim == 2 else weight
     return np.where(weight > 1e-3, blurred / np.maximum(weight, 1e-3), a)
+
+
+def _soft_blur(a: np.ndarray, sigma: float) -> np.ndarray:
+    """A wide blur done on a smaller copy and scaled back: the same soft result, many times
+    quicker on a full-size photo (a strong background blur has no fine detail to lose)."""
+    scale = min(1.0, 6.0 / sigma)
+    if scale >= 1.0:
+        return cv2.GaussianBlur(a, (0, 0), sigma)
+    h, w = a.shape[:2]
+    small = cv2.resize(a, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+    small = cv2.GaussianBlur(small, (0, 0), sigma * scale)
+    return cv2.resize(small, (w, h), interpolation=cv2.INTER_CUBIC)
 
 
 @op("fog", label="Fog / stadium haze", layer="background", color="#d9dee6", density=0.5, height=0.65)

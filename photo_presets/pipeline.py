@@ -313,7 +313,7 @@ def face_mask(scene: Scene, h: int, w: int) -> np.ndarray | None:
         cv2.circle(soft, center, radius, 1.0, -1)
         cv2.circle(core, center, max(1, int(radius * 0.75)), 1.0, -1)
     biggest = max(r for _, _, r in scene.faces) * w
-    return np.maximum(core, cv2.GaussianBlur(soft, (0, 0), max(1.0, biggest * 0.35)))
+    return np.maximum(core, np.clip(_wide_blur(soft, max(1.0, biggest * 0.35)), 0, 1))
 
 
 def render(img: Image.Image, recipe: dict, library: Library, scene: Scene, seed: int = 0,
