@@ -125,6 +125,7 @@ class Slot:
     secs: float = 0.0
     error: str = ""
     future: Future | None = None
+    edit_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def public(self) -> dict:
         pct = 0
@@ -893,13 +894,13 @@ def _variant(r: Result, kind: str) -> bytes:
     thumb, full: with its text; before: the original, straightened and cropped the same;
     base: parts adjusted, not yet straightened or cropped (for cropping and brushing);
     area-N: base with part N shown in blue."""
-    arr = pipeline.to_array(r.after)
+    arr = E.base_after(r)
     if kind == "before":
         return jpeg(pipeline.to_image(edits.geometry(pipeline.to_array(r.before), r.edits)), quality=90)
     if kind == "base":
-        return jpeg(pipeline.to_image(E.finalize(r, arr, geometry=False, texts=False)), quality=90)
+        return jpeg(pipeline.to_image(E.finalize(r, arr, geometry=False, texts=False, removals=False)), quality=90)
     if kind.startswith("area-"):
-        base = E.finalize(r, arr, geometry=False, texts=False)
+        base = E.finalize(r, arr, geometry=False, texts=False, removals=False)
         areas = (r.edits or {}).get("areas", [])
         i = int(kind[5:])
         if 0 <= i < len(areas):
@@ -907,10 +908,10 @@ def _variant(r: Result, kind: str) -> bytes:
             base = base * (1 - m) + engine.CUTOUT_TINT * m
         return jpeg(pipeline.to_image(base), quality=88)
     if kind == "thumb":
-        return jpeg(pipeline.to_image(E.finalize(r, arr)), THUMB, 84)
+        return jpeg(pipeline.to_image(E.finalize(r, arr, removals=False)), THUMB, 84)
     if kind == "full":
-        return jpeg(pipeline.to_image(E.finalize(r, arr)), quality=92)
-    return jpeg(pipeline.to_image(E.finalize(r, arr, texts=False)), quality=90)
+        return jpeg(pipeline.to_image(E.finalize(r, arr, removals=False)), quality=92)
+    return jpeg(pipeline.to_image(E.finalize(r, arr, texts=False, removals=False)), quality=90)
 
 
 @app.get("/img/slot/{sid}/{ver}/{kind}.jpg")
@@ -981,14 +982,17 @@ async def edit(sid: int, req: Request):
     """{adjust: {...}, edits: {...}}: the picture's sliders and its edits (each one given is replaced whole)."""
     s = S.slot(sid)
     body = await req.json()
-    r = s.result
-    if "adjust" in body:
-        r = await asyncio.to_thread(E.adjust, r, _adj(body["adjust"]))
-    if "edits" in body:
-        r = dataclasses.replace(r, edits=edits.clean(body["edits"]))
-    await traced(r)
-    with S.lock:
-        s.result, s.ver = r, s.ver + 1
+    new = edits.clean(body["edits"]) if "edits" in body else None
+    if new is not None:  # the slow part first (tracing parts, filling removals) ...
+        await traced(dataclasses.replace(s.result, edits=new))
+    async with s.edit_lock:  # ... then applied to the latest picture, one change at a time
+        r = s.result
+        if "adjust" in body:
+            r = await asyncio.to_thread(E.adjust, r, _adj(body["adjust"]))
+        if new is not None:
+            r = dataclasses.replace(r, edits=new)
+        with S.lock:
+            s.result, s.ver = r, s.ver + 1
     return s.public()
 
 
@@ -997,14 +1001,19 @@ async def white_balance(sid: int, req: Request):
     """{x, y}: a click on something that should be white or gray (shares of the picture shown)."""
     s = S.slot(sid)
     body = await req.json()
-    r = s.result
-    await traced(r)
-    shown = await asyncio.to_thread(E.finalize, r, pipeline.to_array(r.after), True, True, False)
-    adj = pipeline.adjustments(r.recipe)
-    adj["warmth"], adj["tint"] = edits.white_balance(shown, float(body["x"]), float(body["y"]), adj["warmth"], adj["tint"])
-    r = await asyncio.to_thread(E.adjust, r, adj)
-    with S.lock:
-        s.result, s.ver = r, s.ver + 1
+    async with s.edit_lock:
+        r = s.result
+        await traced(r)
+        shown = await asyncio.to_thread(lambda: E.finalize(r, E.base_after(r), texts=False, removals=False))
+        if not edits.neutral_enough(shown, float(body["x"]), float(body["y"])):
+            raise HTTPException(400, "That spot has a color of its own. Click something that should be white or "
+                                     "gray: a white kit, a line, a cloud.")
+        adj = pipeline.adjustments(r.recipe)
+        adj["warmth"], adj["tint"] = edits.white_balance(shown, float(body["x"]), float(body["y"]), adj["warmth"],
+                                                         adj["tint"])
+        r = await asyncio.to_thread(E.adjust, r, adj)
+        with S.lock:
+            s.result, s.ver = r, s.ver + 1
     return s.public()
 
 
@@ -1107,21 +1116,22 @@ async def remove_from_looks(sid: int, req: Request):
                    for st in removal["strokes"]]
         S.future.setdefault(s.photo, []).append({"points": X, "strokes": strokes})
 
-    def apply():
-        changed = []
-        for o in targets:
-            rm = removal if o is s else _to_look(s.result, o.result, removal)
-            if rm is None:
-                continue
-            e = dict(o.result.edits or {})
-            e["removals"] = list(e.get("removals", [])) + [rm]
-            r = dataclasses.replace(o.result, edits=edits.clean(e))
-            E.finished(r, texts=False)  # worked out now, so the picture shows at once
-            changed.append((o, r))
-        return changed
-    for o, r in await asyncio.wrap_future(W.submit(FIX, apply)):
-        with S.lock:
-            o.result, o.ver = r, o.ver + 1
+    placed = [(o, removal if o is s else _to_look(s.result, o.result, removal)) for o in targets]
+    placed = [(o, rm) for o, rm in placed if rm is not None]
+
+    def with_it(o, rm):
+        e = dict(o.result.edits or {})
+        e["removals"] = list(e.get("removals", [])) + [rm]
+        return dataclasses.replace(o.result, edits=edits.clean(e))
+
+    def apply():  # worked out now (the slow part), so the pictures show at once
+        for o, rm in placed:
+            E.finished(with_it(o, rm), texts=False)
+    await asyncio.wrap_future(W.submit(FIX, apply))
+    for o, rm in placed:  # added to each look as it is now (a slider may have moved meanwhile)
+        async with o.edit_lock:
+            with S.lock:
+                o.result, o.ver = with_it(o, rm), o.ver + 1
     return {"slots": [o.public() for o in targets], "future": S.future.get(s.photo, [])}
 
 

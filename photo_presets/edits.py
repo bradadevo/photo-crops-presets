@@ -213,6 +213,17 @@ def white_balance(arr: np.ndarray, x: float, y: float, warmth: float, tint: floa
     return (float(np.clip(warmth + k / 0.08, -WB_MAX, WB_MAX)), float(np.clip(tint + kt / 0.06, -WB_MAX, WB_MAX)))
 
 
+def neutral_enough(arr: np.ndarray, x: float, y: float) -> bool:
+    """Is the color at x, y close enough to white or gray to set the white balance from?
+    (A navy kit or the grass is not: correcting it to gray would turn the picture yellow or purple.)"""
+    h, w = arr.shape[:2]
+    r = max(2, int(min(w, h) * 0.006))
+    X, Y = int(np.clip(x * w, 0, w - 1)), int(np.clip(y * h, 0, h - 1))
+    c = np.median(arr[max(0, Y - r):Y + r + 1, max(0, X - r):X + r + 1].reshape(-1, 3), axis=0)
+    hi, lo = float(c.max()), float(c.min())
+    return hi > 0.08 and (hi - lo) / hi < 0.35
+
+
 def level_angle(arr: np.ndarray) -> float:
     """The turn (degrees, clockwise) that levels the picture: from its long
     straight lines (field lines, the horizon, goal posts), 0 when there are none."""

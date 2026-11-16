@@ -78,10 +78,12 @@ async function api(path, body, opts = {}) {
   if (!res.ok) {
     const msg = data.error || data.detail || `Something went wrong (${res.status})`;
     toast(typeof msg === "string" ? msg : "Something went wrong", { bad: true });
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), { shown: true });
   }
   return data;
 }
+// a problem the app already explained in a note needs nothing more
+window.addEventListener("unhandledrejection", (e) => { if (e.reason?.shown) e.preventDefault(); });
 const store = {
   get(k, d) { try { const v = localStorage.getItem("app." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("app." + k, JSON.stringify(v)); } catch { /* private mode */ } },
@@ -448,10 +450,10 @@ function toolbar(cur) {
     <span class="title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span></span>
     <span class="sep"></span>
     ${done ? `<button data-act="compare" class="${st.compare ? "on" : ""}" title="Compare with the original (C, or hold B)">${icon("compare")}</button>
-    <button data-act="edit" title="Edit: light, crop, remove, text (A)">${icon("sun")} Edit</button>
+    <button data-act="edit" title="Edit: light, crop, remove, text (A)">${icon("sun")}<span class="lbl"> Edit</span></button>
     <span class="sep"></span>
     <span class="rating" title="Rate it (1 to 5)">${[1, 2, 3, 4, 5].map((n) => `<button data-rate="${n}" class="${(cur.rating || 0) >= n ? "on" : ""}">${icon("star")}</button>`).join("")}</span>
-    <button data-act="keep" class="${cur.kept ? "kept" : ""}" title="Pick it (Space)">${icon(cur.kept ? "pick" : "pickO")} ${cur.kept ? "Picked" : "Pick"}</button>
+    <button data-act="keep" class="${cur.kept ? "kept" : ""}" title="Pick it (Space)">${icon(cur.kept ? "pick" : "pickO")}<span class="lbl"> ${cur.kept ? "Picked" : "Pick"}</span></button>
     <span class="sep"></span>
     <button data-act="share" title="AirDrop, Messages, Mail, Photos, Copy">${icon("share")}</button>
     <button data-act="export" title="Export this picture">${icon("export")}</button>

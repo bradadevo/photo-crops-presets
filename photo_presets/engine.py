@@ -31,7 +31,7 @@ from photo_presets.scene import Fix, Prepared, prepare, resized, segment
 JPEG, TIFF, BOTH = "jpeg", "tiff", "both"
 PREVIEW_EDGE = 1600
 REEL_EDGE = 2400  # a landscape photo shows half its width across the reel's 1080 px
-PREPARED_CACHE = 4
+PREPARED_CACHE = 8
 DRAWINGS_KEPT = 400  # AI drawings kept for reuse (about 1 MB each)
 CUTOUT_TINT = np.array([0.18, 0.55, 1.0], np.float32)  # how the cut-out view marks the player
 CROPS = {"none": "Whole photo", "wide": "Pro crop: no zoom (keeps the scene)",
@@ -228,14 +228,28 @@ class Engine:
             self._trim()
         return self._gone[key]
 
+    def base_after(self, r: "Result") -> np.ndarray:
+        """The result's preview (floats 0-1) with its removals: they are filled in the look and
+        the photo under it (kept, so the sliders stay instant), then its sliders applied."""
+        removals = (r.edits or {}).get("removals")
+        if not removals:
+            return pipeline.to_array(r.after)
+        look = self.removed(r, pipeline.to_array(r.look or r.after))
+        if not pipeline.adjusted(r.recipe):
+            return look
+        before = self.removed(r, pipeline.matched(pipeline.to_array(r.before), r.recipe))
+        alpha = self.cutout(r) if pipeline.needs_cutout({"adjust": r.recipe.get("adjust")}) else None
+        done, _ = pipeline.finish(before, look, r.recipe, alpha)
+        return done
+
     def finalize(self, r: "Result", arr: np.ndarray, areas: bool = True, geometry: bool = True,
-                 texts: bool = True) -> np.ndarray:
+                 texts: bool = True, removals: bool = True) -> np.ndarray:
         """The result's picture (floats 0-1, any size) with its edits: parts
         adjusted, straightened and cropped, and its text."""
         e = r.edits or {}
         if not edits.edited(e):
             return arr
-        out = self.removed(r, arr)
+        out = self.removed(r, arr) if removals else arr
         if areas:
             for a in e.get("areas", []):
                 out = edits.adjust_part(out, self.part(r, a["x"], a["y"], *out.shape[:2]), a)
@@ -249,7 +263,7 @@ class Engine:
         """The result's preview with its edits."""
         if not edits.edited(r.edits):
             return r.after
-        return pipeline.to_image(self.finalize(r, pipeline.to_array(r.after), texts=texts))
+        return pipeline.to_image(self.finalize(r, self.base_after(r), texts=texts, removals=False))
 
     def ready(self, path: Path, crop: str, recipe: dict) -> Prepared:
         """The photo ready for this look: cut out if the look needs it, and

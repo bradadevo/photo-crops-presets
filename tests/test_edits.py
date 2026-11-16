@@ -89,3 +89,10 @@ def test_edits_are_tidied():
     e = edits.clean({"angle": 0, "crop": [0, 0, 1, 1], "texts": [{"text": "x", "style": "nope", "size": 9}]})
     assert "angle" not in e and "crop" not in e
     assert e["texts"][0]["style"] == "clean" and e["texts"][0]["size"] == 0.4
+
+
+def test_white_balance_only_from_something_white_or_gray():
+    navy = np.zeros((40, 40, 3), np.float32); navy[:] = (0.08, 0.12, 0.30)
+    kit = np.zeros((40, 40, 3), np.float32); kit[:] = (0.85, 0.82, 0.74)
+    assert not edits.neutral_enough(navy, 0.5, 0.5)
+    assert edits.neutral_enough(kit, 0.5, 0.5)

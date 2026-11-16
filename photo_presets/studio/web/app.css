@@ -593,3 +593,14 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .frame .rm-status .spin { width: 11px; height: 11px; }
 .rm-bar { flex-wrap: nowrap; max-width: calc(100% - 20px); }
 .sheet .tile .acts span[data-act="delete"]:hover { color: var(--bad); }
+
+/* smaller windows: nothing squashed */
+.chip-btn, .toolbar .of, .toolbar button, .strip-count { white-space: nowrap; }
+.strip-head { flex-wrap: wrap; height: auto; min-height: 32px; row-gap: 2px; }
+.strip-tools { flex-wrap: wrap; justify-content: flex-end; }
+.toolbar { flex-wrap: nowrap; max-width: calc(100% - 12px); }
+@media (max-width: 1360px) {
+  .toolbar .lbl, .toolbar .title span { display: none; }
+  .toolbar .title { max-width: 150px; }
+  .toolbar .rating button { min-width: 17px; width: 17px; }
+}
