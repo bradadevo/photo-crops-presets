@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AllProPhoto</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111'/%3E%3Cpath d='M9 23 16 8l7 15h-4l-3-7-3 7z' fill='%234f8bff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="app" class="app">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span class="word">AllPro<b>Photo</b></span></div>
+    <nav class="modes" role="tablist" aria-label="Mode">
+      <button role="tab" data-mode="edit" class="on">Looks</button>
+      <button role="tab" data-mode="reel">Reel</button>
+    </nav>
+    <div class="top-right">
+      <div id="run-pill" class="run-pill" hidden></div>
+      <div class="menu-wrap">
+        <button id="tools-btn" class="btn ghost" aria-haspopup="menu">Tools <i data-i="chev"></i></button>
+        <div id="tools-menu" class="menu" role="menu" hidden>
+          <a role="menuitem" href="/classic/" target="_blank" rel="noopener">Preset editor<small>Build and change looks</small></a>
+          <a role="menuitem" href="/classic/" target="_blank" rel="noopener">Lightroom presets &amp; assets<small>LUTs, textures, overlays</small></a>
+          <button role="menuitem" id="help-btn">Keyboard shortcuts<small>Press ?</small></button>
+        </div>
+      </div>
+      <button id="export-btn" class="btn primary" disabled><i data-i="export"></i><span>Export</span></button>
+    </div>
+  </header>
+
+  <aside class="rail" aria-label="Photos">
+    <div class="rail-head">
+      <h2>Photos <span id="photo-count" class="count"></span></h2>
+      <div class="menu-wrap">
+        <button id="add-btn" class="icon-btn" aria-label="Add photos" aria-haspopup="menu"><i data-i="plus"></i></button>
+        <div id="add-menu" class="menu" role="menu" hidden>
+          <button role="menuitem" data-add="files">Add photos…<small>JPG, HEIC or RAW</small></button>
+          <button role="menuitem" data-add="folder">Add a folder…<small>A whole game</small></button>
+        </div>
+      </div>
+    </div>
+    <div id="photo-list" class="photo-list"></div>
+    <div id="rail-empty" class="rail-empty">
+      <p>Drop photos anywhere, paste with <kbd>⌘V</kbd>, or</p>
+      <button class="btn" data-add="files">Add photos…</button>
+      <button class="btn ghost" data-add="folder">Add a folder…</button>
+    </div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <section id="viewer" class="viewer" aria-label="Picture"></section>
+    <section id="strip-wrap" class="strip-wrap" hidden>
+      <div class="strip-head">
+        <span id="strip-count" class="strip-count"></span>
+        <div class="strip-tools">
+          <button id="keep-all" class="chip-btn">Keep all</button>
+          <button id="keep-none" class="chip-btn">Clear keeps</button>
+          <button id="clear-looks" class="chip-btn">Remove all</button>
+          <div class="seg small" role="group" aria-label="View">
+            <button id="view-single" class="on" title="One at a time (E… or Enter)"><i data-i="single"></i></button>
+            <button id="view-grid" title="Contact sheet (G)"><i data-i="grid"></i></button>
+          </div>
+        </div>
+      </div>
+      <div id="strip" class="strip" role="listbox" aria-label="Looks made"></div>
+    </section>
+    <section id="reel" class="reel" hidden></section>
+  </main>
+
+  <aside class="inspector" id="inspector" aria-label="Looks and adjustments">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="looks" class="on">Looks</button>
+      <button role="tab" data-tab="adjust" disabled>Adjust</button>
+    </div>
+    <div id="pane-looks" class="pane looks-pane">
+      <div class="looks-head">
+        <label class="search"><i data-i="search"></i><input id="look-search" type="search" placeholder="Search looks" autocomplete="off"></label>
+        <div id="look-filters" class="filters" role="group" aria-label="Look groups"></div>
+      </div>
+      <div id="look-grid" class="look-grid"></div>
+      <div class="make" id="make"></div>
+    </div>
+    <div id="pane-adjust" class="pane adjust-pane" hidden></div>
+  </aside>
+</div>
+
+<div id="drop" class="drop" hidden><div><i data-i="plus"></i><b>Drop to add photos</b></div></div>
+<div id="modal-root"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 Everything in [photo-crops](https://github.com/bradadevo/photo-crops)
 (professional crops, face close-ups, screenshots rebuilt from the camera
 files), plus **AllProPhoto**: a creative looks engine for sports photos
-with a Gradio app.
+with its own Mac app.
 
 - **Random exploration**: drop in photos and get a gallery of different,
   outside-the-box looks, each mixing one of your LUTs (or a neon split-tone,
@@ -44,135 +44,150 @@ time one is used. Reels and video overlays need ffmpeg
 ## The AllProPhoto app
 
 ```bash
-uv run allprophoto
+uv run allprophoto-install-app     # once: puts AllProPhoto.app in ~/Applications
 ```
 
-It opens in your browser on this Mac. (`uv run photo-presets` still works too.)
+Then open **AllProPhoto** like any Mac app (Finder, Spotlight or the Dock: drag
+it there to keep it). It opens in its own window, no Terminal or browser
+needed. Run the install again after updating Python or the project's
+packages. Without the app: `uv run allprophoto` opens the same thing in your
+browser (`--window` for the app window).
 
-**Make looks** walks you through six numbered steps (left: set up, right:
-results). It suits both ways of working:
+It is dark and photo-first, like Lightroom: **your photos** on the left, the
+**picture** big in the middle with the **looks made** in a strip under it, and
+the **looks** to choose from on the right. It suits both ways of working:
 
-- **One photo**: tick as many looks as you like, compare them, fine-tune the
-  best one, export it.
-- **A batch (a whole game)**: try looks on one good photo first, then press
-  **Use the selected look on all N photos**; fine-tune once and use the
-  settings on every photo with that look; export them all and make a reel.
+- **One photo**: pick as many looks as you like, compare them, star the best,
+  export.
+- **A whole game**: try looks on one good photo first, then **Use this look on
+  all N photos**; fine-tune once and use the settings on every photo with that
+  look; export them all and make a reel.
 
-1. **Add photos** (any mix, including RAW and HEIC): paste a copied image with
-   **⌘V** (a screenshot, or a photo copied from Photos, a browser or Finder;
-   each paste adds to the list), drag photos in, click to browse, or type a
-   folder or press **Browse…**. On Preset manager, ⌘V puts the image in the
-   sample photo box. It says how many photos you added, and with more than one
-   suggests trying looks on one photo first.
-2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
-   dramatic, Clean editorial, Studio smoke and lights, Watercolor, Anime, Oil
-   painting, Comic book, Pencil and ink, My presets), each with a
-   one-line description and about how long it takes per photo (⏱). Tick
-   any, or **Select all**; every photo goes through each one, and it shows how
-   many looks that makes and about how long the run takes. The times were
-   measured on this Mac and keep learning from your own runs (in
-   `~/.config/photo-crops-presets/timings.json`). **Explore random looks** invents new looks instead (how many per
-   photo, and an optional seed to repeat a run).
-3. **Make looks on** (with more than one photo): **Try looks on one photo
-   first** (pick which) or **All photos**. **Crop first**, then **Make looks**:
-   - **Whole photo**: as shot.
-   - **Pro crop: no zoom (keeps the scene)**: the photo's own shape, at
-     least 90% of its width and height, moved so the players sit on a
-     rule-of-thirds point (their upper body toward the upper third), never
-     cutting them; a photo already well composed stays whole.
-   - **Pro crop: zoomed in on the action**: the photo-crops pro crop, framed
-     tightly around the players in the play (often a third of the photo).
-   - **Face close-up**: head and shoulders.
+**1. Add photos** (any mix, RAW and HEIC included): drop photos or whole
+folders anywhere on the window, paste with **⌘V**, or press **+** → **Add
+photos…** / **Add a folder…** (the Mac's own dialogs; your photos stay where
+they are). A shot saved as both JPEG and RAW is used once (the camera's JPEG),
+and a photo added twice is added once. Your photos are still there next time
+you open the app (dropped and pasted ones are kept in
+`~/.cache/photo-crops-presets/added`). Click a photo to work on it.
 
-   While the looks are made, a small **Making looks** card floats in the
-   corner of the screen (no scrolling needed): a tile for every look, waiting,
-   being made with its %, or done with its picture and how long it took; how
-   many are done and about how long is left. The results open in step 4 when
-   all are done. With many photos, results are grouped look by look.
-4. **Compare, fine-tune and export**: every result is a picture with a ✓ in
-   its corner. Tick ✓ the good ones (leave the bad ones out) and press
-   **Export selected**, or press ⬇ on one picture to export just that one.
-   **Select all**, **Select this look** (every photo in the look you are
-   viewing) and **Clear** help with big batches. **Export as**: **Files in my
-   export folder**, or **One zip file** (saved in the export folder and shown
-   in Finder). Exports are full size, made with the sizes, file type and your
-   name in step 5, with a progress card in the corner.
-   Click any result to see it against the original
+**2. Pick looks**: every look is a card showing **your own photo in that
+look** (the quick looks are made on it in the background, a fraction of a
+second each, once the players are cut out). Rest the pointer on a card to
+**try the look on** the big picture, full size. The AI illustration looks take
+about 20 s each, so their cards show their most recent picture instead (kept
+in `~/.cache/photo-crops-presets/examples`). Search, or filter by group (Bold,
+Editorial, Studio, Watercolor, Anime, Oil painting, Comic book, Pencil and
+ink, Mine). Each card says about how long it takes (**instant**, or seconds;
+learned from your own runs, in `~/.config/photo-crops-presets/timings.json`).
+Tap cards to pick them (numbered in order), then choose:
+- **Photos**: **This photo**, or **All N**.
+- **Framing**: **Whole** (as shot); **Pro** (no zoom: the photo's own shape, at
+  least 90% of it, moved so the players sit on a rule-of-thirds point, never
+  cutting them); **Tight** (zoomed in on the action); **Face** (head and
+  shoulders).
 
-   on the before/after slider, with its description. After a one-photo trial,
-   **Use the selected look on all N photos** makes it (with its fine-tuning) on
-   every photo. **Fine-tune the selected look** changes it instantly, without
-   making the look again:
-   - **Look strength** (0-100 %), **Warmth**
-   - **Player brightness** and **Background brightness** (stops), using the
-     player's cut-out; it says what the look itself already does to them
-   - **Auto fill light on the player**: lifts a player darker than the scene
-     around them (backlit or in shade), up to +0.75 stops, photo by photo. It
-     compares the player with their own background, so it corrects the light,
-     not anyone's skin tone or kit.
-   - **Show and fix the player cut-out**: shows in blue what the app treats
-     as the player (at first only the main players of the play; others count
-     as background). **Click to fix it**: with **Add what I click**, click a
-     teammate, the ball or a flag to make it part of the player; with **Take
-     out what I click**, click a pole or a sign to put it back in the
-     background. Each click is traced with SAM 2.1 (Meta's free Segment
-     Anything model, run on this Mac; about 1 s, 160 MB downloaded once to
-     `~/.cache/photo-crops`), first on the whole photo and then closer around
-     the object for sharp edges. **Undo last click**, **Back to automatic**,
-     and **Remake this photo's looks** (to see the fix in effects such as
-     Color Pop or the neon looks; the brightness sliders use it at once).
-     Fixes stay with the photo for all its looks and the full-size export,
-     and are listed in the export's `.json` (`cutout_fixes`).
-   - **Reset**, and **Use these settings on every photo with this look**
+and press **Make N looks** (it says about how long, the first AI look of a
+session included: about a minute to load the drawing models). The shuffle
+button beside it makes six random looks, to discover new styles.
 
-   Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when
-   you export, make a reel, or save the look as a preset.
+**3. Watch them come in**: each look gets a tile in the strip at once, with a
+ring showing its %, and turns into its picture when done; you can open, star
+and export finished ones while the rest are still being made. The top bar
+shows how many are done and about how long is left (**Stop** keeps what is
+made). When you are in another app, the tab title shows the progress and a
+Mac notification says when the looks (or an export, or a reel) are ready.
 
-   **Match the game** (with more than one photo): **Match all photos to the
-   selected one** evens out exposure and white balance across the set, so a
-   gallery looks like one shoot instead of changing light. Each photo is
-   measured before any look (its middle brightness, and the color of its
-   near-neutral tones: white kits, lines, haze; a green field or a blue sky
-   does not count) and gently corrected toward the selected photo (three
-   quarters of the difference, at most 0.75 stops and 8% per color), then its
-   looks are made again. The correction is in each result's recipe as
-   `"match"` (left out when you save a preset). **Undo matching** puts every
-   photo back as shot.
-5. **Save a preset, export settings**: name a look and **Save preset** to
-   keep it. The export settings used by step 4: the export folder (default `~/Pictures/Photo Presets`), each
-   with its recipe beside it as `.json`. **Open folder** shows them in Finder.
-   **Sizes** (tick any): **Full size**, **Instagram post 4:5** (1080 x
-   1350), **Instagram square** (1080 x 1080), **Instagram story / reel cover
-   9:16** (1080 x 1920), and prints at 300 ppi: **4 x 6**, **5 x 7**, **8 x 10**,
-   **11 x 14** (turned to match the photo). Each size is cropped to its shape
-   around the players (kept whole whenever the shape allows; a cut-out fix
-   that adds a teammate keeps them in too), then resized; Instagram sizes get
-   a light output sharpening. A print size bigger than the photo's own pixels
-   is enlarged, and the export says so. Files are named with the size, e.g.
-   `DSC03424_vivid-pro_ig-4x5.jpg`.
-   **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
-   prints, further editing in Lightroom or Photoshop; about 6 times bigger),
-   or **Both**.
-   **Your name, copyright and watermark**: your name, a copyright notice
-   (empty: `© <year taken> <your name>`) and contact (email, website or
-   handle) go into every file: EXIF Artist and Copyright, and XMP (creator,
-   rights, IPTC creator contact), where Lightroom, Photo Mechanic, Photos and
-   print labs look. They are remembered (in
-   `~/.config/photo-crops-presets/delivery.json`). **Add a watermark** for
-   client proofs or posts: **Corner** (small text, bottom right) or **Across**
-   (large and repeated), with its text (empty: your copyright notice) and
-   strength.
+**4. Look, compare, star the keepers**:
+- **← →** go through the looks; **Space** stars (keeps) one. **G** switches to
+  the **contact sheet** (every look big, ★ and ⬇ on each).
+- **Compare** (**C**) puts a before/after slider on the picture; hold **B** to
+  see the original.
+- **Zoom** (**Z** or double-click; drag to move) to check faces and focus: the
+  look is made again at 3600 px for it, so it is sharp. Compare works zoomed
+  in too.
+- **⌘-click** 2 to 6 pictures to see them **side by side**, each with its ★.
+- **⌘C** copies the picture, to paste into Messages, Mail or a post.
+- **Remove** a look you do not want, or **Remove all**.
 
-6. **Make an Instagram reel**: a vertical MP4 (1080 x 1920, 30 fps) under a
-   minute, ready to post, made from the looks above or from a folder of photos
-   (such as your exports). Every photo is on screen for 2 seconds (shortened so
-   the reel fits; never under 1.5 s), slowly pushes in and dissolves into the
-   next. With a song, the cuts land on its beat (the song can start later to
-   skip a slow intro) and it fades out at the end. Add an optional opening
-   title (lower third) and closing text (such as your handle). Landscape
-   photos show about half their width, centered on the players, on a blurred
-   copy of themselves; portrait photos fill the screen. Reels are saved in
-   `Reels` inside your export folder.
+**5. Adjust** (the **Adjust** tab, or **A**) changes the picture instantly, as
+you drag, without making the look again:
+- **Look strength**, **Warmth**, **Player brightness** and **Background
+  brightness** (stops, using the player's cut-out), **Auto fill light** (lifts
+  a player darker than the scene around them, backlit or in shade, up to +0.75
+  stops; it compares the player with their own background, so it corrects the
+  light, not anyone's skin tone or kit). Double-click a slider to reset it.
+- **Reset**, and **Use on all N "<look>"** (these settings on every picture
+  with this look).
+- **Fix the player cut-out**: the picture shows in blue what the app treats as
+  the player. With **Add**, click a teammate, the ball or a flag to make it
+  part of the player; with **Take out**, click a pole or a sign. Each click is
+  traced with SAM 2.1 (Meta's free Segment Anything model, run on this Mac;
+  about 1 s, 160 MB downloaded once to `~/.cache/photo-crops`). **Undo**,
+  **Automatic**, and **Remake this photo's looks**. Fixes stay with the photo
+  for all its looks and the full-size export, and are listed in the export's
+  `.json` (`cutout_fixes`).
+- **Use this look on all N photos** (with its fine-tuning).
+- **Match every photo's light to this one**: evens out exposure and white
+  balance across the set, so a gallery looks like one shoot. Each photo is
+  measured before any look (its middle brightness, and the color of its
+  near-neutral tones: white kits, lines, haze; a green field or a blue sky does
+  not count) and gently corrected toward this one (three quarters of the
+  difference, at most 0.75 stops and 8% per color), then its looks are made
+  again. The correction is in each recipe as `"match"`. **Undo matching**
+  puts every photo back as shot.
+- **Save as a preset**: the look with its fine-tuning, under **Mine**.
+
+Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when you
+export, make a reel, or save the look as a preset.
+
+**6. Export**: **Export N kept** (top right, or **E**) exports the starred
+pictures; with none starred, the one you are looking at. ⬇ on a picture
+exports just that one. The export window:
+- **Save to**: your export folder (default `~/Pictures/Photo Presets`;
+  **Change…**). Each picture is saved with its recipe beside it as `.json`.
+- **As**: **Separate files**, or **One zip file** (named with the date and how
+  many pictures).
+- **Sizes** (any): **Full size**, **Instagram post 4:5** (1080 x 1350),
+  **Instagram square** (1080 x 1080), **Instagram story / reel cover 9:16**
+  (1080 x 1920), and prints at 300 ppi: **4 x 6**, **5 x 7**, **8 x 10**, **11 x
+  14** (turned to match the photo). Each size is cropped to its shape around
+  the players (kept whole whenever the shape allows; a cut-out fix that adds a
+  teammate keeps them in too), then resized; Instagram sizes get a light
+  output sharpening. A print size bigger than the photo's own pixels is
+  enlarged, and the export says so. Files are named with the size, e.g.
+  `DSC03424_vivid-pro_ig-4x5.jpg`.
+- **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
+  prints, further editing in Lightroom or Photoshop; about 6 times bigger), or
+  **Both**.
+- **Your name, copyright and watermark**: your name, a copyright notice (empty:
+  `© <year taken> <your name>`) and contact go into every file: EXIF Artist and
+  Copyright, and XMP (creator, rights, IPTC creator contact), where Lightroom,
+  Photo Mechanic, Photos and print labs look. Remembered (in
+  `~/.config/photo-crops-presets/delivery.json`). **Add a watermark** for
+  client proofs or posts: **Corner** (small text, bottom right) or **Across
+  (proofs)** (large and repeated), with its text (empty: your copyright
+  notice) and strength.
+
+The window remembers your choices. A progress note shows the export; when it
+is done, **Show in Finder**.
+
+**7. Reel** (the **Reel** tab): a vertical MP4 (1080 x 1920, 30 fps) under a
+minute, ready to post, from your **★ Kept** pictures or **All looks**. Drag the
+pictures into the order you want; × leaves one out. Every picture is on screen
+for 2 seconds (shortened so the reel fits; never under 1.5 s), slowly pushes in
+and dissolves into the next. With a song, the cuts land on its beat (it can
+start later to skip a slow intro) and it fades out at the end. Add an optional
+opening title (lower third) and closing text (such as your handle). Landscape
+photos show about half their width, centered on the players, on a blurred copy
+of themselves; portrait photos fill the screen. The reel plays in the phone on
+the right, and is saved in `Reels` inside your export folder.
+
+Press **?** for every keyboard shortcut.
+
+**Tools** (top right) opens the preset editor, Lightroom presets and assets in
+your browser: they are the classic app's pages (below), working on the same
+looks. The classic app on its own: `uv run allprophoto-classic`.
 
 **Quality and color** (for paid and print work):
 - RAW (and 16-bit TIFF) photos keep a 16-bit copy, and full-size exports make
@@ -189,6 +204,8 @@ results). It suits both ways of working:
 
 Every picture keeps the photo's real date and camera details (date taken, camera, lens, exposure), Sony RAW files included, and saved files are dated when the photo was taken. Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
+
+### Tools: preset editor, Lightroom presets, assets
 
 **Preset manager**: load a preset to start from, adjust it, preview it on a
 photo (the preview stays beside the settings), then save it with a name and a
@@ -512,7 +529,11 @@ The tests never load the large models.
 ```text
 photo_crops/          photo-crops (see its README)
 photo_presets/
-  app.py              The Gradio app
+  studio/             The AllProPhoto app
+    server.py         Its local server: the session (photos, looks made, kept), the worker, the page's API
+    web/              The page: index.html, app.css, app.js (plain JavaScript, no build step)
+    macapp.py         allprophoto-install-app: AllProPhoto.app in ~/Applications
+  app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
   cli.py              allprophoto-batch
   engine.py           Random and preset modes, previews, full-size export
   pipeline.py         Running recipes, the step registry, plugins, keeping faces clean
