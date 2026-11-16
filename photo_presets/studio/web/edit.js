@@ -26,6 +26,7 @@ async function travel(from, to, side) {
     for (const it of e.items) updateSlot(await api(`/api/slots/${it.sid}/edit`, it[side]));
     if (e.pid != null) await api(`/api/photos/${e.pid}/future_removals`, { removals: e[side === "before" ? "futureBefore" : "futureAfter"] });
   } else {
+    await flushEdits(e.sid);  // (a save on its way first, so it cannot bring back what is undone)
     const s = await api(`/api/slots/${e.sid}/edit`, e[side]);
     updateSlot(s);
   }
@@ -54,14 +55,52 @@ function updateSlot(s, { keepPane = false } = {}) {
   if (!keepPane) renderTabs();
 }
 
+/* Saving a picture's edits, one at a time and always the latest: what you type shows at once and is
+   saved a moment later; any other change waits for it and builds on it (so nothing typed is lost). */
+const saving = new Map();  // slot id -> { timer, ver, sent, chain }
+function pendingOf(sid) {
+  if (!saving.has(sid)) saving.set(sid, { timer: null, ver: 0, sent: 0, chain: Promise.resolve() });
+  return saving.get(sid);
+}
+function saveSoon(sid, edits, delay = 300) {
+  const s = slotById(sid);
+  if (!s) return;
+  s.edits = edits;
+  const p = pendingOf(sid);
+  p.ver++;
+  clearTimeout(p.timer);
+  p.timer = setTimeout(() => flushEdits(sid), delay);
+}
+function flushEdits(sid) {
+  const p = pendingOf(sid);
+  clearTimeout(p.timer); p.timer = null;
+  if (p.sent >= p.ver) return p.chain;
+  p.chain = p.chain.then(async () => {
+    const s = slotById(sid);
+    if (!s || p.sent >= p.ver) return;
+    const ver = p.ver;
+    const got = await api(`/api/slots/${sid}/edit`, { edits: s.edits });
+    p.sent = Math.max(p.sent, ver);
+    if (p.ver > ver) got.edits = slotById(sid).edits;  // typed more meanwhile: kept on screen, saved next
+    updateSlot(got, { keepPane: true });
+  }).catch(() => {});
+  return p.chain;
+}
 async function changeEdits(cur, mutate, opts) {
-  const before = snapshot(cur);
-  const e = clone(cur.edits);
-  mutate(e);
-  const s = await api(`/api/slots/${cur.id}/edit`, { edits: e });
-  pushHist({ type: "slot", sid: cur.id, before, after: snapshot(s) });
-  updateSlot(s, opts);
-  return s;
+  await flushEdits(cur.id);  // what was just typed first
+  const p = pendingOf(cur.id);
+  const run = p.chain.then(async () => {
+    const live = slotById(cur.id) || cur;  // (never an older copy of the picture)
+    const before = snapshot(live);
+    const e = clone(live.edits);
+    mutate(e);
+    const s = await api(`/api/slots/${cur.id}/edit`, { edits: e });
+    pushHist({ type: "slot", sid: cur.id, before, after: snapshot(s) });
+    updateSlot(s, opts);
+    return s;
+  });
+  p.chain = run.catch(() => {});
+  return run;
 }
 
 // The Edit tab ---------------------------------------------------------------------------------
@@ -236,7 +275,7 @@ function bindEditPane(cur, pane) {
       const e = clone(s.edits);
       e.areas[+r.dataset.i][r.dataset.areaK] = +r.value;
       clearTimeout(areaTimer);
-      areaTimer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e }), { keepPane: true }); }, 120);
+      saveSoon(cur.id, e, 120);
     };
     r.onchange = () => setTimeout(() => {
       if (!areaSnap) return;
@@ -259,7 +298,7 @@ function bindEditPane(cur, pane) {
       e.texts[i].text = ta.value;
       s.edits = e; paintTexts(s);  // shown at once; saved a moment later
       clearTimeout(timer);
-      timer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e }), { keepPane: true }); }, 300);
+      saveSoon(cur.id, e, 300);
     };
     ta.onblur = () => setTimeout(() => {
       if (snap && JSON.stringify(snap.edits) !== JSON.stringify(slotById(cur.id).edits)) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(slotById(cur.id)) });
@@ -288,7 +327,7 @@ function bindEditPane(cur, pane) {
       e.texts[+r.dataset.sizeOf].size = +r.value;
       s.edits = e; paintTexts(s);
       clearTimeout(timer);
-      timer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e }), { keepPane: true }); }, 200);
+      saveSoon(cur.id, e, 200);
     };
     r.onchange = () => setTimeout(() => {
       if (snap) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(slotById(cur.id)) });
@@ -576,11 +615,17 @@ function posterSection(e) {
 function bindPosterSection(cur, pane) {
   const s0 = () => slotById(cur.id);
   const set = (fn) => changeEdits(s0(), (ed) => { ed.poster ||= { template: "gameday", shape: "post", color: "#1f2a44" }; fn(ed.poster); });
-  pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => set((p) => {
-    const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || ""), ...(p.colors ? { colors: p.colors } : {}) };
-    for (const k of Object.keys(p)) delete p[k];
-    Object.assign(p, keep, { template: b.dataset.poster });
-  }));
+  pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => {
+    if (s0().edits?.poster?.template === b.dataset.poster) return;  // the layout you are on: its words stay
+    set((p) => {
+      const words = Object.fromEntries((POSTER_FIELDS[p.template] || []).map(([k]) => [k, p[k] ?? ""]));
+      const kept = { ...(p.kept || {}), [p.template]: words };  // what you typed, for coming back to this layout
+      const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || ""), ...(p.colors ? { colors: p.colors } : {}),
+        ...(p.size ? { size: p.size } : {}), kept };
+      for (const k of Object.keys(p)) delete p[k];
+      Object.assign(p, keep, { template: b.dataset.poster }, kept[b.dataset.poster] || {});
+    });
+  });
   $("#pp-save", pane)?.addEventListener("click", async () => {
     const name = $("#pp-name", pane).value.trim();
     if (!name) { $("#pp-name", pane).focus(); toast("Give the poster a name first"); return; }
@@ -625,9 +670,10 @@ function bindPosterSection(cur, pane) {
     inp.onfocus = () => { snap = snapshot(s0()); };
     inp.oninput = () => {
       const s = s0(), e2 = clone(s.edits);
+      if (!e2.poster) return;
       e2.poster[inp.dataset.pk] = inp.value;
       clearTimeout(timer);
-      timer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e2 }), { keepPane: true }); }, 450);
+      saveSoon(cur.id, e2, 450);
     };
     inp.onblur = () => setTimeout(() => {
       if (snap && JSON.stringify(snap.edits) !== JSON.stringify(s0().edits)) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(s0()) });
@@ -704,7 +750,7 @@ function bindLogoSection(cur, pane) {
       const e2 = clone(s.edits); e2.logos[i][k] = +r.value;
       s.edits = e2; paintTexts(s);
       clearTimeout(timer);
-      timer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e2 }), { keepPane: true }); }, 200);
+      saveSoon(cur.id, e2, 200);
     };
     r.onchange = () => setTimeout(() => { if (snap) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(s0()) }); snap = null; }, 400);
   });

@@ -68,12 +68,17 @@ def clean(p: dict | None) -> dict | None:
             out["aspect"] = round(float(p["aspect"]), 4)
     except (TypeError, ValueError):
         pass
+    kept = {t: {k: str(v)[:40] for k, v in (w or {}).items() if k in FIELD_KEYS}
+            for t, w in (p.get("kept") or {}).items() if t in TEMPLATES and isinstance(w, dict)}
+    if kept:
+        out["kept"] = kept  # the words typed for the other layouts: back when you switch back
     if p["template"] == "spotlight":
         out["number_style"] = p.get("number_style") if p.get("number_style") in NUMBER_STYLES else "badge"
     return out
 
 
 WORD_KEYS = ("title", "line", "number", "home", "away", "home_score", "name", "minute")
+FIELD_KEYS = ("title", "line", "number", "home", "away", "home_score", "away_score", "name", "minute")
 NUMBER_STYLES = ("badge", "behind")  # Spotlight's number: a solid badge on the card's corner, or big behind it
 
 

@@ -106,3 +106,9 @@ def test_a_poster_can_be_laid_out_for_any_export_shape():
     p = poster.clean({"template": "gameday", "shape": "story", "aspect": 0.8})
     w, h = poster.size_for(800, 1000, p)
     assert abs(w / h - 0.8) < 0.01
+
+
+def test_words_typed_for_another_layout_are_kept_for_coming_back():
+    from photo_presets import poster
+    p = poster.clean({"template": "gameday", "kept": {"final": {"home_score": "5", "away_score": "2", "bogus": "x"}, "nope": {"title": "x"}}})
+    assert p["kept"] == {"final": {"home_score": "5", "away_score": "2"}}
