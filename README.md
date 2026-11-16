@@ -148,6 +148,16 @@ the tab too). Tools used on the picture itself:
   **Bold**, **Spaced** or **Banner** (on a dark bar), its size and color.
   The page draws it with the same font as the export, so what you place is
   what you get; every export size has it in the same place.
+- **Logo**: your **brand kit** (a team crest, a sponsor, your own mark).
+  **Add a logo** (or drop it on the kit): a PNG, a JPG on white, or a
+  screenshot; its background is taken away (keyed out of a plain color with a
+  clean edge, or cut out) and it is trimmed. Click a logo to put it on the
+  picture (bottom right), drag it, or pick a corner; its **Size**,
+  **Strength**, and **Auto** (a one-color mark goes white on dark spots and
+  black on light ones; a crest shows as it is), **As it is**, **White** or
+  **Black**. Logos are kept in `~/.config/photo-crops-presets/logos`. The
+  export window's **Add my logo** puts one in a corner of every picture that
+  has none placed, sized to each export size.
 - **Cut-out**: fix what counts as the player (below).
 
 Sliders:

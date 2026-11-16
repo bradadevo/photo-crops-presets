@@ -34,7 +34,8 @@ AREA_EDGE = 1024  # px: a part's traced outline, scaled to each picture
 
 def edited(edits: dict | None) -> bool:
     e = edits or {}
-    return bool(e.get("areas") or e.get("angle") or e.get("crop") or e.get("texts") or e.get("removals"))
+    return bool(e.get("areas") or e.get("angle") or e.get("crop") or e.get("texts") or e.get("removals")
+                or e.get("logos"))
 
 
 def cover_scale(w: int, h: int, angle: float) -> float:
@@ -278,6 +279,9 @@ def clean(edits: dict | None) -> dict:
                             "strokes": [{"pts": [[float(x), float(y)] for x, y in st.get("pts", [])][:2000],
                                          "r": float(st.get("r", 0.02))} for st in rm.get("strokes", [])][:200]}
                            for rm in e["removals"] if rm.get("points") or rm.get("strokes")][:30]
+    if e.get("logos"):  # from the brand kit, placed like text (see brand.py)
+        from photo_presets import brand
+        out["logos"] = brand.clean(e["logos"])
     if e.get("texts"):
         out["texts"] = [{"text": str(t.get("text", ""))[:200], "x": float(t.get("x", 0.5)), "y": float(t.get("y", 0.5)),
                          "size": float(np.clip(float(t.get("size", 0.06)), 0.01, 0.4)),

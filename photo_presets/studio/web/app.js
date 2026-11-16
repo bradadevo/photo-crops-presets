@@ -45,6 +45,7 @@ const ICONS = {
   mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
   photos: '<circle cx="12" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><circle cx="7" cy="12" r="3.2"/><circle cx="17" cy="12" r="3.2"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  badge: '<path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5z"/><path d="m9 12 2 2 4-4"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
 };
 const icon = (name) => `<i data-i="${name}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg></i>`;
@@ -168,7 +169,7 @@ const st = {
   reelSource: "kept", reelTask: null, reelOrder: [], reelOut: new Set(),
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
   tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [], points: [], order: [] }, areaSel: null, textSel: null,
-  show: "all",
+  show: "all", kit: [], logoSel: null,
 };
 const slotById = (id) => st.slots.find((s) => s.id === id);
 const doneSlots = () => st.slots.filter((s) => s.state === "done");
@@ -734,7 +735,9 @@ function openExport(ids) {
   if (!ids.length) return;
   const p = st.prefs;
   const sel = { how: p.how || "files", kind: p.kind || "jpeg", sizes: new Set(p.sizes || ["full"]), folder: p.folder,
-    mark: Object.assign({ on: false, text: "", style: "corner", opacity: 0.5 }, p.watermark || {}) };
+    mark: Object.assign({ on: false, text: "", style: "corner", opacity: 0.5 }, p.watermark || {}),
+    logo: Object.assign({ on: false, id: st.kit?.[0]?.id, corner: "br", size: 0.16, color: "auto" }, p.logo || {}) };
+  if (!st.kit?.some((k) => k.id === sel.logo.id)) sel.logo.id = st.kit?.[0]?.id;
   const c = st.credit || {};
   const n = ids.length;
   const thumbs = ids.slice(0, 5).map((id) => `<img src="${slotImg(slotById(id), "thumb")}" alt="">`).join("");
@@ -746,7 +749,14 @@ function openExport(ids) {
         ${st.sizes.map((s) => `<button data-v="${s.key}" title="${esc(s.label)}">${esc(s.short)}</button>`).join("")}</div></div>
       <div class="fld"><label>File type</label><div class="seg full" id="x-kind"><button data-v="jpeg">JPEG</button><button data-v="tiff">16-bit TIFF</button><button data-v="both">Both</button></div>
         <small class="notes" id="x-kind-note"></small></div>
-      <details class="more" ${c.creator ? "" : ""}><summary>${icon("chev")} Your name, copyright and watermark</summary><div class="inner">
+      ${(st.kit || []).length ? `<div class="fld"><label class="toggle"><input type="checkbox" id="x-logo" ${sel.logo.on ? "checked" : ""}><span><b>Add my logo</b><small>On every picture that has none placed</small></span></label>
+        <div id="x-logo-box" class="fld" ${sel.logo.on ? "" : "hidden"}>
+          <div class="kit-grid small" id="x-logo-pick">${st.kit.map((k) => `<button class="kit-logo" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>
+          <div class="seg full small" id="x-logo-corner">${[["tl", "Top left"], ["tr", "Top right"], ["bl", "Bottom left"], ["br", "Bottom right"]].map(([v, t]) => `<button data-v="${v}">${t}</button>`).join("")}</div>
+          <div class="seg full small" id="x-logo-color">${[["auto", "Auto"], ["original", "As it is"], ["white", "White"], ["black", "Black"]].map(([v, t]) => `<button data-v="${v}">${t}</button>`).join("")}</div>
+          <div class="slider"><label>Size</label><output id="x-logo-size-v"></output><input type="range" id="x-logo-size" min="0.06" max="0.4" step="0.01" value="${sel.logo.size}"></div>
+        </div></div>` : ""}
+      <details class="more"><summary>${icon("chev")} Your name, copyright and watermark</summary><div class="inner">
         <div class="fld"><div class="two"><input class="field" id="x-creator" placeholder="Photographer" value="${esc(c.creator || "")}"><input class="field" id="x-contact" placeholder="Email, website or @handle" value="${esc(c.contact || "")}"></div></div>
         <input class="field" id="x-copy" placeholder="Copyright (empty: © year taken, your name)" value="${esc(c.copyright || "")}">
         <label class="toggle"><input type="checkbox" id="x-mark" ${sel.mark.on ? "checked" : ""}><span><b>Add a watermark</b><small>For client proofs and posts</small></span></label>
@@ -766,6 +776,10 @@ function openExport(ids) {
     $$("#x-sizes button", m).forEach((b) => b.classList.toggle("on", sel.sizes.has(b.dataset.v)));
     $("#x-kind-note", m).textContent = KIND_NOTE[sel.kind];
     $("#x-op-v", m).textContent = Math.round(sel.mark.opacity * 100) + "%";
+    $$("#x-logo-pick button", m).forEach((b) => b.classList.toggle("on", b.dataset.v === sel.logo.id));
+    $$("#x-logo-corner button", m).forEach((b) => b.classList.toggle("on", b.dataset.v === sel.logo.corner));
+    $$("#x-logo-color button", m).forEach((b) => b.classList.toggle("on", b.dataset.v === sel.logo.color));
+    if ($("#x-logo-size-v", m)) $("#x-logo-size-v", m).textContent = Math.round(sel.logo.size * 100) + "%";
     setOff($("#x-go", m), !sel.sizes.size, "Choose at least one size above.");
   };
   $$("#x-how button", m).forEach((b) => b.onclick = () => { sel.how = b.dataset.v; paint(); });
@@ -776,6 +790,11 @@ function openExport(ids) {
   });
   $("#x-mark", m).onchange = (e) => { sel.mark.on = e.target.checked; $("#x-mark-box", m).hidden = !sel.mark.on; };
   $("#x-op", m).oninput = (e) => { sel.mark.opacity = +e.target.value; paint(); };
+  $("#x-logo", m)?.addEventListener("change", (e) => { sel.logo.on = e.target.checked; $("#x-logo-box", m).hidden = !sel.logo.on; });
+  $$("#x-logo-pick button", m).forEach((b) => b.onclick = () => { sel.logo.id = b.dataset.v; paint(); });
+  $$("#x-logo-corner button", m).forEach((b) => b.onclick = () => { sel.logo.corner = b.dataset.v; paint(); });
+  $$("#x-logo-color button", m).forEach((b) => b.onclick = () => { sel.logo.color = b.dataset.v; paint(); });
+  $("#x-logo-size", m)?.addEventListener("input", (e) => { sel.logo.size = +e.target.value; paint(); });
   $("#x-change", m).onclick = async () => {
     const r = await api("/api/folder/choose", { folder: sel.folder });
     if (r.folder) { sel.folder = r.folder; paint(); }
@@ -783,7 +802,8 @@ function openExport(ids) {
   $("#x-go", m).onclick = async () => {
     const body = { ids, how: sel.how, kind: sel.kind, sizes: [...sel.sizes], folder: sel.folder,
       credit: { creator: $("#x-creator", m).value, contact: $("#x-contact", m).value, copyright: $("#x-copy", m).value },
-      watermark: { on: sel.mark.on, text: $("#x-mtext", m).value, style: sel.mark.style, opacity: sel.mark.opacity } };
+      watermark: { on: sel.mark.on, text: $("#x-mtext", m).value, style: sel.mark.style, opacity: sel.mark.opacity },
+      logo: { ...sel.logo, on: sel.logo.on && !!sel.logo.id } };
     closeModal();
     await api("/api/export", body);
     refresh();
@@ -1243,6 +1263,7 @@ window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", async (e) => {
   e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
   if (e.target.closest?.("#r-order")) return;
+  if (e.target.closest?.(".kit-drop")) { const f = e.dataTransfer?.files?.[0]; if (f) addLogo(f); return; }
   upload(await droppedFiles(e.dataTransfer));
 });
 /* Files dropped on the page, the photos inside dropped folders included. */
@@ -1398,5 +1419,6 @@ function init() {
   };
   st.crop = store.get("crop", "none");
   loadLooks().then(refresh);
+  document.addEventListener("DOMContentLoaded", () => loadKit());
 }
 init();

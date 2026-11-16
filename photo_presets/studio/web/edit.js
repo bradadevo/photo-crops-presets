@@ -111,6 +111,7 @@ function renderEdit(cur) {
       ${tool("area", "target", "Adjust a part", "Click a face, the player or the sky to adjust just that")}
       ${tool("wb", "pipette", "White balance", "Click something white or gray")}
       ${tool("text", "type", "Text", "Add a name, a score or a date (T)")}
+      ${tool("logo", "badge", "Logo", "Put your logo on it: a team crest, a sponsor, your own mark")}
       ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player")}
     </div>
     <div class="section"><h3>Light</h3>${SLIDERS.light.map(sliderRow).join("")}</div>
@@ -128,6 +129,7 @@ function renderEdit(cur) {
       <div class="slider"><label>Size</label><output>${Math.round(t.size * 100)}</output><input type="range" data-size-of="${i}" min="0.02" max="0.2" step="0.005" value="${t.size}"></div>
       <div class="swatches" data-color-of="${i}">${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>` : ""}
       </div>`).join("")}</div>` : ""}
+    ${st.tool === "logo" || (e.logos || []).length ? logoSection(e) : ""}
     <div class="inline"><button class="btn" id="e-reset" title="Back to the look as it was made">Reset all</button>
       ${same > 1 ? `<button class="btn" id="e-all" style="flex:1" title="These light, color and look settings on every picture in this look">${icon("copy")} Use on all ${same}</button>` : ""}</div>
     <div class="section"><h3>This photo</h3><div class="actions">
@@ -220,6 +222,7 @@ function bindEditPane(cur, pane) {
       pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) });
     }, 400);
   });
+  bindLogoSection(cur, pane);
   // text
   pane.querySelectorAll(".text-in").forEach((ta) => {
     const i = +ta.dataset.ti;
@@ -296,6 +299,12 @@ function setTool(tool) {
   st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null;
   st.brush.strokes = []; st.brush.points = []; st.brush.preview = null;
   if (tool === "text" && st.tool === "text" && !(cur.edits?.texts || []).length) { addText(cur); }
+  if (tool === "logo" && st.tool === "logo" && st.kit?.length === 1 && !(cur.edits?.logos || []).length) {
+    // one logo in the kit: on it goes, bottom right (drag it, or pick a corner)
+    const k = st.kit[0], [x, y] = cornerPlace("br", 0.18, k.width / k.height, cur.width, cur.height);
+    st.logoSel = 0;
+    changeEdits(cur, (ed) => { ed.logos = [{ id: k.id, x, y, size: 0.18, color: "auto", opacity: 1 }]; });
+  }
   if (st.tab !== "edit") st.tab = "edit";
   viewerSig = ""; editSig = ""; render();
 }
@@ -320,13 +329,14 @@ function renderTool(v, cur) {
     area: `<span class="title"><b>Adjust a part</b><span>Click a face, the player, the sky or the grass</span></span><span class="sep"></span><button data-done>Done</button>`,
     wb: `<span class="title"><b>White balance</b><span>Click something that should be white or gray</span></span><span class="sep"></span><button data-done>Cancel</button>`,
     text: `<span class="title"><b>Text</b><span>Drag to place it · type in the panel</span></span><span class="sep"></span><button data-add-text>${icon("plus")} Add text</button><button data-done>Done</button>`,
+    logo: `<span class="title"><b>Logo</b><span>Pick one in the panel · drag it to place it</span></span><span class="sep"></span><button data-done>Done</button>`,
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
-      ${t === "text" ? `<div class="texts" id="texts"></div>` : ""}</div>
+      ${t === "text" || t === "logo" ? `<div class="texts" id="texts"></div>` : ""}</div>
     <div class="fixbar toolbar">${bar}</div>`;
   paintIcons(v);
   if (base) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
-  if (t === "text") { paintTexts(cur); bindTexts(cur); }
+  if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
   $("[data-done]", v).onclick = () => setTool(t);
   $("[data-add-text]", v)?.addEventListener("click", () => addText(slotById(cur.id)));
   const f = $("#frame");
@@ -352,14 +362,38 @@ function paintTexts(cur) {
   if (!box) return;
   const texts = cur.edits?.texts || [];
   box.innerHTML = texts.map((t, i) => `<div class="tx tx-${t.style}${st.tool === "text" && st.textSel === i ? " sel" : ""}" data-i="${i}"
-    style="left:${t.x * 100}%;top:${t.y * 100}%;font-size:calc(var(--fw) * ${t.size});color:${esc(t.color)}">${esc(t.text)}</div>`).join("");
+    style="left:${t.x * 100}%;top:${t.y * 100}%;font-size:calc(var(--fw) * ${t.size});color:${esc(t.color)}">${esc(t.text)}</div>`).join("")
+    + (cur.edits?.logos || []).map((l, i) => `<img class="lg${st.tool === "logo" && st.logoSel === i ? " sel" : ""}" data-li="${i}" alt="" draggable="false"
+      src="/img/logo/${enc(l.id)}/${l.color === "auto" ? autoColor(l) : l.color}.png" style="left:${l.x * 100}%;top:${l.y * 100}%;width:${l.size * 100}%;opacity:${l.opacity}">`).join("");
+}
+
+/* "auto": white on a dark spot of the picture, black on a light one (as the export decides). */
+let lumCanvas = null, lumSrc = "";
+function autoColor(l) {
+  if ((st.kit || []).find((k) => k.id === l.id)?.flat === false) return "original";  // a crest shows as it is
+  const img = $("#frame img.after");
+  if (!img || !img.complete || !img.naturalWidth) return "white";
+  if (lumSrc !== img.src) {
+    lumCanvas = document.createElement("canvas");
+    lumCanvas.width = 200; lumCanvas.height = Math.max(1, Math.round(200 * img.naturalHeight / img.naturalWidth));
+    try { lumCanvas.getContext("2d").drawImage(img, 0, 0, lumCanvas.width, lumCanvas.height); lumSrc = img.src; } catch { return "white"; }
+  }
+  const W = lumCanvas.width, H = lumCanvas.height, w = Math.max(1, Math.round(l.size * W));
+  const art = (st.kit || []).find((k) => k.id === l.id), hh = Math.max(1, Math.round(w * (art ? art.height / art.width : 0.5)));
+  const x0 = Math.max(0, Math.round(l.x * W - w / 2)), y0 = Math.max(0, Math.round(l.y * H - hh / 2));
+  const d = lumCanvas.getContext("2d").getImageData(x0, y0, Math.min(w, W - x0) || 1, Math.min(hh, H - y0) || 1).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  return sum / (d.length / 4) / 255 > 0.62 ? "black" : "white";
 }
 function bindTexts(cur) {
   const box = $("#texts"), f = $("#frame");
   if (!box) return;
   box.onpointerdown = (e) => {
+    const lg = e.target.closest(".lg");
+    if (lg && st.tool === "logo") return dragLogo(cur, lg, e, f);
     const el = e.target.closest(".tx");
-    if (!el) return;
+    if (!el || st.tool !== "text") return;
     e.preventDefault();
     const i = +el.dataset.i, r = f.getBoundingClientRect();
     if (st.textSel !== i) { st.textSel = i; editSig = ""; renderTabs(); box.querySelectorAll(".tx").forEach((x) => x.classList.toggle("sel", +x.dataset.i === i)); }
@@ -380,6 +414,119 @@ function bindTexts(cur) {
       if (moved) changeEdits(slotById(cur.id), (ed) => { ed.texts[i].x = pos.x; ed.texts[i].y = pos.y; }, { keepPane: true });
     };
   };
+}
+
+function dragLogo(cur, el, e, f) {
+  e.preventDefault();
+  const i = +el.dataset.li, r = f.getBoundingClientRect();
+  if (st.logoSel !== i) { st.logoSel = i; editSig = ""; renderTabs(); $$("#texts .lg").forEach((x) => x.classList.toggle("sel", +x.dataset.li === i)); }
+  const l0 = slotById(cur.id).edits.logos[i];
+  const start = { x: e.clientX, y: e.clientY, lx: l0.x, ly: l0.y };
+  let moved = false, pos = { x: l0.x, y: l0.y };
+  el.setPointerCapture(e.pointerId);
+  el.onpointermove = (m) => {
+    moved = true;
+    pos = { x: Math.max(0, Math.min(1, start.lx + (m.clientX - start.x) / r.width)), y: Math.max(0, Math.min(1, start.ly + (m.clientY - start.y) / r.height)) };
+    if (Math.abs(pos.x - 0.5) < 0.012) pos.x = 0.5;
+    el.style.left = pos.x * 100 + "%"; el.style.top = pos.y * 100 + "%";
+    f.classList.toggle("snap-x", pos.x === 0.5);
+  };
+  el.onpointerup = () => {
+    el.onpointermove = null; f.classList.remove("snap-x");
+    if (moved) changeEdits(slotById(cur.id), (ed) => { ed.logos[i].x = pos.x; ed.logos[i].y = pos.y; }, { keepPane: true });
+  };
+}
+
+// The brand kit and the logos on this picture ------------------------------------------------------
+const CORNER_ICONS = [["tl", "↖"], ["tr", "↗"], ["bc", "↓"], ["bl", "↙"], ["br", "↘"]];
+function logoSection(e) {
+  const placed = e.logos || [];
+  const kit = st.kit || [];
+  const sel = placed[st.logoSel ?? -1];
+  return `<div class="section"><h3>Logo</h3>
+    ${placed.map((l, i) => { const k = kit.find((x) => x.id === l.id);
+      return `<div class="item${st.logoSel === i ? " on" : ""}"><div class="item-head"><button class="item-name" data-pick-logo="${i}">
+        <img class="kit-mini" src="/img/logo/${enc(l.id)}/original.png" alt="">${esc(k?.name || "Logo")}</button>
+        <button class="icon-btn" data-del-logo="${i}" title="Take it off this picture">${icon("trash")}</button></div>
+        ${st.logoSel === i ? `<div class="corners">${CORNER_ICONS.map(([c, a]) => `<button data-corner="${c}" title="Move it to this corner">${a}</button>`).join("")}</div>
+        <div class="seg full small" data-logo-color>${[["auto", "Auto"], ["original", "As it is"], ["white", "White"], ["black", "Black"]].map(([v, t]) => `<button data-v="${v}" class="${l.color === v ? "on" : ""}" title="${v === "auto" ? "A one-color logo goes white on dark spots and black on light ones; a crest shows as it is" : ""}">${t}</button>`).join("")}</div>
+        <div class="slider"><label>Size</label><output>${Math.round(l.size * 100)}%</output><input type="range" data-logo-k="size" min="0.04" max="0.6" step="0.01" value="${l.size}"></div>
+        <div class="slider"><label>Strength</label><output>${Math.round(l.opacity * 100)}%</output><input type="range" data-logo-k="opacity" min="0.1" max="1" step="0.05" value="${l.opacity}"></div>` : ""}
+      </div>`; }).join("")}
+    <div class="kit kit-drop" id="kit"><span class="kit-title">Your logos <small>· click one to put it on</small></span>
+      <div class="kit-grid">${kit.map((k) => `<button class="kit-logo" data-kit="${k.id}" title="${esc(k.name)}: put it on this picture"><img src="/img/logo/${enc(k.id)}/original.png" alt="${esc(k.name)}">
+        <span class="kit-x" data-kit-del="${k.id}" title="Delete it from your logos">${icon("x")}</span></button>`).join("")}
+        <label class="kit-add" title="Add a logo: a PNG, a JPG on white, or a screenshot of it">${icon("plus")}<span>Add a logo</span><input type="file" id="kit-file" accept="image/*" hidden></label></div>
+      <small class="notes">Drop a logo here. Any background is taken away: a JPG on white or a screenshot works.</small></div>
+  </div>`;
+}
+function bindLogoSection(cur, pane) {
+  const s0 = () => slotById(cur.id);
+  pane.querySelectorAll("[data-kit]").forEach((b) => b.onclick = (ev) => {
+    if (ev.target.closest("[data-kit-del]")) return;
+    const k = st.kit.find((x) => x.id === b.dataset.kit), s = s0();
+    const n = (s.edits?.logos || []).length;
+    const size = 0.18, aspect = k.width / k.height;
+    const [x, y] = cornerPlace("br", size, aspect, s.width, s.height);
+    st.logoSel = n;
+    if (st.tool !== "logo") { st.tool = "logo"; viewerSig = ""; }
+    changeEdits(s, (ed) => { (ed.logos ||= []).push({ id: k.id, x, y, size, color: "auto", opacity: 1 }); });
+  });
+  pane.querySelectorAll("[data-kit-del]").forEach((b) => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    await api(`/api/logos/${b.dataset.kitDel}`, undefined, { method: "DELETE" });
+    await loadKit();
+  });
+  $("#kit-file", pane)?.addEventListener("change", (ev) => { const f = ev.target.files[0]; if (f) addLogo(f); });
+  pane.querySelectorAll("[data-pick-logo]").forEach((b) => b.onclick = () => {
+    const i = +b.dataset.pickLogo; st.logoSel = st.logoSel === i ? null : i; editSig = "";
+    if (st.tool !== "logo") { st.tool = "logo"; viewerSig = ""; renderViewer(); }
+    renderTabs();
+  });
+  pane.querySelectorAll("[data-del-logo]").forEach((b) => b.onclick = () => {
+    const i = +b.dataset.delLogo; st.logoSel = null;
+    changeEdits(s0(), (ed) => { ed.logos.splice(i, 1); });
+  });
+  pane.querySelectorAll("[data-corner]").forEach((b) => b.onclick = () => {
+    const i = st.logoSel, s = s0(), l = s.edits.logos[i], k = st.kit.find((x) => x.id === l.id);
+    const [x, y] = cornerPlace(b.dataset.corner, l.size, k ? k.width / k.height : 2, s.width, s.height);
+    changeEdits(s, (ed) => { ed.logos[i].x = x; ed.logos[i].y = y; });
+  });
+  pane.querySelectorAll("[data-logo-color] button").forEach((b) => b.onclick = () => {
+    const i = st.logoSel;
+    changeEdits(s0(), (ed) => { ed.logos[i].color = b.dataset.v; });
+  });
+  pane.querySelectorAll("input[data-logo-k]").forEach((r) => {
+    let snap = null, timer = null;
+    r.oninput = () => {
+      const s = s0(), i = st.logoSel, k = r.dataset.logoK;
+      if (!snap) snap = snapshot(s);
+      r.previousElementSibling.textContent = Math.round(r.value * 100) + "%";
+      const e2 = clone(s.edits); e2.logos[i][k] = +r.value;
+      s.edits = e2; paintTexts(s);
+      clearTimeout(timer);
+      timer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e2 }), { keepPane: true }); }, 200);
+    };
+    r.onchange = () => setTimeout(() => { if (snap) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(s0()) }); snap = null; }, 400);
+  });
+}
+/* Where a logo's middle goes to sit in a corner with a margin (as brand.corner_place). */
+function cornerPlace(corner, size, aspect, w, h) {
+  const m = 0.035, lh = size * w / h / Math.max(aspect, 1e-3);
+  const cx = { l: m + size / 2, r: 1 - m - size / 2, c: 0.5 }[corner[1]];
+  const cy = { t: m * w / h + lh / 2, b: 1 - m * w / h - lh / 2 }[corner[0]];
+  return [cx, cy];
+}
+async function loadKit() {
+  try { st.kit = (await api("/api/logos")).logos; } catch { st.kit = []; }
+  editSig = "";
+  if (st.tab === "edit") renderTabs();
+}
+async function addLogo(file) {
+  const fd = new FormData(); fd.append("file", file, file.name);
+  const t = toast("Adding your logo…", { sticky: true, spin: true, small: "Taking its background away" });
+  try { await api("/api/logos", fd); t.done("Logo added", "Click it to put it on the picture"); } catch { t.close(); }
+  await loadKit();
 }
 
 // Crop and straighten ---------------------------------------------------------------------------

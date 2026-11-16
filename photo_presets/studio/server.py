@@ -39,7 +39,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import deliver, edits, engine, pipeline, presets, reel, timing
+from photo_presets import brand, deliver, edits, engine, pipeline, presets, reel, timing
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
 
@@ -270,6 +270,7 @@ class Session:
 
 
 E = Engine()
+E.brand_dir = STATE or CONFIG
 S = Session()
 W = Worker()
 
@@ -1252,20 +1253,22 @@ async def export(req: Request):
     if w.get("on"):
         text = (w.get("text") or "").strip() or credit.notice() or "PROOF"
         mark = deliver.Watermark(text, w.get("style", deliver.CORNER), float(w.get("opacity", 0.5)))
+    logo = body.get("logo") if (body.get("logo") or {}).get("on") else None
     save_prefs({"folder": str(dest), "how": how, "kind": kind, "sizes": sizes,
-                "watermark": {k: w.get(k) for k in ("on", "text", "style", "opacity")}})
+                "watermark": {k: w.get(k) for k in ("on", "text", "style", "opacity")},
+                "logo": {k: (body.get("logo") or {}).get(k) for k in ("on", "id", "corner", "size", "color")}})
     task = Task(next(S.ids), "export", len(chosen), now=chosen[0].title)
     S.tasks[task.id] = task
-    W.submit(OUTPUT, _export, task, chosen, dest, how, kind, sizes, credit, mark)
+    W.submit(OUTPUT, _export, task, chosen, dest, how, kind, sizes, credit, mark, logo)
     return task.public()
 
 
-def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark) -> None:
+def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo=None) -> None:
     def tick(done, total, name):
         task.done, task.now = done, name
     try:
         into = Path(tempfile.mkdtemp(prefix="allprophoto-zip-")) if how == ZIP else dest
-        saved, notes = E.export(chosen, into, tick, kind, sizes, credit, mark)
+        saved, notes = E.export(chosen, into, tick, kind, sizes, credit, mark, logo)
         n = len(chosen)
         photos = f"{n} picture{'s' if n != 1 else ''}"
         if how == ZIP:
@@ -1285,6 +1288,42 @@ def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark) -> N
         task.state = "done"
     except Exception as e:
         task.state, task.message = "failed", f"Export failed: {e}"
+
+
+# The brand kit: logos kept ready to put on pictures
+
+@app.get("/api/logos")
+def logos():
+    return {"logos": brand.listing(E.brand_dir)}
+
+
+@app.post("/api/logos")
+async def add_logo(file: UploadFile = File(...)):
+    """A logo for the kit, any way it comes (PNG, JPG on white, a screenshot): made transparent."""
+    data = await file.read()
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        raise HTTPException(400, "That file is not a picture. Use a PNG, JPG or screenshot of the logo.")
+    name = Path(file.filename or "Logo").stem[:40]
+    return await asyncio.wrap_future(W.submit(FIX, brand.add, E.brand_dir, img, name))
+
+
+@app.delete("/api/logos/{lid}")
+def delete_logo(lid: str):
+    brand.remove_logo(E.brand_dir, lid)
+    return {"ok": True}
+
+
+@app.get("/img/logo/{lid}/{color}.png")
+def logo_image(lid: str, color: str):
+    art = brand.load(E.brand_dir, lid)
+    if art is None:
+        raise HTTPException(404)
+    buf = io.BytesIO()
+    brand.colored(art, color).save(buf, "PNG")
+    return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 SHARES = ("airdrop", "messages", "mail", "photos")

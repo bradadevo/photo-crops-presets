@@ -1,0 +1,192 @@
+"""Your brand kit: logos (a team crest, a sponsor, your own photography mark) kept
+ready to put on pictures.
+
+A logo can arrive any way: a PNG with a clear background, a JPG on white, or a
+screenshot of it. Its background is taken away: kept when the file already has
+one clear, keyed out when it sits on a plain color (the soft, anti-aliased edge
+cleaned of that color), else cut out like a player. Then it is trimmed to its
+edges. On a picture it is placed by its middle (shares of the picture), its
+width a share of the picture's width, and shown as it is, in white or black, or
+"auto": a one-color mark white on a dark spot and black on a light one, a crest
+as it is.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+COLORS = ("auto", "original", "white", "black")
+CLEAR = 0.05  # a share of the logo's pixels clear enough: it already has a transparent background
+PLAIN = 0.06  # how alike the edge must be (0-1) to count as a plain background color
+
+
+def folder(base: Path) -> Path:
+    d = base / "logos"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def listing(base: Path) -> list[dict]:
+    out = []
+    for meta in sorted(folder(base).glob("*.json")):
+        try:
+            data = json.loads(meta.read_text())
+        except (OSError, ValueError):
+            continue
+        if (meta.with_suffix(".png")).exists():
+            if "flat" not in data:
+                data["flat"] = flat(Image.open(meta.with_suffix(".png")).convert("RGBA"))
+            out.append(data)
+    return out
+
+
+def flat(logo: Image.Image) -> bool:
+    """A one-color mark (lettering, a silhouette): fine all white or all black. A crest
+    with its own light and dark parts is not: made one color it would be a blank shape."""
+    small = logo.copy()
+    small.thumbnail((256, 256))
+    a = np.asarray(small).astype(np.float32) / 255
+    solid = a[..., 3] > 0.8
+    if solid.sum() < 20:
+        return True
+    lum = a[..., 0] * 0.299 + a[..., 1] * 0.587 + a[..., 2] * 0.114
+    colors = a[..., :3][solid]
+    return float(lum[solid].std()) < 0.12 and float(colors.std(0).max()) < 0.12  # one shade and one color
+
+
+def transparent(img: Image.Image) -> Image.Image:
+    """The logo with its background taken away and trimmed to its edges (RGBA)."""
+    rgba = img.convert("RGBA")
+    a = np.asarray(rgba).astype(np.float32) / 255
+    if (a[..., 3] < 0.9).mean() > CLEAR:  # already has a clear background
+        return _trim(rgba)
+    rgb = a[..., :3]
+    h, w = rgb.shape[:2]
+    edge = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
+    bg = np.median(edge, axis=0)
+    if np.abs(edge - bg).max(1).mean() < PLAIN:  # a plain background: key it out
+        dist = np.abs(rgb - bg).max(2)
+        alpha = np.clip((dist - 0.04) / 0.18, 0, 1)
+        # the soft edge pixels hold some background: take it back out of their color
+        safe = np.maximum(alpha, 1e-3)[..., None]
+        fg = np.clip((rgb - (1 - alpha[..., None]) * bg) / safe, 0, 1)
+        out = np.dstack([fg, alpha])
+        return _trim(Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA"))
+    from rembg import remove  # a busy background: cut the logo out
+    from photo_presets.scene import _session
+    mask = np.asarray(remove(img.convert("RGB"), session=_session(), only_mask=True), np.float32) / 255
+    out = np.dstack([rgb, mask])
+    return _trim(Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA"))
+
+
+def _trim(img: Image.Image) -> Image.Image:
+    a = np.asarray(img)[..., 3]
+    ys, xs = np.nonzero(a > 8)
+    if not len(ys):
+        return img
+    pad = max(2, int(0.02 * max(img.size)))
+    box = (max(0, xs.min() - pad), max(0, ys.min() - pad), min(img.width, xs.max() + 1 + pad),
+           min(img.height, ys.max() + 1 + pad))
+    return img.crop(box)
+
+
+def add(base: Path, img: Image.Image, name: str) -> dict:
+    """A new logo in the kit: made transparent, kept as PNG with its name."""
+    logo = transparent(img)
+    logo.thumbnail((2400, 2400))
+    lid = uuid.uuid4().hex[:10]
+    d = folder(base)
+    logo.save(d / f"{lid}.png")
+    meta = {"id": lid, "name": name, "width": logo.width, "height": logo.height, "flat": flat(logo)}
+    (d / f"{lid}.json").write_text(json.dumps(meta))
+    return meta
+
+
+def remove_logo(base: Path, lid: str) -> None:
+    for ext in (".png", ".json"):
+        (folder(base) / f"{lid}{ext}").unlink(missing_ok=True)
+
+
+def load(base: Path, lid: str) -> Image.Image | None:
+    p = folder(base) / f"{lid}.png"
+    return Image.open(p).convert("RGBA") if p.exists() else None
+
+
+def colored(logo: Image.Image, color: str) -> Image.Image:
+    """The logo as it is, or all white, or all black (its shape kept)."""
+    if color not in ("white", "black"):
+        return logo
+    a = np.asarray(logo)
+    v = 255 if color == "white" else 0
+    out = np.dstack([np.full(a.shape[:2] + (3,), v, np.uint8), a[..., 3]])
+    return Image.fromarray(out, "RGBA")
+
+
+def auto_color(arr: np.ndarray, box: tuple[int, int, int, int]) -> str:
+    """White on a dark spot of the picture, black on a light one."""
+    x0, y0, x1, y1 = box
+    spot = arr[max(0, y0):max(y0 + 1, y1), max(0, x0):max(x0 + 1, x1)]
+    if not spot.size:
+        return "white"
+    lum = float((spot[..., 0] * 0.299 + spot[..., 1] * 0.587 + spot[..., 2] * 0.114).mean())
+    return "black" if lum > 0.62 else "white"
+
+
+def draw(arr: np.ndarray, placements: list[dict] | None, base: Path) -> np.ndarray:
+    """The logos placed on the picture (floats 0-1): {"id", "x", "y" (its middle, shares),
+    "size" (its width, a share of the picture's width), "color", "opacity"}."""
+    if not placements:
+        return arr
+    h, w = arr.shape[:2]
+    out = arr.astype(np.float32)
+    for pl in placements:
+        logo = load(base, pl.get("id", ""))
+        if logo is None:
+            continue
+        lw = max(4, int(float(pl.get("size", 0.16)) * w))
+        lh = max(1, round(lw * logo.height / logo.width))
+        x0 = int(round(float(pl.get("x", 0.85)) * w - lw / 2))
+        y0 = int(round(float(pl.get("y", 0.88)) * h - lh / 2))
+        color = pl.get("color", "auto")
+        if color == "auto":  # a crest shows as it is; a one-color mark goes white or black to read
+            color = auto_color(out, (x0, y0, x0 + lw, y0 + lh)) if flat(logo) else "original"
+        art = np.asarray(colored(logo, color).resize((lw, lh), Image.LANCZOS)).astype(np.float32) / 255
+        # the part of the logo inside the picture
+        X0, Y0, X1, Y1 = max(0, x0), max(0, y0), min(w, x0 + lw), min(h, y0 + lh)
+        if X1 <= X0 or Y1 <= Y0:
+            continue
+        piece = art[Y0 - y0:Y1 - y0, X0 - x0:X1 - x0]
+        a = piece[..., 3:4] * float(np.clip(pl.get("opacity", 1.0), 0, 1))
+        out[Y0:Y1, X0:X1] = out[Y0:Y1, X0:X1] * (1 - a) + piece[..., :3] * a
+    return np.clip(out, 0, 1)
+
+
+def clean(placements) -> list[dict]:
+    out = []
+    for pl in placements or []:
+        if not pl.get("id"):
+            continue
+        out.append({"id": str(pl["id"])[:20], "x": float(np.clip(float(pl.get("x", 0.85)), -0.2, 1.2)),
+                    "y": float(np.clip(float(pl.get("y", 0.88)), -0.2, 1.2)),
+                    "size": float(np.clip(float(pl.get("size", 0.16)), 0.02, 0.9)),
+                    "color": pl.get("color") if pl.get("color") in COLORS else "auto",
+                    "opacity": float(np.clip(float(pl.get("opacity", 1.0)), 0.05, 1.0))})
+    return out[:6]
+
+
+CORNERS = {"br": (0.88, 0.9), "bl": (0.12, 0.9), "tr": (0.88, 0.1), "tl": (0.12, 0.1), "bc": (0.5, 0.9)}
+
+
+def corner_place(corner: str, size: float, logo_aspect: float, pic_w: int, pic_h: int) -> tuple[float, float]:
+    """Where a logo's middle goes to sit in a corner with a margin (shares of the picture)."""
+    margin = 0.035
+    lw = size
+    lh = size * pic_w / pic_h / max(logo_aspect, 1e-3)  # its height as a share of the picture's height
+    cx = {"l": margin + lw / 2, "r": 1 - margin - lw / 2, "c": 0.5}[corner[1]]
+    cy = {"t": margin * pic_w / pic_h + lh / 2, "b": 1 - margin * pic_w / pic_h - lh / 2}[corner[0]]
+    return cx, cy

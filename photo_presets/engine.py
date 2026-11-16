@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 from photo_crops import images
-from photo_presets import deliver, edits, explore, match, pipeline, presets, reel, retouch
+from photo_presets import brand, deliver, edits, explore, match, pipeline, presets, reel, retouch
 from photo_presets.assets import Library
 from photo_presets.scene import Fix, Prepared, prepare, resized, segment
 
@@ -83,6 +83,7 @@ class Engine:
         self.fixes: dict[tuple[str, str], list[Fix]] = {}
         # AI drawings, kept so a look's export (and reel) reuse its preview's drawing
         self.drawings: OrderedDict = OrderedDict()
+        self.brand_dir = Path("~/.config/photo-crops-presets").expanduser()  # where the brand kit's logos are
         # distractions removed from each photo: a list of removals, each a list of brush strokes
         self.removals: dict[str, list[list[dict]]] = {}
         self._cleaned: OrderedDict = OrderedDict()  # (photo, removals): its cleaned image and 16-bit copy
@@ -255,8 +256,9 @@ class Engine:
                 out = edits.adjust_part(out, self.part(r, a["x"], a["y"], *out.shape[:2]), a)
         if geometry:
             out = edits.geometry(out, e)
-        if texts:
+        if texts:  # (and logos: drawn on top like text)
             out = edits.draw_texts(out, e.get("texts"))
+            out = brand.draw(out, e.get("logos"), self.brand_dir)
         return out
 
     def finished(self, r: "Result", texts: bool = True) -> Image.Image:
@@ -442,6 +444,20 @@ class Engine:
         photo is prepared once)."""
         return self._run(self.preset_jobs(paths, names), crop, progress)
 
+    def _kit_logo(self, logo: dict | None, arr: np.ndarray) -> list[dict]:
+        """The export's logo ({"id", "corner", "size", "color", "opacity"}) placed in its corner
+        of this picture (each size has its own shape)."""
+        if not logo or not logo.get("id"):
+            return []
+        art = brand.load(self.brand_dir, logo["id"])
+        if art is None:
+            return []
+        h, w = arr.shape[:2]
+        size = float(logo.get("size", 0.16))
+        x, y = brand.corner_place(logo.get("corner", "br"), size, art.width / art.height, w, h)
+        return [{"id": logo["id"], "x": x, "y": y, "size": size, "color": logo.get("color", "auto"),
+                 "opacity": float(logo.get("opacity", 1.0))}]
+
     def reel_shots(self, results: list[Result], progress=None) -> list[reel.Shot]:
         """The looks again at REEL_EDGE px (sharper than the previews on a
         phone screen), each with where its player is."""
@@ -501,7 +517,7 @@ class Engine:
 
     def export(self, results: list[Result], folder: Path, progress=None, kind: str = JPEG,
                sizes: list[str] | None = None, credit: deliver.Credit | None = None,
-               mark: deliver.Watermark | None = None) -> tuple[list[Path], list[str]]:
+               mark: deliver.Watermark | None = None, logo: dict | None = None) -> tuple[list[Path], list[str]]:
         """Each result in each size (full size, Instagram, prints), with its
         recipe beside it as JSON. Returns the files saved and notes (such as a
         print size enlarged past the photo's own pixels).
@@ -540,6 +556,7 @@ class Engine:
                         notes_out.append(f"{r.source.name} {size.label.split(' (')[0]}: enlarged {grow:.1f}x "
                                          "(the photo has fewer pixels than this print size)")
                 arr = edits.draw_texts(arr, (r.edits or {}).get("texts"))
+                arr = brand.draw(arr, (r.edits or {}).get("logos") or self._kit_logo(logo, arr), self.brand_dir)
                 if mark is not None:
                     arr = deliver.watermark(arr, mark)
                 dest = _unique(folder / f"{name}.jpg")
