@@ -969,9 +969,9 @@ function tryOn(name) {
     if (!f || tryName !== name) return;
     let ov = f.querySelector(".tryon");
     if (!ov) { ov = document.createElement("div"); ov.className = "tryon"; f.appendChild(ov); }
-    if (l.ai) {
+    if (l.ai || l.design) {
       ov.classList.toggle("ready", !!l.example);
-      ov.innerHTML = `${l.example ? `<img src="/img/example/${enc(name)}.jpg" alt="">` : ""}<span class="tag l">${esc(name)} · an AI look: an example, press Make to see it on this photo</span>`;
+      ov.innerHTML = `${l.example ? `<img src="/img/example/${enc(name)}.jpg" alt="">` : ""}<span class="tag l">${esc(name)} · ${l.design ? "your design as saved: press Make to put this photo in it" : "an AI look: an example, press Make to see it on this photo"}</span>`;
       return;
     }
     ov.innerHTML = `<span class="tag l"><span class="spin"></span> ${esc(name)}</span>`;
@@ -1032,7 +1032,7 @@ function watchSwatches() {
       if (!e.isIntersecting) continue;
       swatchObserver.unobserve(e.target);
       const card = e.target, l = lookByName(card.dataset.name);
-      if (!l || l.ai) continue;
+      if (!l || l.ai || l.design) continue;
       swatchWanted.set(l.name, card);
       const coming = card.querySelector(".coming");
       coming.hidden = false; coming.textContent = "Preview coming…";
@@ -1160,6 +1160,7 @@ async function editPhoto(pid = st.activePhoto) {
   if (!pid) return;
   const r = await api(`/api/photos/${pid}/original`, {});
   st.current = r.slot; st.tab = "edit"; st.view = "single"; st.survey = [];
+  st.editWhenReady = r.slot;  // (still being prepared: the editor opens by itself when it's ready)
   await refresh();
   if (slotById(r.slot)?.state !== "done") toast("Opening the photo for editing…", { small: "A moment while it's prepared" });
 }
@@ -1178,6 +1179,8 @@ async function make(what) {
 function renderTabs() {
   const cur = slotById(st.current);
   const can = cur && cur.state === "done";
+  if (can && st.editWhenReady === cur.id) { st.tab = "edit"; st.editWhenReady = null; }
+  if (cur && st.editWhenReady && st.editWhenReady !== cur.id) st.editWhenReady = null;  // (you moved on)
   if (!can && st.tab === "edit") st.tab = "looks";
   $$(".tabs button").forEach((b) => {
     b.classList.toggle("on", b.dataset.tab === st.tab);

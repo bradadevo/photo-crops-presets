@@ -281,6 +281,13 @@ their name and the minute), Team Color (the background in the team color, the
 player in full color), Matchday (the opponent on a team-color band, when and
 where below) and Champions (a gold title, the event between gold rules).
 
+**Save a poster, put any picture in it**: in the Poster panel, name it and
+press **Save poster** (its layout, words, color, text and logo are kept in
+`~/.config/photo-crops-presets/posters.json`). On any other picture, open
+Poster and click it under **Your posters**. Saving a preset with **Keep the
+poster in it** ticked does the same together with the look: pick the preset
+under **Mine** and Make, and every photo comes out in that design.
+
 **Looks on top of your edits**: edit the photo first (for a night shot, lower
 the player's light), then press **Add a look on top of this edit**, or in the
 Looks panel set **From: My edit**, and pick a look such as Stadium Night. The

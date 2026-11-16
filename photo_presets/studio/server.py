@@ -39,7 +39,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import brand, deliver, edits, engine, pipeline, players, presets, reel, timing
+from photo_presets import brand, deliver, edits, engine, pipeline, players, presets, reel, timing, poster
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
 
@@ -500,7 +500,7 @@ def _start_from(pid: int, token: str) -> Path:
 
 def _swatch(pid: int, name: str, token: str = "") -> bytes | None:
     recipe = presets.load_all().get(name)
-    if recipe is None or timing.uses_ai(recipe):
+    if recipe is None or timing.uses_ai(recipe) or recipe.get("design"):  # (a design shows as saved)
         return None  # the AI looks take 20 s each: shown by their example instead
     recipe = dict(recipe, name=name)
     path = _start_from(pid, token)
@@ -534,7 +534,7 @@ def swatch_future(pid: int, name: str, token: str = "") -> Future:
 
 def _try(pid: int, name: str, token: str = "") -> bytes | None:
     recipe = presets.load_all().get(name)
-    if recipe is None or timing.uses_ai(recipe):
+    if recipe is None or timing.uses_ai(recipe) or recipe.get("design"):
         return None
     recipe = dict(recipe, name=name)
     p = E.ready(_start_from(pid, token), "none", recipe)
@@ -587,7 +587,8 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
         S.pace.append((took, slot.expect))
     elif cutting and not loading:  # how long the cut-out itself took, for the next estimates
         timing.learn("__cut_out__", max(5.0, took - slot.expect - (timing.PHOTO_READY if extra > timing.cut_out() else 0)))
-    if name in presets.load_all():
+    design = design_of(job.recipe.get("design"))
+    if name in presets.load_all() and not design:
         keep_example(name, r.after)
     future = S.future.get(slot.photo)
     if future:  # removed from every look of this photo, so from this one too
@@ -595,11 +596,13 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
         placed = [rm for rm in (_to_look(whole, r, rm) for rm in future) if rm]
         if placed:
             r = dataclasses.replace(r, edits=edits.clean({"removals": placed}))
+    if design:  # the preset's poster, text and logos, on this photo
+        r = dataclasses.replace(r, edits=edits.clean({**(r.edits or {}), **design}))
     slot.result, slot.secs, slot.state = r, took, "done"
 
 
 
-def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None = None) -> list[int]:
+def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None = None, priority: int = RUN) -> list[int]:
     """The jobs (photo id, job) as slots, listed in the order given. by_photo: made
     photo by photo in this order instead (so each photo is prepared once)."""
     run = next(S.runs)
@@ -616,7 +619,7 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
         if by_photo:
             order = sorted(order, key=lambda i: by_photo.index(jobs[i][0]))
         for i in order:
-            slots[i].future = W.submit(RUN, _make, slots[i], jobs[i][1], crop)
+            slots[i].future = W.submit(priority, _make, slots[i], jobs[i][1], crop)
     return [s.id for s in slots]
 
 
@@ -649,8 +652,9 @@ def looks_list() -> list[dict]:
             r = all_presets[name]
             out.append({"name": name, "group": SHORT_GROUPS.get(group, group), "about": presets.describe(name, r),
                         "secs": round(timing.seconds(name, r), 1), "ai": timing.uses_ai(r),
-                        "cutout": pipeline.needs_cutout(r), "example": example_file(name).exists(),
-                        "mine": group == presets.MINE})
+                        "cutout": pipeline.needs_cutout(r) or bool((r.get("design") or {}).get("poster")),
+                        "example": example_file(name).exists(), "mine": group == presets.MINE,
+                        "design": bool(design_of(r.get("design")))})
     return out
 
 
@@ -929,7 +933,11 @@ def original(pid: int):
         for s in S.slots.values():
             if s.photo == pid and s.look == "Original" and s.crop == "none" and s.state != "failed":
                 return {"slot": s.id}
-    return {"slot": start_run([(pid, Job(S.photo(pid).path, dict(ORIGINAL), 0))], "none")[0]}
+    with S.lock:  # you are waiting on this: the look previews of other photos are dropped, and it goes first
+        for k, f in list(SWATCHES.items()):
+            if k[0] != pid and not f.done():
+                f.cancel()
+    return {"slot": start_run([(pid, Job(S.photo(pid).path, dict(ORIGINAL), 0))], "none", priority=FIX)[0]}
 
 
 @app.post("/api/run/stop")
@@ -1273,15 +1281,86 @@ async def adjust_look(sid: int, req: Request):
 
 @app.post("/api/slots/{sid}/save_preset")
 async def save_preset(sid: int, req: Request):
-    name = ((await req.json()).get("name") or "").strip()
+    body = await req.json()
+    name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "Give the preset a name")
-    recipe = dict(S.slot(sid).result.recipe)
+    s = S.slot(sid)
+    recipe = dict(s.result.recipe)
     recipe.pop("match", None)  # a game match belongs to its photo, not to the look
     recipe.pop("name", None)
+    recipe.pop("design", None)
+    design = design_of(s.result.edits) if body.get("design", True) else {}
+    if design:  # the poster, text and logos go with it: made on any photo, the same design
+        recipe["design"] = design
+        recipe["description"] = "Your design: " + ", ".join(design_words(design))
     presets.save(name, recipe)
-    keep_example(name, S.slot(sid).result.after)
+    shown = await asyncio.wrap_future(W.submit(FIX, E.finished, s.result)) if design else s.result.after
+    keep_example(name, shown)
     return {"name": name}
+
+
+POSTERS_FILE = (STATE or CONFIG) / "posters.json"  # your saved posters (their layout, words, text and logos)
+
+
+def saved_posters() -> list[dict]:
+    try:
+        return json.loads(POSTERS_FILE.read_text())
+    except (OSError, ValueError):
+        return []
+
+
+@app.get("/api/posters")
+def list_posters():
+    return {"posters": [{"name": p["name"], "about": ", ".join(design_words(p["design"]))} for p in saved_posters()]}
+
+
+@app.post("/api/posters")
+async def save_poster(req: Request):
+    """{name, slot}: the picture's poster (with its text and logos) saved, to put any picture into."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()[:40]
+    if not name:
+        raise HTTPException(400, "Give the poster a name")
+    design = design_of(S.slot(int(body["slot"])).result.edits)
+    if not design.get("poster"):
+        raise HTTPException(400, "This picture has no poster yet: pick a layout above first")
+    kept = [p for p in saved_posters() if p["name"] != name] + [{"name": name, "design": design}]
+    POSTERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    POSTERS_FILE.write_text(json.dumps(kept, indent=1))
+    return {"name": name}
+
+
+@app.get("/api/posters/{name}")
+def get_poster(name: str):
+    for p in saved_posters():
+        if p["name"] == name:
+            return p
+    raise HTTPException(404, "That poster is no longer saved")
+
+
+@app.delete("/api/posters/{name}")
+def delete_poster(name: str):
+    POSTERS_FILE.write_text(json.dumps([p for p in saved_posters() if p["name"] != name], indent=1))
+    return {"ok": True}
+
+
+DESIGN = ("poster", "texts", "logos")  # the parts of a picture's edits that fit any photo
+
+
+def design_of(e: dict | None) -> dict:
+    return {k: v for k, v in (e or {}).items() if k in DESIGN and v}
+
+
+def design_words(d: dict) -> list[str]:
+    out = []
+    if d.get("poster"):
+        out.append(f"{poster.TEMPLATES.get(d['poster'].get('template'), 'a')} poster")
+    if d.get("texts"):
+        out.append("your text" if len(d["texts"]) == 1 else f"{len(d['texts'])} texts")
+    if d.get("logos"):
+        out.append("your logo")
+    return out
 
 
 @app.post("/api/slots/{sid}/match")

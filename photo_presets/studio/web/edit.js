@@ -142,7 +142,9 @@ function renderEdit(cur) {
       ${anyMatched ? `<button class="btn ghost" id="e-unmatch">${icon("undo")} Undo matching</button>` : ""}
     </div></div>
     <div class="section"><h3>Save as a preset</h3><div class="inline"><input class="field" id="e-name" placeholder="Preset name">
-      <button class="btn" id="e-save">${icon("save")} Save</button></div></div>
+      <button class="btn" id="e-save">${icon("save")} Save</button></div>
+      ${e.poster || texts.length || (e.logos || []).length ? `<label class="check-row"><input type="checkbox" id="e-design" checked>
+        <span>Keep the ${[e.poster && "poster", texts.length && "text", (e.logos || []).length && "logo"].filter(Boolean).join(", ")} in it<small>Make it on any photo: the same design, with that photo in it</small></span></label>` : ""}</div>
     ${cur.notes?.length ? `<p class="notes">${esc(cur.notes.join("; "))}</p>` : ""}`;
   paintIcons(pane);
   bindEditPane(cur, pane);
@@ -201,8 +203,9 @@ function bindEditPane(cur, pane) {
   $("#e-save", pane).onclick = async () => {
     const name = $("#e-name", pane).value.trim();
     if (!name) { $("#e-name", pane).focus(); return; }
-    await api(`/api/slots/${cur.id}/save_preset`, { name });
-    toast(`Saved “${name}” under Mine`); loadLooks();
+    const design = !!$("#e-design", pane)?.checked;
+    await api(`/api/slots/${cur.id}/save_preset`, { name, design });
+    toast(`Saved “${name}” under Mine`, { small: design ? "Pick it in Looks and Make: any photo gets the same design" : "" }); loadLooks();
   };
   // parts
   pane.querySelectorAll("[data-pick-area]").forEach((b) => b.onclick = () => {
@@ -504,7 +507,10 @@ function posterSection(e) {
       <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
       ${(st.kit || []).length ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
         <button class="kit-logo${!p.logo ? " on" : ""}" data-v="" title="No logo">${icon("x")}</button>${st.kit.map((k) => `<button class="kit-logo${p.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>` : ""}
+      <div class="inline save-poster"><input class="field" id="pp-name" placeholder="Name this poster">
+        <button class="btn" id="pp-save" title="Save this poster (layout, words, text, logo) to put any picture into it">${icon("save")} Save poster</button></div>
       <button class="btn ghost" id="pp-off">${icon("trash")} No poster</button>` : ""}
+    ${(st.posters || []).length ? `<h4 class="sub">Your posters <small>click one to put this picture in it</small></h4><div class="my-posters">${st.posters.map((q) => `<span class="chip-x"><button data-my-poster="${esc(q.name)}" title="${esc(q.about)}">${esc(q.name)}</button><button class="x" data-del-poster="${esc(q.name)}" title="Delete this saved poster">${icon("x")}</button></span>`).join("")}</div>` : ""}
   </div>`;
 }
 function bindPosterSection(cur, pane) {
@@ -515,6 +521,23 @@ function bindPosterSection(cur, pane) {
     for (const k of Object.keys(p)) delete p[k];
     Object.assign(p, keep, { template: b.dataset.poster });
   }));
+  $("#pp-save", pane)?.addEventListener("click", async () => {
+    const name = $("#pp-name", pane).value.trim();
+    if (!name) { $("#pp-name", pane).focus(); toast("Give the poster a name first"); return; }
+    await api("/api/posters", { name, slot: cur.id });
+    await loadPosters(); editSig = ""; renderTabs();
+    toast(`Saved the poster “${name}”`, { small: "Open any picture, then Poster: it's under Your posters" });
+  });
+  pane.querySelectorAll("[data-my-poster]").forEach((b) => b.onclick = async () => {
+    const q = await api(`/api/posters/${enc(b.dataset.myPoster)}`);
+    changeEdits(s0(), (ed) => { Object.assign(ed, JSON.parse(JSON.stringify(q.design))); });
+    toast(`This picture is in “${q.name}” now`, { small: "Change its words here: the saved poster stays as it is" });
+  });
+  pane.querySelectorAll("[data-del-poster]").forEach((b) => b.onclick = async () => {
+    await fetch(`/api/posters/${enc(b.dataset.delPoster)}`, { method: "DELETE" });
+    await loadPosters(); editSig = ""; renderTabs();
+    toast(`Deleted the saved poster “${b.dataset.delPoster}”`);
+  });
   pane.querySelectorAll("#pp-shape button").forEach((b) => b.onclick = () => set((p) => { p.shape = b.dataset.v; }));
   pane.querySelectorAll("#pp-color button").forEach((b) => b.onclick = () => set((p) => { p.color = b.dataset.v; }));
   pane.querySelectorAll("#pp-logo button").forEach((b) => b.onclick = () => set((p) => { p.logo = b.dataset.v; }));
@@ -852,3 +875,8 @@ function renderBrush(v, cur) {
     viewerSig = ""; renderViewer();
   };
 }
+
+async function loadPosters() {
+  try { st.posters = (await fetch("/api/posters").then((r) => r.json())).posters; } catch { st.posters = []; }
+}
+document.addEventListener("DOMContentLoaded", loadPosters);
