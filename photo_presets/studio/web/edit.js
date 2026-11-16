@@ -404,6 +404,7 @@ function renderTool(v, cur) {
   if (base) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
   if (t === "poster") paintWords(cur);
+  watchPicture(cur);
   $("[data-done]", v).onclick = () => setTool(t);
   $("[data-add-text]", v)?.addEventListener("click", () => addText(slotById(cur.id)));
   const f = $("#frame");

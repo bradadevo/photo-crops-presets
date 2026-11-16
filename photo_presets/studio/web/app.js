@@ -458,6 +458,7 @@ function renderViewer() {
     paintTexts(cur);
     bindViewer(cur);
     bindPicks(cur);
+    watchPicture(cur);
   } else if (cur) {
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${cur.photo}/view.jpg" alt="" draggable="false"></div>
         <div class="wait">${cur.state === "failed" ? `<b>${icon("x")}</b><span>This look could not be made</span><small>${esc(cur.error)}</small>`
@@ -1548,3 +1549,20 @@ window.addEventListener("resize", () => {  // a smaller window: the panels give 
   const saved = store.get("panels", {});
   for (const [name, w] of Object.entries(saved)) if (PANELS[name] && w) setPanelWidth(name, w);
 });
+
+/* While a picture is still being made (the first time after a restart, a poster's players are found
+   again), the photo shows at once, softly, with a note; the picture takes its place when ready. */
+function watchPicture(cur) {
+  const f = $("#frame"), img = f?.querySelector("img.after");
+  if (!img || (img.complete && img.naturalWidth)) return;
+  f.classList.add("waiting");
+  f.style.setProperty("--placeholder", `url("/img/photo/${cur.photo}/view.jpg")`);
+  if (!f.querySelector(".ready-note")) f.insertAdjacentHTML("beforeend", `<span class="tag ready-note"><span class="spin"></span> Getting the picture ready…</span>`);
+  const done = () => { f.classList.remove("waiting"); f.querySelector(".ready-note")?.remove(); };
+  img.addEventListener("load", done, { once: true });
+  img.addEventListener("error", () => {
+    const note = f.querySelector(".ready-note");
+    if (note) note.innerHTML = `This picture could not be shown · <button class="link" id="ready-retry">Try again</button>`;
+    $("#ready-retry")?.addEventListener("click", () => { img.src = img.src.split("?")[0] + "?r=" + Date.now(); watchPicture(cur); });
+  }, { once: true });
+}

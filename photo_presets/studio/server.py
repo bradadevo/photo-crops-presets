@@ -1923,6 +1923,8 @@ def main() -> int:
     _classic()
     S.restore()
     K.start()
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: _shut_down())  # stopped by the Mac (log out, restart): saved first
     if not window:
         if "--no-browser" not in sys.argv:
             threading.Timer(1.5, lambda: webbrowser.open(url)).start()

@@ -222,7 +222,7 @@ def tone(out: np.ndarray, adj: dict) -> np.ndarray:
     if con:
         mid = 0.5
         curve = mid + (new - mid) * (1 + con * 0.6)
-        new = np.where(con > 0, new + (np.clip(curve, 0, 1) - new) * (4 * new * (1 - new)) ** 0.5, curve)
+        new = np.where(con > 0, new + (np.clip(curve, 0, 1) - new) * np.clip(4 * new * (1 - new), 0, 1) ** 0.5, curve)
     ratio = np.clip(new, 0, 1.2) / np.maximum(lum, 0.004)
     return out * np.clip(ratio, 0, 4)[..., None]
 

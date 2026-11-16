@@ -26,3 +26,21 @@ def test_grass_between_the_players_stays_background_and_a_hidden_child_is_kept()
     out = fill_group(alpha, Image.fromarray(img), people)
     assert out[260:300, 150:190].max() < 0.2  # the grass between two players: background
     assert out[230:300, 295:325].mean() > 0.8  # the hidden child: part of the team
+
+
+def test_a_photos_cut_out_is_kept_on_disk_for_next_time(tmp_path, monkeypatch):
+    from photo_presets import scene
+    monkeypatch.setenv("ALLPROPHOTO_STATE", str(tmp_path))
+    img = Image.fromarray(np.full((60, 80, 3), 120, np.uint8))
+    subject = np.zeros((60, 80), bool)
+    subject[10:50, 20:60] = True
+    key = scene._matte_key(img, subject, False)
+    assert scene._kept_matte(key) is None
+    matte = np.zeros((60, 80), np.float32)
+    matte[10:50, 20:60] = 1
+    scene._keep_matte(key, matte)
+    back = scene._kept_matte(key)
+    assert back is not None and np.abs(back - matte).max() < 0.01
+    other = subject.copy()
+    other[:, :30] = False  # other players: not the same cut-out
+    assert scene._matte_key(img, other, False) != key

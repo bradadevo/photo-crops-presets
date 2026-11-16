@@ -21,6 +21,8 @@ cut-out. A photo's fixes stay with it, for every look and the full-size export.
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import threading
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -147,19 +149,31 @@ class Prepared:
     box: tuple[float, float, float, float] | None = None  # cropped first ("crop", "wide", "face"): its box in the photo (shares)
     _auto: tuple | None = field(default=None, repr=False)  # the cut-out and players' outline before fixes
     _pieces: dict = field(default_factory=dict, repr=False)  # each click's traced object
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def ensure_matte(self) -> np.ndarray | None:
+        with self._lock:  # (asked for twice at once, the players are found once: the second waits)
+            return self._ensure_matte()
+
+    def _ensure_matte(self) -> np.ndarray | None:
         if self.scene.matte is None:
             if self._auto is None:
                 matte = None
                 if self.scene.subject_mask is not None:
-                    matte = cutout(self.image, self.scene.subject_mask)
+                    key = _matte_key(self.image, self.scene.subject_mask, self.scene.team)
+                    matte = _kept_matte(key)  # made before (this photo, these players): no minute's wait
                     if matte is not None:
                         self.scene.take_in(matte)
-                        matte = refine_heads(self.image, matte, self.scene.faces)
-                    matte = with_balls(matte, self.scene.balls) if matte is not None else None
-                    if matte is not None and self.scene.team:
-                        matte = fill_group(matte, self.image, self.scene.subject_mask)
+                    else:
+                        matte = cutout(self.image, self.scene.subject_mask)
+                        if matte is not None:
+                            self.scene.take_in(matte)
+                            matte = refine_heads(self.image, matte, self.scene.faces)
+                        matte = with_balls(matte, self.scene.balls) if matte is not None else None
+                        if matte is not None and self.scene.team:
+                            matte = fill_group(matte, self.image, self.scene.subject_mask)
+                        if matte is not None:
+                            _keep_matte(key, matte)
                 self._auto = (matte, self.scene.subject_mask)
             self.scene.matte, self.scene.subject_mask = self._fixed()
         return self.scene.matte
@@ -384,6 +398,53 @@ def cutout(img: Image.Image, subject_mask: np.ndarray) -> np.ndarray | None:
     full = np.zeros((h, w), np.float32)
     full[y0:y1, x0:x1] = alpha
     return full
+
+
+MATTE_VERSION = 3  # (raised when the cut-out is made differently: the kept ones are made again)
+MATTES_KEPT = 400  # cut-outs kept on disk, the oldest let go
+
+
+def _mattes_dir() -> Path:
+    import os
+    state = os.environ.get("ALLPROPHOTO_STATE")
+    base = Path(state) if state else Path("~/.cache/photo-crops-presets").expanduser()
+    return base / "mattes"
+
+
+def _matte_key(image: Image.Image, subject: np.ndarray, team: bool) -> str:
+    """The same picture with the same players: a small copy of it, its size and the players' outline."""
+    import hashlib
+    small = np.asarray(image.convert("RGB").resize((96, 96)), np.uint8)
+    outline = np.packbits(cv2.resize(subject.astype(np.uint8), (128, 128), interpolation=cv2.INTER_NEAREST) > 0)
+    h = hashlib.sha1()
+    for part in (small.tobytes(), outline.tobytes(), repr((image.size, team, MATTE_VERSION)).encode()):
+        h.update(part)
+    return h.hexdigest()[:20]
+
+
+def _kept_matte(key: str) -> np.ndarray | None:
+    p = _mattes_dir() / f"{key}.png"
+    try:
+        if p.exists():
+            p.touch()
+            return np.asarray(Image.open(p).convert("L"), np.float32) / 255
+    except OSError:
+        pass
+    return None
+
+
+def _keep_matte(key: str, matte: np.ndarray) -> None:
+    try:
+        d = _mattes_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = d / f"{key}.part.png"
+        Image.fromarray((np.clip(matte, 0, 1) * 255 + 0.5).astype(np.uint8), "L").save(tmp, optimize=False)
+        tmp.replace(d / f"{key}.png")
+        kept = sorted(d.glob("*.png"), key=lambda q: q.stat().st_mtime)
+        for old in kept[:-MATTES_KEPT]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def fill_group(alpha: np.ndarray, image: Image.Image | None = None, people: np.ndarray | None = None) -> np.ndarray:

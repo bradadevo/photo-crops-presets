@@ -756,3 +756,9 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .pieces-layer .pc.sel { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
 .pc-h { position: absolute; right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 50%; background: #fff;
   border: 2px solid var(--accent); cursor: nwse-resize; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+/* a picture still being made: the photo, softly, until it is ready */
+.frame.waiting { background: var(--placeholder) center / cover no-repeat, #000; }
+.frame.waiting::before { content: ""; position: absolute; inset: 0; backdrop-filter: blur(10px) brightness(.7); z-index: 1; }
+.frame.waiting img.after { opacity: 0; }
+.frame .tag.ready-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; display: inline-flex; gap: 8px; align-items: center; }
+.ready-note .link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
