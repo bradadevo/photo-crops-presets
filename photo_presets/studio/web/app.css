@@ -583,3 +583,13 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .viewer:has(.frame-preview) .hint-line { display: none; }
 .btn.update { border-color: rgba(62, 207, 142, .5); color: var(--good); background: rgba(62, 207, 142, .08); }
 .btn.update:hover { background: rgba(62, 207, 142, .16) !important; }
+
+/* removing */
+.frame.tool-remove.mode-click { cursor: crosshair; }
+.frame.tool-remove .rm-preview { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none;
+  transform: none; animation: tipin .15s ease-out; }
+.frame.tool-remove canvas { z-index: 3; }
+.frame .rm-status { z-index: 4; display: flex; align-items: center; gap: 6px; }
+.frame .rm-status .spin { width: 11px; height: 11px; }
+.rm-bar { flex-wrap: nowrap; max-width: calc(100% - 20px); }
+.sheet .tile .acts span[data-act="delete"]:hover { color: var(--bad); }

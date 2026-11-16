@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from queue import PriorityQueue
 
+import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image
@@ -173,6 +175,8 @@ class Session:
         self.ids = itertools.count(1)
         self.runs = itertools.count(1)
         self.pace: list[tuple[float, float]] = []  # (took, expected) of clean looks: how this Mac runs today
+        self.future: dict[int, list[dict]] = {}  # removed from every look of a photo: also from looks made later
+        self.trash: dict[int, tuple[float, Slot]] = {}  # looks just removed, for undo
 
     def photo(self, pid: int) -> Photo:
         p = self.photos.get(pid)
@@ -208,6 +212,7 @@ class Session:
 
     def saved(self) -> dict:
         return {"photos": [str(p.path) for p in self.photos.values()],
+                "future": {str(self.photos[pid].path): rms for pid, rms in self.future.items() if pid in self.photos and rms},
                 "fixes": [[k[0], k[1], [[f.x, f.y, f.add] for f in v]] for k, v in E.fixes.items() if v],
                 "removals": E.removals}
 
@@ -234,6 +239,9 @@ class Session:
             self.ids = itertools.count(max(m["id"] for m, _ in looks) + 1)
         self.add_photos([Path(p) for p in data.get("photos", []) if Path(p).is_file()])
         by_path = {str(p.path): p.id for p in self.photos.values()}
+        for path, rms in (data.get("future") or {}).items():
+            if path in by_path:
+                self.future[by_path[path]] = rms
         for meta, r in looks:
             pid = by_path.get(meta["photo"])
             if pid is None:
@@ -514,7 +522,14 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
         S.pace.append((took, slot.expect))
     if name in presets.load_all():
         keep_example(name, r.after)
+    future = S.future.get(slot.photo)
+    if future:  # removed from every look of this photo, so from this one too
+        whole = Result(r.source, "none", {}, 0, r.before, r.after)
+        placed = [rm for rm in (_to_look(whole, r, rm) for rm in future) if rm]
+        if placed:
+            r = dataclasses.replace(r, edits=edits.clean({"removals": placed}))
     slot.result, slot.secs, slot.state = r, took, "done"
+
 
 
 def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None = None) -> list[int]:
@@ -825,12 +840,35 @@ def use_on_all(sid: int):
 
 @app.post("/api/slots/remove")
 async def remove_slots(req: Request):
+    """Takes looks out (finished ones can be put back for a while: /api/slots/restore)."""
     ids = set((await req.json()).get("ids", []))
+    gone = []
     with S.lock:
+        order = list(S.slots)
         for sid in ids:
             s = S.slots.get(sid)
             if s and s.state not in ("now",) and (s.future is None or s.future.done() or s.future.cancel()):
                 del S.slots[sid]
+                if s.state == "done":
+                    S.trash[sid] = (order.index(sid), s)
+                    gone.append(sid)
+        for sid in [k for k, (_, s) in S.trash.items() if k not in gone and len(S.trash) > 300]:
+            S.trash.pop(sid, None)
+    return {"removed": gone}
+
+
+@app.post("/api/slots/restore")
+async def restore_slots(req: Request):
+    """Puts removed looks back where they were (undo)."""
+    ids = (await req.json()).get("ids", [])
+    with S.lock:
+        items = list(S.slots.items())
+        for sid in sorted(ids, key=lambda i: S.trash.get(i, (0,))[0]):
+            if sid in S.trash:
+                at, s = S.trash.pop(sid)
+                items.insert(min(at, len(items)), (sid, s))
+                K.stamps.pop(sid, None)  # saved again
+        S.slots = OrderedDict(items)
     return {"ok": True}
 
 
@@ -987,45 +1025,112 @@ async def rate(req: Request):
     return {"ok": True}
 
 
-async def _remake_photo(source: Path) -> int:
-    """Every look of this photo made again (after a removal), keeping each one's tuning and edits."""
-    same = [o for o in S.slots.values() if o.result is not None and o.result.source == source]
-    for o in same:
-        o.state, o.started, o.extra, o.loading = "now", time.time(), 0.0, False
-    for o in same:
-        try:
-            r = await asyncio.wrap_future(W.submit(RUN, E.remake, o.result))
-            o.result, o.ver = r, o.ver + 1
-        finally:
-            o.state = "done"
-    return len(same)
+def _to_look(src: Result, dst: Result, removal: dict) -> dict | None:
+    """A removal made on one look of a photo, placed on another look of it (their crops can
+    differ); None when it falls outside that look's picture."""
+    scale = E.photo_scale(src) / max(E.photo_scale(dst), 1e-6)
+    move = lambda x, y: list(E.from_photo(dst, *E.to_photo(src, x, y)))
+    points = [move(x, y) for x, y in removal.get("points", [])]
+    points = [p for p in points if 0 <= p[0] <= 1 and 0 <= p[1] <= 1]
+    strokes = [{"pts": [move(x, y) for x, y in st["pts"]], "r": st["r"] * scale} for st in removal.get("strokes", [])]
+    strokes = [st for st in strokes if any(-0.05 <= x <= 1.05 and -0.05 <= y <= 1.05 for x, y in st["pts"])]
+    return {"points": points, "strokes": strokes} if points or strokes else None
+
+
+def _removal(body: dict) -> dict:
+    return {"points": [[float(x), float(y)] for x, y in body.get("points", [])],
+            "strokes": [{"pts": [[float(x), float(y)] for x, y in st.get("pts", [])], "r": float(st.get("r", 0.02))}
+                        for st in body.get("strokes", [])]}
+
+
+@app.post("/api/slots/{sid}/remove/preview")
+async def remove_preview(sid: int, req: Request):
+    """{points, strokes}: what would be removed, as a picture to lay over this look (red where it goes)."""
+    s = S.slot(sid)
+    removal = _removal(await req.json())
+    w, h = s.result.after.size
+
+    def make() -> bytes:
+        m = E.removal_mask(s.result, removal, h, w)
+        rgba = np.zeros((h, w, 4), np.uint8)
+        rgba[m] = (255, 60, 90, 150)
+        edge = cv2.morphologyEx(m.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) > 0
+        rgba[edge] = (255, 255, 255, 230)
+        buf = io.BytesIO()
+        Image.fromarray(rgba, "RGBA").save(buf, "PNG")
+        return buf.getvalue()
+    data = await asyncio.wrap_future(W.submit(FIX, make))
+    return Response(data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/slots/{sid}/people")
+async def background_people(sid: int):
+    """The people in this look who are not the players kept (a click on each removes them)."""
+    s = S.slot(sid)
+
+    def find():
+        found = E.people_in(s.result)
+        matte = E.cutout(s.result)
+        out = []
+        for m in found:
+            ys, xs = np.nonzero(m)
+            if not len(ys):
+                continue
+            if matte is not None:
+                mm = cv2.resize(matte, (m.shape[1], m.shape[0])) > 0.5
+                if (mm & m).sum() > 0.3 * m.sum():
+                    continue  # a player kept in the look
+            # a point well inside them: the middle of their body
+            cy = int(np.median(ys)); row = np.nonzero(m[cy])[0]
+            cx = int(np.median(row)) if len(row) else int(np.median(xs))
+            out.append({"x": cx / m.shape[1], "y": cy / m.shape[0],
+                        "box": [xs.min() / m.shape[1], ys.min() / m.shape[0], xs.max() / m.shape[1], ys.max() / m.shape[0]]})
+        return out
+    return {"people": await asyncio.wrap_future(W.submit(FIX, find))}
 
 
 @app.post("/api/slots/{sid}/remove")
-async def remove_distraction(sid: int, req: Request):
-    """{strokes: [{pts: [[x, y]...], r}]} brushed on the picture (shares, before straightening and
-    cropping): what is under them is removed from the photo, and its looks are made again."""
+async def remove_from_looks(sid: int, req: Request):
+    """{points, strokes, scope: "look" | "photo"}: removes what was clicked or brushed from this
+    look, or from every look of this photo (and the looks made of it later). Quick: the looks are
+    not made again, each just has it filled in."""
     s = S.slot(sid)
-    r = s.result
-    strokes = (await req.json()).get("strokes", [])
-    if not strokes:
-        raise HTTPException(400, "Brush over what should go")
-    scale = E.photo_scale(r)
-    removal = [{"pts": [list(E.to_photo(r, float(x), float(y))) for x, y in st.get("pts", [])],
-                "r": float(st.get("r", 0.02)) * scale} for st in strokes]
-    removals = E.removals.get(str(r.source), []) + [removal]
-    await asyncio.wrap_future(W.submit(FIX, E.set_removals, r.source, removals))
-    count = await _remake_photo(r.source)
-    return {"photo": s.photo, "removals": removals, "count": count}
+    body = await req.json()
+    removal = _removal(body)
+    if not removal["points"] and not removal["strokes"]:
+        raise HTTPException(400, "Click or brush over what should go")
+    targets = [s]
+    if body.get("scope") == "photo":
+        targets += [o for o in S.slots.values() if o is not s and o.photo == s.photo and o.result is not None]
+        X = [list(E.to_photo(s.result, x, y)) for x, y in removal["points"]]
+        strokes = [{"pts": [list(E.to_photo(s.result, x, y)) for x, y in st["pts"]], "r": st["r"] * E.photo_scale(s.result)}
+                   for st in removal["strokes"]]
+        S.future.setdefault(s.photo, []).append({"points": X, "strokes": strokes})
+
+    def apply():
+        changed = []
+        for o in targets:
+            rm = removal if o is s else _to_look(s.result, o.result, removal)
+            if rm is None:
+                continue
+            e = dict(o.result.edits or {})
+            e["removals"] = list(e.get("removals", [])) + [rm]
+            r = dataclasses.replace(o.result, edits=edits.clean(e))
+            E.finished(r, texts=False)  # worked out now, so the picture shows at once
+            changed.append((o, r))
+        return changed
+    for o, r in await asyncio.wrap_future(W.submit(FIX, apply)):
+        with S.lock:
+            o.result, o.ver = r, o.ver + 1
+    return {"slots": [o.public() for o in targets], "future": S.future.get(s.photo, [])}
 
 
-@app.post("/api/photos/{pid}/removals")
-async def set_removals(pid: int, req: Request):
-    """{removals: [...]}: the photo's removals as given (undo and redo)."""
-    path = S.photo(pid).path
-    removals = (await req.json()).get("removals", [])
-    await asyncio.wrap_future(W.submit(FIX, E.set_removals, path, removals))
-    return {"removals": removals, "count": await _remake_photo(path)}
+@app.post("/api/photos/{pid}/future_removals")
+async def future_removals(pid: int, req: Request):
+    """{removals}: what new looks of this photo have removed (undo and redo)."""
+    S.photo(pid)
+    S.future[pid] = (await req.json()).get("removals", [])
+    return {"ok": True}
 
 
 @app.post("/api/slots/{sid}/adjust_look")

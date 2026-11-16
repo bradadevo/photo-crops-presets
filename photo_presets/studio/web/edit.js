@@ -22,10 +22,9 @@ async function travel(from, to, side) {
   const e = from.pop();
   if (!e) return;
   to.push(e);
-  if (e.type === "removal") {
-    const t = toast(side === "before" ? "Putting it back…" : "Removing it again…", { sticky: true, spin: true });
-    try { await api(`/api/photos/${e.pid}/removals`, { removals: e[side] }); t.close(); } catch { t.close(); }
-    await refresh();
+  if (e.type === "multi") {  // a removal on every look of a photo
+    for (const it of e.items) updateSlot(await api(`/api/slots/${it.sid}/edit`, it[side]));
+    if (e.pid != null) await api(`/api/photos/${e.pid}/future_removals`, { removals: e[side === "before" ? "futureBefore" : "futureAfter"] });
   } else {
     const s = await api(`/api/slots/${e.sid}/edit`, e[side]);
     updateSlot(s);
@@ -132,7 +131,7 @@ function renderEdit(cur) {
     <div class="inline"><button class="btn" id="e-reset" title="Back to the look as it was made">Reset all</button>
       ${same > 1 ? `<button class="btn" id="e-all" style="flex:1" title="These light, color and look settings on every picture in this look">${icon("copy")} Use on all ${same}</button>` : ""}</div>
     <div class="section"><h3>This photo</h3><div class="actions">
-      ${cur.removed ? `<p class="notes">${plural(cur.removed, "distraction")} removed from this photo · ⌘Z puts the last one back</p>` : ""}
+      ${e.removals?.length ? `<p class="notes">${plural(e.removals.length, "thing")} removed from this look · ⌘Z puts the last one back</p>` : ""}
       ${st.photos.length > 1 ? `<button class="btn" id="e-useall">${icon("layers")} Use this look on all ${st.photos.length} photos</button>
       <button class="btn" id="e-match">${icon("sun")} Match every photo's light to this one</button>` : ""}
       ${anyMatched ? `<button class="btn ghost" id="e-unmatch">${icon("undo")} Undo matching</button>` : ""}
@@ -294,7 +293,8 @@ function setTool(tool) {
   if (!cur || cur.state !== "done") return;
   if (tool === "cutout") { st.fixing = !st.fixing; st.tool = null; }
   else { st.tool = st.tool === tool ? null : tool; st.fixing = false; }
-  st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null; st.brush.strokes = [];
+  st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null;
+  st.brush.strokes = []; st.brush.points = []; st.brush.preview = null;
   if (tool === "text" && st.tool === "text" && !(cur.edits?.texts || []).length) { addText(cur); }
   if (st.tab !== "edit") st.tab = "edit";
   viewerSig = ""; editSig = ""; render();
@@ -482,40 +482,78 @@ function renderCrop(v, cur) {
 }
 
 // Removing distractions ---------------------------------------------------------------------------
+/* Click a person or a thing to remove it (the app takes all of them: their edge and their shadow
+   too), or brush over it. What will go shows in red before anything is removed; then this look
+   only, or every look of this photo. It never takes the players kept in the look unless you
+   brush right over them. */
 function renderBrush(v, cur) {
-  const W = cur.base_width, H = cur.base_height;
   const b = st.brush;
-  v.innerHTML = `<div class="frame tool-remove" id="frame"><div class="layer"><img class="after" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
-      <canvas id="brush"></canvas><div class="brush-ring" id="ring" hidden></div></div>
-    <div class="fixbar toolbar">
-      <span class="title"><b>Remove</b><span>Brush over what should go</span></span><span class="sep"></span>
-      <span class="angle">Size<input type="range" id="b-size" min="0.008" max="0.09" step="0.002" value="${b.r}"></span>
-      <button id="b-undo" title="Take back the last stroke">${icon("undo")}</button>
-      <button id="b-clear">Clear</button><span class="sep"></span>
-      <button id="b-go" class="on" ${off(!b.strokes.length, "Brush over what should go first (drag on the picture).")}>Remove it</button><button id="b-done">Done</button></div>`;
+  b.mode ||= "click";
+  b.scope ||= "look";
+  const others = st.slots.filter((s) => s.photo === cur.photo && s.state === "done").length;
+  v.innerHTML = `<div class="frame tool-remove mode-${b.mode}" id="frame"><div class="layer"><img class="after" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
+      <img class="rm-preview" id="rm-preview" alt="" hidden><canvas id="brush"></canvas><div class="brush-ring" id="ring" hidden></div>
+      <span class="tag l rm-status" id="rm-status" hidden></span></div>
+    <div class="fixbar toolbar rm-bar">
+      <div class="seg small" id="rm-mode"><button data-v="click" title="Click a person or a thing: all of it goes">${icon("target")} Click</button><button data-v="brush" title="Paint over what should go">${icon("eraser")} Brush</button></div>
+      <span class="angle" id="rm-size" ${b.mode === "brush" ? "" : "hidden"}>Size<input type="range" id="b-size" min="0.006" max="0.08" step="0.002" value="${b.r}"></span>
+      <button id="rm-people" title="Select every person who is not one of the players kept" hidden>${icon("plus")} Background people</button>
+      <span class="sep"></span>
+      ${others > 1 ? `<div class="seg small" id="rm-scope"><button data-v="look" title="Only this look">This look</button><button data-v="photo" title="Every look of this photo, and the looks made of it later">All ${others} looks</button></div><span class="sep"></span>` : ""}
+      <button id="b-undo" title="Take back the last click or stroke">${icon("undo")}</button>
+      <button id="b-go" class="on">Remove it</button><button id="b-done">Done</button></div>`;
   paintIcons(v);
-  fitFrame(W, H);
-  const f = $("#frame"), cv = $("#brush"), ring = $("#ring");
+  fitFrame(cur.base_width, cur.base_height);
+  const f = $("#frame"), cv = $("#brush"), ring = $("#ring"), prev = $("#rm-preview"), status = $("#rm-status");
+  const paintBar = () => {
+    $$("#rm-mode button").forEach((x) => x.classList.toggle("on", x.dataset.v === b.mode));
+    $$("#rm-scope button").forEach((x) => x.classList.toggle("on", x.dataset.v === b.scope));
+    $("#rm-size").hidden = b.mode !== "brush";
+    f.classList.toggle("mode-brush", b.mode === "brush"); f.classList.toggle("mode-click", b.mode === "click");
+    setOff($("#b-go"), !(b.strokes.length || b.points.length), b.mode === "click"
+      ? "Click a person or a thing on the picture first: it turns red, then Remove it."
+      : "Brush over what should go first (drag on the picture).");
+    setOff($("#b-undo"), !(b.strokes.length || b.points.length), "Nothing picked yet.");
+  };
   const size = () => {
     const r = f.getBoundingClientRect(), k = devicePixelRatio || 1;
     cv.width = r.width * k; cv.height = r.height * k; draw();
   };
-  const draw = () => {
+  const draw = () => {  // the brush strokes while painting (the red preview shows what will really go)
     const ctx = cv.getContext("2d"), w = cv.width, h = cv.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = ctx.fillStyle = "rgba(255, 70, 90, 0.55)";
+    ctx.strokeStyle = ctx.fillStyle = "rgba(255, 70, 90, 0.35)";
     ctx.lineCap = ctx.lineJoin = "round";
-    for (const s of b.strokes) {
-      ctx.lineWidth = s.r * 2 * w;
+    for (const s2 of b.strokes) {
+      ctx.lineWidth = s2.r * 2 * w;
       ctx.beginPath();
-      s.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h)));
-      if (s.pts.length === 1) { ctx.arc(s.pts[0][0] * w, s.pts[0][1] * h, s.r * w, 0, Math.PI * 2); ctx.fill(); } else ctx.stroke();
+      s2.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h)));
+      if (s2.pts.length === 1) { ctx.arc(s2.pts[0][0] * w, s2.pts[0][1] * h, s2.r * w, 0, Math.PI * 2); ctx.fill(); } else ctx.stroke();
     }
   };
-  const go = () => setOff($("#b-go"), !b.strokes.length, "Brush over what should go first (drag on the picture).");
-  requestAnimationFrame(size);
+  let previewTimer = null, previewAsk = 0;
+  const preview = () => {  // what will go, worked out by the app: whole people and things, edges, shadows
+    clearTimeout(previewTimer);
+    paintBar();
+    if (!b.strokes.length && !b.points.length) { prev.hidden = true; status.hidden = true; b.preview = null; return; }
+    previewTimer = setTimeout(async () => {
+      const ask = ++previewAsk;
+      status.hidden = false; status.innerHTML = '<span class="spin"></span> Finding it…';
+      try {
+        const res = await fetch(`/api/slots/${cur.id}/remove/preview`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ points: b.points, strokes: b.strokes }) });
+        if (!res.ok || ask !== previewAsk) return;
+        const url = URL.createObjectURL(await res.blob());
+        if (b.preview) URL.revokeObjectURL(b.preview);
+        b.preview = url; prev.src = url; prev.hidden = false;
+        status.innerHTML = "Red goes · click more, or Remove it";
+      } catch { status.hidden = true; }
+    }, 150);
+  };
+  requestAnimationFrame(() => { size(); if (b.preview) { prev.src = b.preview; prev.hidden = false; } paintBar(); });
   const at = (e) => { const r = f.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
   const showRing = (e) => {
+    if (b.mode !== "brush") { ring.hidden = true; return; }
     const r = f.getBoundingClientRect(), d = b.r * 2 * r.width;
     ring.hidden = false;
     Object.assign(ring.style, { width: d + "px", height: d + "px", left: e.clientX - r.left - d / 2 + "px", top: e.clientY - r.top - d / 2 + "px" });
@@ -524,26 +562,48 @@ function renderBrush(v, cur) {
   f.onpointerleave = () => { ring.hidden = true; };
   cv.onpointerdown = (e) => {
     e.preventDefault();
+    if (b.mode === "click") { b.points.push(at(e)); b.order = [...(b.order || []), "p"]; preview(); return; }
     cv.setPointerCapture(e.pointerId);
-    const s = { pts: [at(e)], r: b.r };
-    b.strokes.push(s); draw(); go();
-    cv.onpointermove = (m) => { showRing(m); s.pts.push(at(m)); draw(); };
-    cv.onpointerup = () => { cv.onpointermove = null; };
+    const s2 = { pts: [at(e)], r: b.r };
+    b.strokes.push(s2); b.order = [...(b.order || []), "s"]; draw();
+    cv.onpointermove = (m) => { showRing(m); s2.pts.push(at(m)); draw(); };
+    cv.onpointerup = () => { cv.onpointermove = null; preview(); };
   };
+  $$("#rm-mode button").forEach((x) => x.onclick = () => { b.mode = x.dataset.v; paintBar(); });
+  $$("#rm-scope button").forEach((x) => x.onclick = () => { b.scope = x.dataset.v; paintBar(); });
   $("#b-size").oninput = (e) => { b.r = +e.target.value; store.set("brush", b.r); };
-  $("#b-undo").onclick = () => { b.strokes.pop(); draw(); go(); };
-  $("#b-clear").onclick = () => { b.strokes = []; draw(); go(); };
+  $("#b-undo").onclick = () => {
+    const last = (b.order || []).pop();
+    if (last === "s") b.strokes.pop(); else if (last === "p") b.points.pop();
+    draw(); preview();
+  };
   $("#b-done").onclick = () => setTool("remove");
+  // the background people: one click selects them all
+  api(`/api/slots/${cur.id}/people`).then((r) => {
+    const btn = $("#rm-people");
+    if (!btn || !r.people.length) return;
+    btn.hidden = false;
+    btn.innerHTML = `${icon("plus")} ${plural(r.people.length, "background person", "background people")}`;
+    btn.onclick = () => { r.people.forEach((p) => { b.points.push([p.x, p.y]); (b.order ||= []).push("p"); }); preview(); };
+  }).catch(() => {});
   $("#b-go").onclick = async () => {
-    const strokes = b.strokes.map((s) => ({ pts: s.pts.map(([x, y]) => [Math.round(x * 10000) / 10000, Math.round(y * 10000) / 10000]), r: s.r }));
-    b.strokes = [];
-    const n = st.slots.filter((s) => s.photo === cur.photo && s.state === "done").length;
-    const t = toast("Removing it…", { sticky: true, spin: true, small: n > 1 ? `then remaking this photo's ${n} looks` : "" });
+    const body = { points: b.points.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]),
+      strokes: b.strokes.map((s2) => ({ pts: s2.pts.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]), r: s2.r })),
+      scope: b.scope };
+    const affected = b.scope === "photo" ? st.slots.filter((s2) => s2.photo === cur.photo && s2.state === "done") : [cur];
+    const before = new Map(affected.map((s2) => [s2.id, snapshot(s2)]));
+    const t = toast(affected.length > 1 ? `Removing it from ${plural(affected.length, "look")}…` : "Removing it…", { sticky: true, spin: true });
     try {
-      const r = await api(`/api/slots/${cur.id}/remove`, { strokes });
-      pushHist({ type: "removal", pid: r.photo, before: r.removals.slice(0, -1), after: r.removals });
+      const r = await api(`/api/slots/${cur.id}/remove`, body);
+      const items = r.slots.filter((s2) => before.has(s2.id)).map((s2) => ({ sid: s2.id, before: before.get(s2.id), after: snapshot(s2) }));
+      pushHist({ type: "multi", items, pid: b.scope === "photo" ? cur.photo : null,
+        futureBefore: (r.future || []).slice(0, -1), futureAfter: r.future || [] });
+      r.slots.forEach((s2) => updateSlot(s2));
       t.done("Removed", "⌘Z puts it back");
     } catch { t.close(); }
-    viewerSig = ""; await refresh();
+    b.strokes = []; b.points = []; b.order = [];
+    if (b.preview) URL.revokeObjectURL(b.preview);
+    b.preview = null;
+    viewerSig = ""; renderViewer();
   };
 }

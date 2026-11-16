@@ -109,12 +109,12 @@ function showTip(el, { why = false } = {}) {
     tipEl.innerHTML = `<span class="why-head">${icon("info")} Not yet</span>${esc(el.dataset.why)}`;
   } else if (look) {
     tipEl.innerHTML = `<b>${esc(look.name)}</b><p>${esc(look.about)}</p><small>${look.ai ? "Drawn by AI on this Mac" : look.cutout ? "Separates the player from the background" : "A color and light look"} · ${short(look.secs) === "instant" ? "instant" : "about " + short(look.secs) + " a photo"}</small>
-      <small class="dim">${look.ai ? "Its card shows an example" : "Rest here to try it on your photo"} · click to pick it</small>`;
+      <small class="dim">${look.ai ? "Its picture is an example" : "Point at its picture to try it on your photo"} · click to pick it</small>`;
   } else tipEl.textContent = el.dataset.tip || "";
   tipEl.className = "tip" + (el.dataset.why && (why || !el.dataset.tip) ? " why" : "") + (look ? " rich" : "");
   tipEl.hidden = false;
   paintIcons(tipEl);
-  const r = el.getBoundingClientRect(), t = tipEl.getBoundingClientRect(), pad = 8;
+  const r = (look ? el.closest(".look") || el : el).getBoundingClientRect(), t = tipEl.getBoundingClientRect(), pad = 8;
   let x, y;
   if (look) { x = r.left - t.width - 10; y = r.top + r.height / 2 - t.height / 2; }
   else {
@@ -165,7 +165,7 @@ const st = {
   scope: "one", crop: "none", compare: false, split: 50, fixing: false, fixAdd: true, fixVer: 0,
   reelSource: "kept", reelTask: null, reelOrder: [], reelOut: new Set(),
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
-  tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [] }, areaSel: null, textSel: null,
+  tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [], points: [], order: [] }, areaSel: null, textSel: null,
   show: "all",
 };
 const slotById = (id) => st.slots.find((s) => s.id === id);
@@ -300,11 +300,12 @@ function tileCreate(sheet) {
     const b = document.createElement("button");
     b.className = "tile"; b.setAttribute("role", "option");
     b.innerHTML = `<img alt="" draggable="false" hidden><div class="ring" hidden><span></span></div><span class="name"></span><span class="star">${icon("pick")}</span><span class="stars"></span>`
-      + (sheet ? `<span class="acts"><span class="k" data-act="keep" title="Pick (Space)">${icon("pickO")}</span><span data-act="export" title="Export this one">${icon("export")}</span></span>` : "");
+      + (sheet ? `<span class="acts"><span class="k" data-act="keep" title="Pick (Space)">${icon("pickO")}</span><span data-act="export" title="Export this one">${icon("export")}</span><span data-act="delete" title="Remove this look">${icon("trash")}</span></span>` : "");
     b.onclick = (e) => {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "keep") { toggleKeep([s.id]); return; }
       if (act === "export") { openExport([s.id]); return; }
+      if (act === "delete") { deleteLooks([s.id]); return; }
       if ((e.metaKey || e.shiftKey || e.ctrlKey) && slotById(s.id)?.state === "done") { toggleSurvey(s.id); return; }
       st.survey = [];
       select(s.id, sheet);
@@ -348,6 +349,7 @@ function renderStrip() {
   show.innerHTML = [["all", "All"], ["picks", `Picks (${kept})`], ...[1, 2, 3, 4, 5].map((n) => [String(n), "★".repeat(n) + (n < 5 ? " and up" : "")])]
     .map(([v, l]) => `<option value="${v}" ${st.show === v ? "selected" : ""}>${l}</option>`).join("");
   $("#keep-none").hidden = !kept;
+  $("#drop-unpicked").hidden = !kept || kept === done;
   $("#keep-all").hidden = !done || kept === done;
   wrap.classList.toggle("grid", st.view === "grid");
   $("#view-single").classList.toggle("on", st.view === "single");
@@ -452,7 +454,8 @@ function toolbar(cur) {
     <button data-act="keep" class="${cur.kept ? "kept" : ""}" title="Pick it (Space)">${icon(cur.kept ? "pick" : "pickO")} ${cur.kept ? "Picked" : "Pick"}</button>
     <span class="sep"></span>
     <button data-act="share" title="AirDrop, Messages, Mail, Photos, Copy">${icon("share")}</button>
-    <button data-act="export" title="Export this picture">${icon("export")}</button>`
+    <button data-act="export" title="Export this picture">${icon("export")}</button>
+    <button data-act="delete" title="Remove this look (Delete): undo is one click">${icon("trash")}</button>`
     : `<button data-act="remove" title="Remove">${icon("trash")} Remove</button>`}
   </div>`;
 }
@@ -508,7 +511,7 @@ function bindViewer(cur) {
     if (a === "export") openExport([cur.id]);
     if (a === "edit") { st.tab = "edit"; renderTabs(); }
     if (a === "share") shareMenu(cur, b);
-    if (a === "remove") api("/api/slots/remove", { ids: [cur.id] }).then(refresh);
+    if (a === "remove" || a === "delete") deleteLooks([cur.id]);
     if (a === "copy") copyPicture(cur);
   });
   const f = $("#frame");
@@ -609,6 +612,22 @@ function shareMenu(cur, anchor) {
     refresh();
   });
   setTimeout(() => document.addEventListener("click", () => m.remove(), { once: true }), 0);
+}
+
+/* Takes looks out, with an Undo right there (and the next look opens). */
+async function deleteLooks(ids) {
+  if (!ids.length) return;
+  const list = visibleSlots(), at = list.findIndex((s) => s.id === st.current);
+  const r = await api("/api/slots/remove", { ids });
+  if (ids.includes(st.current)) {
+    const rest = list.filter((s) => !ids.includes(s.id));
+    st.current = rest.length ? rest[Math.min(Math.max(at, 0), rest.length - 1)].id : null;
+    st.tool = null; st.fixing = false;
+  }
+  viewerSig = ""; await refresh();
+  const gone = r.removed || [];
+  if (gone.length) toast(gone.length === 1 ? "Look removed" : `${plural(gone.length, "look")} removed`, {
+    action: { label: "Undo", run: async () => { await api("/api/slots/restore", { ids: gone }); viewerSig = ""; refresh(); } } });
 }
 
 async function rate(ids, rating) {
@@ -907,10 +926,10 @@ function lookCard(l) {
   const art = `<span class="ph-art" style="background:${gradientFor(l.name)}">${esc(initials(l.name))}</span>
     <img src="/img/example/${enc(l.name)}.jpg?v=${pageStamp}" alt="" loading="lazy" draggable="false" onerror="this.hidden=true"
       onload="this.previousElementSibling?.remove()"><span class="coming" hidden></span>`;
-  return `<button class="look" data-name="${esc(l.name)}" data-tip-look="${esc(l.name)}">
+  return `<button class="look" data-name="${esc(l.name)}">
     <div class="pic">${art}<span class="check"></span>
       <span class="badge">${l.ai ? '<span class="ai">AI</span>' : ""}<span>${short(l.secs)}</span></span></div>
-    <div class="label"><b>${esc(l.name)}</b><small>${esc(l.about)}</small></div></button>`;
+    <div class="label" data-tip-look="${esc(l.name)}"><b>${esc(l.name)}</b><small>${esc(l.about)}</small></div></button>`;
 }
 const pageStamp = Date.now();
 const initials = (n) => n.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).slice(0, 2).map((w) => w[0]).join("");
@@ -1264,7 +1283,7 @@ function showHelp() {
   const keys = [["← →", "Previous / next look"], ["Space or P", "Pick this look"], ["C", "Compare with the original"],
     ["B (hold)", "Show the original"], ["G", "Contact sheet / one at a time"], ["E", "Export the picks (or this one)"],
     ["A", "Edit this look"], ["R", "Crop and straighten"], ["T", "Add text"], ["1 – 5, 0", "Rate it, or clear the rating"],
-    ["⌘Z, ⇧⌘Z", "Undo, redo"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
+    ["⌘Z, ⇧⌘Z", "Undo, redo"], ["Delete", "Remove this look (with Undo)"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
     ["⌘-click", "Compare pictures side by side"], ["⌘C", "Copy the picture (paste into Messages or Mail)"],
     ["⌘V", "Paste a photo"], ["Esc", "Close, or go back"]];
   modal(`<header><h2>Keyboard shortcuts</h2></header><div class="body"><div class="help-list">${keys.map(([k, t]) => `<kbd>${k}</kbd><span>${t}</span>`).join("")}</div></div>
@@ -1302,6 +1321,7 @@ document.addEventListener("keydown", (e) => {
     const up = (u) => { if (u.key.toLowerCase() === "b") { st.compare = false; st.split = 50; renderViewer(); document.removeEventListener("keyup", up); } };
     document.addEventListener("keyup", up);
   }
+  else if ((k === "delete" || k === "backspace") && cur?.state === "done" && !st.tool) { e.preventDefault(); deleteLooks([cur.id]); }
   else if (k === "g" && st.slots.length) { st.view = st.view === "grid" ? "single" : "grid"; render(); }
   else if (k === "e") exportDefault();
   else if (k === "a" && cur?.state === "done") { st.tab = "edit"; renderTabs(); }
@@ -1363,6 +1383,7 @@ function init() {
   $("#view-grid").onclick = () => { st.view = "grid"; render(); };
   $("#keep-all").onclick = () => { const ids = doneSlots().filter((s) => !s.kept).map((s) => s.id); toggleKeep(ids); };
   $("#keep-none").onclick = () => toggleKeep(keptSlots().map((s) => s.id));
+  $("#drop-unpicked").onclick = () => deleteLooks(doneSlots().filter((s) => !s.kept).map((s) => s.id));
   $("#clear-looks").onclick = () => {
     const m = modal(`<header><h2>Remove all looks?</h2></header><div class="body"><p style="margin:0;color:var(--muted)">The ${plural(doneSlots().length, "look")} made so far leave this session. Your photos stay, and anything you exported is kept.</p></div>
       <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="rm-go">Remove all</button></footer>`);

@@ -8,7 +8,8 @@ They belong to one picture (a result), as a dict:
      "crop": [x0, y0, x1, y1],      # shares of the straightened picture
      "texts": [{"text": "WAKE UP", "x": .5, "y": .85, "size": .07, "style": "bold", "color": "#ffffff"}]}
 
-Areas and points are shares of the picture before straightening and
+Removals ({"points": [[x, y]], "strokes": [...]}, see retouch.py) take what was
+clicked or brushed out of the picture, filled from around it. Areas and points are shares of the picture before straightening and
 cropping; a text's place is a share of the finished picture. The page shows
 the same thing: it rotates with the same enlargement and draws the text with
 the same font, so what you place is what you export.
@@ -33,7 +34,7 @@ AREA_EDGE = 1024  # px: a part's traced outline, scaled to each picture
 
 def edited(edits: dict | None) -> bool:
     e = edits or {}
-    return bool(e.get("areas") or e.get("angle") or e.get("crop") or e.get("texts"))
+    return bool(e.get("areas") or e.get("angle") or e.get("crop") or e.get("texts") or e.get("removals"))
 
 
 def cover_scale(w: int, h: int, angle: float) -> float:
@@ -261,6 +262,11 @@ def clean(edits: dict | None) -> dict:
         x0, y0, x1, y1 = (float(np.clip(v, 0, 1)) for v in c)
         if x1 - x0 > 0.02 and y1 - y0 > 0.02 and (x0, y0, x1, y1) != (0, 0, 1, 1):
             out["crop"] = [x0, y0, x1, y1]
+    if e.get("removals"):  # what was clicked and brushed away (shares of the picture), in order
+        out["removals"] = [{"points": [[float(x), float(y)] for x, y in rm.get("points", [])][:40],
+                            "strokes": [{"pts": [[float(x), float(y)] for x, y in st.get("pts", [])][:2000],
+                                         "r": float(st.get("r", 0.02))} for st in rm.get("strokes", [])][:200]}
+                           for rm in e["removals"] if rm.get("points") or rm.get("strokes")][:30]
     if e.get("texts"):
         out["texts"] = [{"text": str(t.get("text", ""))[:200], "x": float(t.get("x", 0.5)), "y": float(t.get("y", 0.5)),
                          "size": float(np.clip(float(t.get("size", 0.06)), 0.01, 0.4)),

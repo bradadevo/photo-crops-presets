@@ -113,7 +113,9 @@ Mac notification says when the looks (or an export, or a reel) are ready.
   size), **Messages**, **Mail**, **Add to Photos** (it reaches your iPhone
   through iCloud Photos), or **Copy** (**⌘C**). What is shared is the finished
   picture, full size, with its edits, text, your name and copyright.
-- **Remove** a look you do not want, or **Remove all**.
+- **Remove a look** you do not want: the bin button, or **Delete**; **Undo**
+  is right there. **Remove unpicked** clears every look you did not pick, and
+  **Remove all** everything.
 
 **5. Edit** (the **Edit** tab, or **A**). Everything changes the picture as you
 drag, and **⌘Z** / **⇧⌘Z** undo and redo every step (the arrows at the top of
@@ -122,12 +124,19 @@ the tab too). Tools used on the picture itself:
   **4:5**, **1:1**, **9:16** or **16:9**; **straighten** with the dial (up to
   20°; the picture is enlarged so no corner is empty), or **Auto**, which
   levels it from the field lines, the horizon and the goal posts. **Apply**.
-- **Remove**: brush over a distraction (a bottle, a bag, a pole, a parent on
-  the sideline) and press **Remove it**: LaMa, a free object-removal model run
-  on this Mac, fills it from what is around it (it is downloaded once, about
-  200 MB, to `~/.cache/photo-crops`, or reused from ai-versions). It is
-  removed from the photo itself, full size, so every look of that photo is
-  made again without it; **⌘Z** puts it back.
+- **Remove**: **Click** a person or a thing (a bag, a cone, the goal cart) and
+  all of it is taken (their edge and their shadow on the grass too), or
+  **Brush** over it (brushing over most of a person takes the whole person).
+  **Background people** selects, in one click, everyone who is not one of the
+  players kept. What will go shows in red before anything is removed; then
+  **Remove it**, from **This look** or **All N looks** of this photo (and the
+  looks made of it later). It never takes the players kept in the look unless
+  you brush right over them. It is filled by LaMa, a free object-removal model
+  run on this Mac (downloaded once, about 200 MB, to `~/.cache/photo-crops`, or
+  reused from ai-versions), with the light matched at the seam, the picture
+  mirrored at its edges for context, and the fine texture (grass blades)
+  borrowed from the ground right around it. It takes seconds: the looks are not
+  made again; each export does it again at full size. **⌘Z** puts it back.
 - **Adjust a part**: click a face, the player, the sky or the grass; the part
   is traced (with SAM 2.1, as for the cut-out) and shown in blue, and gets its
   own **Brightness**, **Warmth** and **Saturation**, with a soft edge. Several
@@ -174,8 +183,8 @@ And for the photo:
 - **Save as a preset**: the look with its sliders, under **Mine** (crops,
   parts, text and removals belong to the picture and are not saved in it).
 
-The sliders are part of the look's recipe (`"adjust"`); crops, parts and text
-are the picture's `"edits"`, and removals the photo's (`"removed"`). All are
+The sliders are part of the look's recipe (`"adjust"`); crops, parts, text and
+removals are the picture's `"edits"`. All are
 kept when you export, share, zoom or make a reel, and written in each
 export's `.json`.
 

@@ -87,6 +87,8 @@ class Engine:
         self.removals: dict[str, list[list[dict]]] = {}
         self._cleaned: OrderedDict = OrderedDict()  # (photo, removals): its cleaned image and 16-bit copy
         self._parts: OrderedDict = OrderedDict()  # traced parts of pictures, for adjusting them on their own
+        self._people: OrderedDict = OrderedDict()  # each picture's people (outlines), for removing them
+        self._gone: OrderedDict = OrderedDict()  # what each removal takes, and pictures with it removed
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -139,6 +141,13 @@ class Engine:
             x, y = box[0] + x * (box[2] - box[0]), box[1] + y * (box[3] - box[1])
         return x, y
 
+    def from_photo(self, r: "Result", x: float, y: float) -> tuple[float, float]:
+        """A point on the whole photo (shares) as shares of the result's picture."""
+        box = self.prepared(r.source, r.crop).box
+        if box:
+            x, y = (x - box[0]) / (box[2] - box[0]), (y - box[1]) / (box[3] - box[1])
+        return to_frame(r.frame, x, y)
+
     def photo_scale(self, r: "Result") -> float:
         """The result's picture width as a share of the photo's width."""
         w = 1.0 if not r.frame else r.frame[2] - r.frame[0]
@@ -160,6 +169,65 @@ class Engine:
         m = self._parts[key]
         return cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR) if m.shape != (h, w) else m
 
+    # Removing distractions from a picture --------------------------------------------------------
+
+    REMOVE_EDGE = 1600  # px: what a removal takes is worked out at this size, then scaled to any picture
+
+    def _picture(self, r: "Result"):
+        """The result's picture region of the photo (before its look), at REMOVE_EDGE."""
+        p = self.ready(r.source, r.crop, r.recipe)
+        img = p.image.copy()
+        img.thumbnail((self.REMOVE_EDGE, self.REMOVE_EDGE))
+        return img
+
+    def people_in(self, r: "Result") -> list[np.ndarray]:
+        key = (str(r.source), r.crop, r.frame)
+        if key not in self._people:
+            self._people[key] = retouch.people(self._picture(r))
+            while len(self._people) > 24:
+                self._people.popitem(last=False)
+        return self._people[key]
+
+    def removal_mask(self, r: "Result", removal: dict, h: int, w: int) -> np.ndarray:
+        """What one removal takes from the result's picture (bool, h x w): what was brushed,
+        and the whole person or object clicked, with its edge and shadow; never the players
+        kept in the look, unless brushed over directly."""
+        key = ("mask", str(r.source), r.crop, r.frame, json.dumps(removal, sort_keys=True))
+        if key not in self._gone:
+            img = self._picture(r)
+            matte = self.cutout(r)
+            protect = None if matte is None else cv2.resize(matte, img.size, interpolation=cv2.INTER_LINEAR)
+            self._gone[key] = retouch.what_to_remove(img, removal.get("strokes", []), removal.get("points", []),
+                                                     protect, self.people_in(r))
+            self._trim()
+        m = self._gone[key]
+        if m.shape != (h, w):
+            m = cv2.resize(m.astype(np.uint8), (w, h), interpolation=cv2.INTER_LINEAR) > 0
+        return m
+
+    def _trim(self) -> None:
+        while len(self._gone) > 48:
+            self._gone.popitem(last=False)
+
+    def removed(self, r: "Result", arr: np.ndarray) -> np.ndarray:
+        """The picture (floats 0-1, any size) with the result's removals filled in."""
+        removals = (r.edits or {}).get("removals") or []
+        if not removals:
+            return arr
+        h, w = arr.shape[:2]
+        sample = arr[:: max(1, h // 64), :: max(1, w // 64)].tobytes()
+        key = ("fill", hash(sample), h, w, json.dumps(removals, sort_keys=True), str(r.source), r.crop, r.frame)
+        if key not in self._gone:
+            mask = np.zeros((h, w), bool)
+            for rm in removals:
+                mask |= self.removal_mask(r, rm, h, w)
+            u8 = (np.clip(arr, 0, 1) * 255 + 0.5).astype(np.uint8)
+            filled, weight = retouch.fill(u8, mask)
+            wgt = weight[..., None]
+            self._gone[key] = (arr * (1 - wgt) + filled.astype(np.float32) / 255 * wgt).astype(np.float32)
+            self._trim()
+        return self._gone[key]
+
     def finalize(self, r: "Result", arr: np.ndarray, areas: bool = True, geometry: bool = True,
                  texts: bool = True) -> np.ndarray:
         """The result's picture (floats 0-1, any size) with its edits: parts
@@ -167,7 +235,7 @@ class Engine:
         e = r.edits or {}
         if not edits.edited(e):
             return arr
-        out = arr
+        out = self.removed(r, arr)
         if areas:
             for a in e.get("areas", []):
                 out = edits.adjust_part(out, self.part(r, a["x"], a["y"], *out.shape[:2]), a)
