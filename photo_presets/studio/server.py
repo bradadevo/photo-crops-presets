@@ -669,6 +669,31 @@ def restart():
     return {"ok": True}
 
 
+@app.get("/api/version")
+def version():
+    """Which version of the code this app is running (for a newer copy opening)."""
+    return {"code": STARTED_CODE}
+
+
+@app.post("/api/quit")
+def quit_app():
+    """Ends this app (its looks and photos saved first): a newer version is taking over."""
+    def go():
+        time.sleep(0.3)
+        _shut_down()
+    threading.Thread(target=go, daemon=True).start()
+    return {"ok": True}
+
+
+def _shut_down() -> None:
+    """Saves everything and ends the app for good, engine and all (nothing left running unseen)."""
+    try:
+        K.flush()
+        S.save()
+    finally:
+        os._exit(0)
+
+
 @app.get("/api/state")
 def state():
     with S.lock:
@@ -1677,6 +1702,39 @@ def _ours(port: int) -> bool:
         return False
 
 
+def _older(port: int) -> bool:
+    """Is the AllProPhoto running on this port an older version than the code here?"""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/version", timeout=1.5) as r:
+            return float(json.loads(r.read())["code"]) < _code_time() - 1
+    except (OSError, ValueError, KeyError):
+        return True  # from before versions were asked: older
+
+
+def _retire(port: int) -> None:
+    """Asks the older AllProPhoto to save and quit (or ends it, if it is too old to be asked)."""
+    import signal
+    import urllib.request
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/api/quit", data=b"{}",
+                                                      headers={"Content-Type": "application/json"}), timeout=3)
+    except OSError:
+        try:
+            out = subprocess.run(["lsof", "-tiTCP:%d" % port, "-sTCP:LISTEN"], capture_output=True, text=True).stdout
+            for pid in out.split():
+                cmd = subprocess.run(["ps", "-o", "command=", "-p", pid], capture_output=True, text=True).stdout
+                if "AllProPhoto" in cmd or "photo_presets" in cmd or "allprophoto" in cmd:
+                    os.kill(int(pid), signal.SIGTERM)
+        except (OSError, ValueError):
+            pass
+    for _ in range(100):  # until it has gone
+        if _free(port):
+            return
+        time.sleep(0.1)
+
+
 def _free(port: int) -> bool:
     import socket
     with socket.socket() as sock:
@@ -1697,8 +1755,9 @@ def _window(url: str) -> None:
                 NSImage.alloc().initWithContentsOfFile_(str(icon)))
     except Exception:
         pass
-    webview.create_window("AllProPhoto", url, width=1480, height=920, min_size=(980, 620),
-                          background_color="#0b0c0e", text_select=False)
+    win = webview.create_window("AllProPhoto", url, width=1480, height=920, min_size=(980, 620),
+                                background_color="#0b0c0e", text_select=False)
+    win.events.closed += _shut_down  # closing the window quits the whole app, engine included
     webview.start()
 
 
@@ -1712,6 +1771,8 @@ def main() -> int:
             port = int(sys.argv[i + 1])
     window = "--window" in sys.argv
     url = f"http://127.0.0.1:{port}"
+    if _ours(port) and _older(port):  # an older version still running: it makes way for this one
+        _retire(port)
     if _ours(port):  # already running: just open it
         if window:
             _window(url)
@@ -1736,7 +1797,7 @@ def main() -> int:
             break
         time.sleep(0.05)
     _window(url)  # until the window is closed
-    server.should_exit = True
+    _shut_down()
     return 0
 
 
