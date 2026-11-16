@@ -85,7 +85,7 @@ const TEXT_COLORS = ["#ffffff", "#111111", "#f5c443", "#1f2a44", "#e63946", "#86
 const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
 
 let editSig = "";
-const paneSignature = (cur) => `${cur.id}:${cur.ver}:${st.photos.length}:${st.areaSel}:${st.textSel}:${hist.undo.length}:${hist.redo.length}:${st.tool}`;
+const paneSignature = (cur) => `${cur.id}:${cur.ver}:${st.photos.find((p) => p.id === cur.photo)?.edited}:${st.photos.length}:${st.areaSel}:${st.textSel}:${hist.undo.length}:${hist.redo.length}:${st.tool}`;
 
 function renderEdit(cur) {
   const sig = paneSignature(cur);
@@ -115,6 +115,7 @@ function renderEdit(cur) {
       ${tool("poster", "layout", "Poster", "Make it a social post: Game Day, Spotlight, Final Score, MVP")}
       ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player")}
     </div>
+    ${cur.look === "Original" ? `<button class="btn wide on-top" id="e-on-top" ${off(!photo?.edited, "Edit the photo first (light, color, crop, or remove something), then put a look on top of it. Example: lower the player's light, then add Stadium Lights for a night shot.")} title="Pick looks to go on top of this edit (they keep your light, color, crop and removals)">${icon("layers")} Add a look on top of this edit</button>` : ""}
     <div class="section"><h3>Light</h3>${SLIDERS.light.map(sliderRow).join("")}</div>
     <div class="section"><h3>Color</h3>${SLIDERS.color.map(sliderRow).join("")}</div>
     <div class="section"><h3>The look</h3>${SLIDERS.look.map(sliderRow).join("")}
@@ -151,6 +152,11 @@ function bindEditPane(cur, pane) {
   const vals = { ...cur.adjust };
   let dragSnap = null;
   $("#e-undo", pane).onclick = undo;
+  $("#e-on-top", pane)?.addEventListener("click", () => {  // pick looks for the photo as edited
+    st.fromEdits = true; store.set("fromEdits", true);
+    st.activePhoto = cur.photo; st.scope = "one"; st.tab = "looks"; renderTabs();
+    toast("Pick looks, then Make: they go on top of your edit", { small: "\"From: My edit\" is on in the Looks panel" });
+  });
   $("#e-redo", pane).onclick = redo;
   pane.querySelectorAll("[data-tool]").forEach((b) => b.onclick = () => setTool(b.dataset.tool));
   pane.querySelectorAll("input[data-k]").forEach((r) => {

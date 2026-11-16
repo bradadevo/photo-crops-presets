@@ -11,6 +11,7 @@ them (look strength, player and background brightness, warmth) is instant.
 """
 
 import dataclasses
+import hashlib
 import json
 import re
 import time
@@ -273,6 +274,27 @@ class Engine:
         if not edits.edited(r.edits):
             return r.after
         return pipeline.to_image(self.finalize(r, self.base_after(r), texts=texts, removals=False))
+
+    def bake(self, r: "Result", folder: Path) -> Path:
+        """The result made into a photo of its own, to make more looks from: full size, 16-bit,
+        with its light, color, crop and removals in (its text, logos and poster are left off,
+        they belong on the finished picture). Made once for the same edits."""
+        e = {k: v for k, v in (r.edits or {}).items() if k not in ("texts", "logos", "poster")}
+        key = hashlib.sha1(json.dumps([str(r.source), r.crop, r.recipe, e, r.seed], sort_keys=True,
+                                      default=str).encode()).hexdigest()[:12]
+        dest = folder / key / f"{r.source.stem}.tif"  # (named as the photo, so exports are too)
+        if dest.exists():
+            return dest
+        p = self.ready(r.source, r.crop, r.recipe)
+        full, _ = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe, self.library,
+                                       p.scene, r.seed, self.drawings, self.memo_key(r.source, r.crop, r.recipe, p.frame))
+        if edits.edited(e):
+            full = self.finalize(dataclasses.replace(r, edits=e), full, texts=False)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.stem + ".part.tif")
+        images.save_tiff16(np.clip(full, 0, 1), tmp, p.exif)
+        tmp.replace(dest)
+        return dest
 
     def ready(self, path: Path, crop: str, recipe: dict) -> Prepared:
         """The photo ready for this look: cut out if the look needs it, and

@@ -172,7 +172,7 @@ const st = {
   photos: [], slots: [], tasks: [], looks: [], groups: [], sizes: [], prefs: {}, credit: {}, busy: false, left: 0,
   modelsLoaded: false,
   activePhoto: null, current: null, mode: "edit", view: "single", tab: "looks",
-  picked: new Set(), filter: store.get("filter", "All"), query: "",
+  picked: new Set(), filter: store.get("filter", "All"), query: "", fromEdits: store.get("fromEdits", true),
   scope: "one", crop: "none", compare: false, split: 50, fixing: false, fixAdd: true, fixVer: 0,
   reelSource: "kept", reelTask: null, reelOrder: [], reelOut: new Set(),
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
@@ -1077,6 +1077,8 @@ function renderMake() {
   const photos = st.scope === "all" ? st.photos.length : st.scope === "chosen" ? st.chosen.size : 1;
   const n = looks.length * photos;
   const can = st.photos.length && n;
+  const targets = st.scope === "all" ? st.photos : st.scope === "chosen" ? st.photos.filter((p) => st.chosen.has(p.id)) : st.photos.filter((p) => p.id === st.activePhoto);
+  const edited = targets.some((p) => p.edited);
   box.innerHTML = `
     ${many ? `<div class="row"><span>Photos</span><div class="seg full" id="m-scope">
       <button data-v="one" class="${st.scope === "one" ? "on" : ""}" title="Try looks on one photo first">This photo</button>
@@ -1084,6 +1086,10 @@ function renderMake() {
       <button data-v="all" class="${st.scope === "all" ? "on" : ""}" title="Make the looks on every photo">All ${st.photos.length}</button></div></div>` : ""}
     <div class="row"><span>Framing</span><div class="seg full" id="m-crop">${CROPS.map(([v, label]) => `<button data-v="${v}" class="${st.crop === v ? "on" : ""}">${label}</button>`).join("")}</div></div>
     <p class="crop-hint" id="m-crop-hint">${esc(cropHint(st.crop))}</p>
+    ${edited ? `<div class="row"><span>From</span><div class="seg full" id="m-from">
+      <button data-v="1" class="${st.fromEdits ? "on" : ""}" title="The looks go on top of your edits (light, color, crop, removals): darken the player, then add Stadium Lights for a night shot">My edit</button>
+      <button data-v="0" class="${st.fromEdits ? "" : "on"}" title="The looks start from the photo as shot, your edits left out">Original photo</button></div></div>
+      <p class="crop-hint">${st.fromEdits ? (photos > 1 ? "Photos you edited keep your edits under the look." : "The look goes on top of your edits.") : "Your edits are left out of these looks."}</p>` : ""}
     <div class="summary">${looks.length ? `<span><b>${plural(looks.length, "look")}</b> picked · <button id="m-clear">Clear</button></span><span>${n > 0 ? say(estimate(looks, photos)) : ""}</span>`
       : `<span>Tap looks to pick them</span>`}</div>
     <div class="inline"><button class="btn primary big wide" id="m-go" ${off(!can, !st.photos.length ? "Add a photo first: drop one on the window, paste it, or press + at the top left." : "Tap one or more looks above to pick them, then Make.")}>${n ? `Make ${plural(n, "look")}` : "Make looks"}</button>
@@ -1095,6 +1101,7 @@ function renderMake() {
     b.onmouseenter = () => { $("#m-crop-hint").textContent = cropHint(b.dataset.v); previewFrame(b.dataset.v); };
     b.onmouseleave = () => { $("#m-crop-hint").textContent = cropHint(st.crop); previewFrame(null); };
   });
+  box.querySelectorAll("#m-from button").forEach((b) => b.onclick = () => { st.fromEdits = b.dataset.v === "1"; store.set("fromEdits", st.fromEdits); renderMake(); });
   $("#m-clear", box)?.addEventListener("click", () => { st.picked.clear(); store.set("looks", []); renderLooks(); renderMake(); });
   $("#m-go", box).onclick = () => make({ looks: looks.map((l) => l.name) });
   $("#m-random", box).onclick = () => make({ random: 6 });
@@ -1145,7 +1152,9 @@ async function editPhoto(pid = st.activePhoto) {
 
 async function make(what) {
   const photos = st.scope === "all" ? st.photos.map((p) => p.id) : st.scope === "chosen" ? [...st.chosen] : [st.activePhoto];
-  const r = await api("/api/run", { photos, crop: st.crop, ...what });
+  const fromEdits = st.fromEdits && st.photos.some((p) => photos.includes(p.id) && p.edited);
+  if (fromEdits) toast("Putting the looks on top of your edits…", { small: "Your edited photo is saved at full size first" });
+  const r = await api("/api/run", { photos, crop: st.crop, from_edits: fromEdits, ...what });
   if (r.slots?.length) { st.current = r.slots[0]; st.view = "single"; st.compare = false; }
   await refresh();
   $(`#strip [data-key="${r.slots?.[0]}"]`)?.scrollIntoView({ block: "nearest", inline: "start" });

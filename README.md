@@ -272,6 +272,14 @@ nothing made, Undo with nothing to undo...). **Edit** works on any photo:
 with no look made, the photo itself opens for editing (as the look
 **Original**).
 
+**Looks on top of your edits**: edit the photo first (for a night shot, lower
+the player's light), then press **Add a look on top of this edit**, or in the
+Looks panel set **From: My edit**, and pick a look such as Stadium Night. The
+look starts from your edited photo (its light, color, crop and removals; its
+text, logos and poster are left for the finished picture), saved once at full
+size in 16 bits in `~/.cache/photo-crops-presets/edited`. **From: Original
+photo** makes looks from the photo as shot.
+
 **Nothing is lost when you quit**: your photos, the looks made, their edits,
 picks and stars, cut-out fixes and removals are saved as you go (looks at
 preview size in `~/.cache/photo-crops-presets/session-looks`) and are all

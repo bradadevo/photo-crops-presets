@@ -51,6 +51,7 @@ PREFS = (STATE or CONFIG) / "studio.json"
 EXAMPLES = Path("~/.cache/photo-crops-presets/examples").expanduser()  # each look's last picture, for the picker
 WORK = Path(tempfile.mkdtemp(prefix="allprophoto-"))  # songs for reels
 ADDED = (STATE / "added") if STATE else Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted
+EDITED = ADDED.parent / "edited"  # photos as edited, to make more looks on top of the edits
 SESSION = (STATE or CONFIG) / "studio-session.json"  # the photos you are working on, kept for next time
 # the looks made, with their edits, picks and stars, kept for next time (pictures at preview size)
 LOOKS = (STATE / "looks") if STATE else Path("~/.cache/photo-crops-presets/session-looks").expanduser()
@@ -120,6 +121,7 @@ class Slot:
     rating: int = 0
     crop: str = "none"
     cut: bool = False  # the look cuts out the players (once per photo)
+    source: str = ""  # the picture it is made from, when not the photo itself (the photo as edited)
     ai: bool = False  # drawn by the AI models (loaded once per session)
     started: float = 0.0
     extra: float = 0.0  # one-off work in this look's time (getting the photo ready, loading models)
@@ -277,7 +279,7 @@ class Session:
                 spent = time.time() - s.started
                 # running over: a little more, not "nearly done" (which would then jump back up)
                 total += max(whole - spent, 0.15 * whole, 2.0)
-                key = (s.photo, s.crop)
+                key = (s.photo, s.source, s.crop)
                 ready.add(key)
                 cut.add(key)
                 if s.ai:
@@ -292,13 +294,14 @@ class Session:
             if s.state != "wait":
                 continue
             total += s.expect * pace
-            key = (s.photo, s.crop)
+            key = (s.photo, s.source, s.crop)
             p = self.photos.get(s.photo)
-            if p is not None and key not in ready and not E.is_prepared(p.path, s.crop):
+            src = Path(s.source) if s.source else (p.path if p is not None else None)
+            if p is not None and key not in ready and not E.is_prepared(src, s.crop):
                 total += timing.PHOTO_READY * pace
                 ready.add(key)
-            if s.cut and p is not None and key not in cut and not E.is_cut_out(p.path, s.crop):
-                began = self.cutting.get((str(p.path), s.crop))
+            if s.cut and p is not None and key not in cut and not E.is_cut_out(src, s.crop):
+                began = self.cutting.get((str(src), s.crop))
                 whole = timing.cut_out()
                 total += max(whole - (time.time() - began), 0.15 * whole, 2.0) if began else whole
                 cut.add(key)
@@ -591,7 +594,8 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
             name = job.recipe.get("name", "")
             sid = next(S.ids)
             S.slots[sid] = Slot(sid, run, pid, name or "Random look", job.title, timing.seconds(name, job.recipe),
-                                crop=crop, cut=pipeline.needs_cutout(job.recipe), ai=timing.uses_ai(job.recipe))
+                                crop=crop, cut=pipeline.needs_cutout(job.recipe), ai=timing.uses_ai(job.recipe),
+                                source=str(job.path) if job.path != S.photo(pid).path else "")
             slots.append(S.slots[sid])
         order = range(len(jobs))
         if by_photo:
@@ -697,7 +701,7 @@ def _shut_down() -> None:
 @app.get("/api/state")
 def state():
     with S.lock:
-        photos = [{"id": p.id, "name": p.name} for p in S.photos.values()]
+        photos = [{"id": p.id, "name": p.name, "edited": _edited_original(p.id) is not None} for p in S.photos.values()]
         slots = [s.public() for s in S.slots.values()]
         tasks = [t.public() for t in S.tasks.values() if t.state == "running" or time.time() - t.started < 600]
     credit = deliver.Credit.load()
@@ -843,17 +847,23 @@ async def run(req: Request):
     if not pids:
         raise HTTPException(400, "Add a photo first")
     crop = body.get("crop", "none") if body.get("crop") in CROPS else "none"
-    paths = [S.photo(p).path for p in pids]
+    source = {p: S.photo(p).path for p in pids}
+    if body.get("from_edits"):  # on top of the photo as edited (where it has been)
+        for p in pids:
+            slot = _edited_original(p)
+            if slot is not None:
+                source[p] = await asyncio.wrap_future(W.submit(RUN, E.bake, slot.result, EDITED))
+    paths = [source[p] for p in pids]
     if body.get("random"):
         made = E.explore_jobs(paths, int(body["random"]))
-        by_path = {str(S.photo(p).path): p for p in pids}
+        by_path = {str(source[p]): p for p in pids}
         jobs = [(by_path[str(j.path)], j) for j in made]
     else:
         saved = presets.load_all()
         names = [n for n in body.get("looks", []) if n in saved]
         if not names:
             raise HTTPException(400, "Choose at least one look")
-        jobs = [(p, Job(S.photo(p).path, dict(saved[n], name=n), 0)) for n in names for p in pids]
+        jobs = [(p, Job(source[p], dict(saved[n], name=n), 0)) for n in names for p in pids]
         save_prefs({"crop": crop})
         return {"slots": start_run(jobs, crop, by_photo=pids)}
     save_prefs({"crop": crop})
@@ -879,6 +889,18 @@ async def frames(pid: int):
 
 
 ORIGINAL = {"name": "Original", "description": "The photo as shot, to edit as it is", "steps": []}
+
+
+def _edited_original(pid: int) -> "Slot | None":
+    """The photo's own picture, edited (light, color, crop, removals...): to make looks on top of."""
+    with S.lock:
+        for s in S.slots.values():
+            if s.photo == pid and s.look == "Original" and s.state == "done" and s.result is not None:
+                r = s.result
+                e = {k: v for k, v in (r.edits or {}).items() if k not in ("texts", "logos", "poster")}
+                if edits.edited(e) or pipeline.adjusted(r.recipe):
+                    return s
+    return None
 
 
 @app.post("/api/photos/{pid}/original")
