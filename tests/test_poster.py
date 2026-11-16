@@ -41,3 +41,16 @@ def test_poster_edits_change_the_finished_size():
     w, h = edits.final_size(900, 600, e)
     assert abs(w / h - 9 / 16) < 0.01
     assert edits.clean({"poster": {"template": "nope"}}) == {}
+
+
+def test_every_new_layout_draws_its_words_and_keeps_its_size():
+    import numpy as np
+    from photo_presets import poster
+    arr = np.full((400, 300, 3), 0.4, np.float32)
+    matte = np.zeros((400, 300), np.float32)
+    matte[120:380, 100:200] = 1
+    for name in ("name", "goal", "teamcolor", "matchday", "champions"):
+        p = poster.clean({"template": name, "shape": "story"})
+        out = poster.compose(arr, matte, p, None)
+        assert out.shape[:2] == poster.size_for(300, 400, p)[::-1]
+        assert out.max() > 0.8  # its title is drawn

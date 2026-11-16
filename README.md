@@ -272,6 +272,15 @@ nothing made, Undo with nothing to undo...). **Edit** works on any photo:
 with no look made, the photo itself opens for editing (as the look
 **Original**).
 
+**Click what you built to edit it**: a text, a logo or a poster on the
+picture opens its tool with it chosen (a text is ready to type in).
+
+Posters come in nine layouts: Game Day, Spotlight, Final Score, MVP, Name
+Stack (the name three times behind the player), Goal (GOAL behind the scorer,
+their name and the minute), Team Color (the background in the team color, the
+player in full color), Matchday (the opponent on a team-color band, when and
+where below) and Champions (a gold title, the event between gold rules).
+
 **Looks on top of your edits**: edit the photo first (for a night shot, lower
 the player's light), then press **Add a look on top of this edit**, or in the
 Looks panel set **From: My edit**, and pick a look such as Stadium Night. The

@@ -23,6 +23,11 @@ TEMPLATES = {
     "spotlight": "Spotlight",
     "final": "Final Score",
     "mvp": "MVP cover",
+    "name": "Name Stack",
+    "goal": "Goal",
+    "teamcolor": "Team Color",
+    "matchday": "Matchday",
+    "champions": "Champions",
 }
 SHAPES = {"post": 4 / 5, "story": 9 / 16}  # width / height
 DEFAULTS = {
@@ -30,7 +35,13 @@ DEFAULTS = {
     "spotlight": {"title": "LINCOLN", "line": "MIDFIELD", "number": "7"},
     "final": {"title": "FINAL", "home": "PSG", "away": "WEST PARK", "home_score": "3", "away_score": "1"},
     "mvp": {"title": "MVP", "line": "PLAYER OF THE MATCH"},
+    "name": {"title": "LINCOLN", "line": "MIDFIELD  ·  #7"},
+    "goal": {"title": "GOAL", "name": "LINCOLN", "minute": "23'"},
+    "teamcolor": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  U11"},
+    "matchday": {"title": "MATCHDAY", "away": "VS WEST PARK", "line": "SAT 9:00 AM  ·  FIELD 4"},
+    "champions": {"title": "CHAMPIONS", "line": "SPRING CUP 2026"},
 }
+GOLD = (212, 175, 55)
 
 
 def clean(p: dict | None) -> dict | None:
@@ -38,7 +49,7 @@ def clean(p: dict | None) -> dict | None:
         return None
     out = {"template": p["template"], "shape": p.get("shape") if p.get("shape") in SHAPES else "post",
            "color": str(p.get("color", "#1f2a44"))[:9], "logo": str(p.get("logo") or "")[:20]}
-    for k in ("title", "line", "number", "home", "away", "home_score", "away_score"):
+    for k in ("title", "line", "number", "home", "away", "home_score", "away_score", "name", "minute"):
         if k in p or k in DEFAULTS[p["template"]]:
             out[k] = str(p.get(k, DEFAULTS[p["template"]].get(k, "")))[:40]
     return out
@@ -128,6 +139,13 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
     color = np.array(_rgb(p.get("color", "#1f2a44")), np.float32)
     if t == "spotlight":
         out = _spotlight(arr, matte, p, W, H, color, box)
+    elif t in MORE:
+        pic, _ = _cover(arr, W, H, (fx, fy - 0.05))
+        m = None
+        if matte is not None:
+            m, _ = _cover(matte.astype(np.float32), W, H, (fx, fy - 0.05))
+            m = cv2.GaussianBlur(np.clip((m - 0.35) / 0.4, 0, 1), (0, 0), 0.8)[..., None]
+        out = MORE[t](pic.astype(np.float32), m, p, W, H, color, logo is not None)
     else:
         pic, (s, x0, y0) = _cover(arr, W, H, (fx, fy - 0.05))
         m = None
@@ -169,7 +187,9 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
             nf = _fit_font(p.get("away", ""), DEMI, W * 0.28, H * 0.03)
             d.text((W * 0.76, H * 0.82), p.get("away", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
             out = _over(out, lay)
-    if logo is not None:
+    if logo is not None and t in MORE:
+        out = _logo_at(out, logo, W, H, LOGO_AT[t])
+    elif logo is not None:
         lw = int(W * 0.13)
         lh = int(lw * logo.height / logo.width)
         art = logo.resize((lw, lh), Image.LANCZOS)
@@ -241,4 +261,153 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
     if line:
         lf = _font(DEMI, H * 0.026)
         d.text((W / 2, H * 0.935), line + (f"  ·  #{num}" if num else ""), font=lf, fill=(255, 255, 255, 200), anchor="mm")
+    return _over(out, lay)
+
+
+# More layouts --------------------------------------------------------------------------------
+# Each: (picture, its players' matte or None, the poster, W, H, team color, has a logo) -> floats.
+
+def _c255(color, a=255) -> tuple:
+    return tuple(int(c * 255) for c in color) + (a,)
+
+
+def _front(out: np.ndarray, pic: np.ndarray, m) -> np.ndarray:
+    """The players drawn again on top: in front of what was drawn behind them."""
+    return out if m is None else out * (1 - m) + pic * m
+
+
+def _name_stack(pic, m, p, W, H, color, has_logo):
+    """The name three times, big, behind the player: outlined, solid, outlined (an editorial echo)."""
+    out = pic * (1 - _gradient(H, W, 0.0, 0.55, 0.6))
+    out = out * 0.82  # (a touch darker, so the white reads)
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.94, H * 0.17)
+    lay, d = _layer((W, H))
+    step = f.size * 0.92
+    mid = H * 0.36
+    for i, y in enumerate((mid - step, mid, mid + step)):
+        if i == 1:
+            d.text((W / 2, y), title, font=f, fill=(255, 255, 255, 235), anchor="mm")
+        else:
+            d.text((W / 2, y), title, font=f, fill=(255, 255, 255, 0), anchor="mm",
+                   stroke_width=max(2, int(W * 0.0035)), stroke_fill=(255, 255, 255, 150))
+    out = _over(out, _shadowed(lay, H * 0.01, 0.3))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, DEMI, W * (0.6 if has_logo else 0.84), H * 0.032)
+        d.rectangle((W * 0.06, H * 0.905, W * 0.06 + W * 0.012, H * 0.945), fill=_c255(color))
+        d.text((W * 0.06 + W * 0.03, H * 0.925), line, font=lf, fill=(255, 255, 255, 240), anchor="lm")
+    return _over(out, lay)
+
+
+def _goal(pic, m, p, W, H, color, has_logo):
+    """GOAL, huge and outlined behind the scorer; their name and the minute at the bottom."""
+    out = pic * (1 - _gradient(H, W, 0.0, 0.7, 0.5))
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.96, H * 0.3)
+    d.text((W / 2, H * 0.3), title, font=f, fill=_c255(color, 170), anchor="mm",
+           stroke_width=max(3, int(W * 0.005)), stroke_fill=(255, 255, 255, 235))
+    out = _over(out, _shadowed(lay, H * 0.012, 0.35))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    name, minute = p.get("name", ""), p.get("minute", "")
+    nf = _fit_font(name, HEAVY, W * 0.62, H * 0.07)
+    d.text((W * 0.06, H * 0.915), name, font=nf, fill=(255, 255, 255, 250), anchor="ls")
+    if minute:
+        mf = _font(HEAVY, H * 0.04)
+        x0 = W * 0.06 + nf.getlength(name) + W * 0.03
+        tw = mf.getlength(minute)
+        d.rounded_rectangle((x0, H * 0.915 - H * 0.058, x0 + tw + W * 0.04, H * 0.915 - H * 0.004),
+                            radius=H * 0.008, fill=_c255(color))
+        d.text((x0 + W * 0.02, H * 0.915 - H * 0.031), minute, font=mf, fill=(255, 255, 255, 255), anchor="lm")
+    return _over(out, lay)
+
+
+def _team_color(pic, m, p, W, H, color, has_logo):
+    """The background in the team color (a duotone), the player in full color in front of a big name."""
+    lum = (pic[..., 0] * 0.299 + pic[..., 1] * 0.587 + pic[..., 2] * 0.114)[..., None]
+    dark, light = color * 0.25, color + (1 - color) * 0.42
+    tone = dark + (light - dark) * np.clip((lum - 0.05) / 0.85, 0, 1) ** 1.1
+    out = tone * (1 - _gradient(H, W, 0.0, 0.45, 0.62))
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.94, H * 0.22)
+    d.text((W / 2, H * 0.04), title, font=f, fill=(255, 255, 255, 235), anchor="mt")
+    out = _over(out, _shadowed(lay, H * 0.012, 0.3))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lx, lwid = (W * 0.43, W * 0.66) if has_logo else (W / 2, W * 0.86)
+        lf = _fit_font(line, DEMI, lwid, H * 0.032)
+        d.text((lx, H * 0.93), line, font=lf, fill=(255, 255, 255, 240), anchor="mm")
+    return _over(out, lay)
+
+
+def _matchday(pic, m, p, W, H, color, has_logo):
+    """A team-color band at the top (MATCHDAY, the opponent), the player standing in front of it,
+    when and where at the bottom."""
+    out = pic * (1 - _gradient(H, W, 0.0, 0.6, 0.62))
+    lay, d = _layer((W, H))
+    band = (0, H * 0.05, W, H * 0.25)
+    d.rectangle(band, fill=_c255(color, 235))
+    d.rectangle((0, band[3], W, band[3] + max(2, H * 0.004)), fill=(255, 255, 255, 220))
+    out = _over(out, _shadowed(lay, H * 0.012, 0.4))
+    out = _front(out, pic, m)  # the players stand in front of the band; its words in front of them
+    lay, d = _layer((W, H))
+    small = _font(BOLD, H * 0.026)
+    d.text((W * 0.06, H * 0.085), p.get("title", ""), font=small, fill=(255, 255, 255, 215), anchor="lt")
+    away = p.get("away", "")
+    af = _fit_font(away, HEAVY, W * (0.62 if has_logo else 0.88), H * 0.085)
+    d.text((W * 0.06, H * 0.215), away, font=af, fill=(255, 255, 255, 255), anchor="ls")
+    out = _over(out, _shadowed(lay, H * 0.006, 0.45))
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, DEMI, W * 0.86, H * 0.034)
+        d.text((W / 2, H * 0.93), line, font=lf, fill=(255, 255, 255, 240), anchor="mm")
+    return _over(out, lay)
+
+
+def _champions(pic, m, p, W, H, color, has_logo):
+    """CHAMPIONS in gold behind the team, the event between two thin gold rules."""
+    out = pic * (1 - _gradient(H, W, 0.18, 0.78, 0.5))
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.92, H * 0.2)
+    d.text((W / 2, H * 0.035), title, font=f, fill=GOLD + (245,), anchor="mt")
+    out = _over(out, _shadowed(lay, H * 0.012, 0.4))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, DEMI, W * 0.6, H * 0.034)
+        y = H * (0.825 if has_logo else 0.93)
+        half = lf.getlength(line) / 2 + W * 0.03
+        d.text((W / 2, y), line, font=lf, fill=(255, 255, 255, 245), anchor="mm")
+        for x0, x1 in ((W * 0.08, W / 2 - half), (W / 2 + half, W * 0.92)):
+            if x1 > x0:
+                d.rectangle((x0, y - max(1, H * 0.0015), x1, y + max(1, H * 0.0015)), fill=GOLD + (230,))
+    return _over(out, _shadowed(lay, H * 0.008, 0.6))
+
+
+MORE = {"name": _name_stack, "goal": _goal, "teamcolor": _team_color, "matchday": _matchday, "champions": _champions}
+LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "champions": "bc"}
+
+
+def _logo_at(out: np.ndarray, logo: Image.Image, W: int, H: int, where: str) -> np.ndarray:
+    lw = int(W * (0.11 if where == "bc" else 0.13))
+    lh = int(lw * logo.height / logo.width)
+    if where == "band":  # inside the band, at its right
+        lh = min(lh, int(H * 0.14))
+        lw = int(lh * logo.width / logo.height)
+    art = logo.resize((max(1, lw), max(1, lh)), Image.LANCZOS)
+    x, y = {"tl": (W * 0.05, H * 0.035), "tr": (W - lw - W * 0.05, H * 0.035),
+            "br": (W - lw - W * 0.05, H * 0.9 - lh / 2), "band": (W - lw - W * 0.05, H * 0.15 - lh / 2),
+            "bc": (W / 2 - lw / 2, H * 0.955 - lh)}[where]
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    lay.alpha_composite(art, (int(x), int(y)))
     return _over(out, lay)

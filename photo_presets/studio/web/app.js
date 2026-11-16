@@ -457,6 +457,7 @@ function renderViewer() {
     if (st.fixing) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
     paintTexts(cur);
     bindViewer(cur);
+    bindPicks(cur);
   } else if (cur) {
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${cur.photo}/view.jpg" alt="" draggable="false"></div>
         <div class="wait">${cur.state === "failed" ? `<b>${icon("x")}</b><span>This look could not be made</span><small>${esc(cur.error)}</small>`

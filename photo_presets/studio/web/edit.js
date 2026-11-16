@@ -112,7 +112,7 @@ function renderEdit(cur) {
       ${tool("wb", "pipette", "White balance", "Click something white or gray")}
       ${tool("text", "type", "Text", "Add a name, a score or a date (T)")}
       ${tool("logo", "badge", "Logo", "Put your logo on it: a team crest, a sponsor, your own mark")}
-      ${tool("poster", "layout", "Poster", "Make it a social post: Game Day, Spotlight, Final Score, MVP")}
+      ${tool("poster", "layout", "Poster", "Make it a social post: Game Day, Spotlight, MVP, Goal, Matchday, Champions and more")}
       ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player")}
     </div>
     ${cur.look === "Original" ? `<button class="btn wide on-top" id="e-on-top" ${off(!photo?.edited, "Edit the photo first (light, color, crop, or remove something), then put a look on top of it. Example: lower the player's light, then add Stadium Lights for a night shot.")} title="Pick looks to go on top of this edit (they keep your light, color, crop and removals)">${icon("layers")} Add a look on top of this edit</button>` : ""}
@@ -399,6 +399,36 @@ function autoColor(l) {
   for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
   return sum / (d.length / 4) / 255 > 0.62 ? "black" : "white";
 }
+/* Click what you built on the picture (a text, a logo, the poster) and its tool opens with it chosen. */
+function bindPicks(cur) {
+  const box = $("#texts"), f = $("#frame");
+  if (!box || !f) return;
+  box.classList.add("pickable");
+  box.onpointerdown = (e) => {
+    const tx = e.target.closest(".tx"), lg = e.target.closest(".lg");
+    if (!tx && !lg) return;
+    e.preventDefault(); e.stopPropagation();
+    openPart(cur, tx ? "text" : "logo", +(tx ? tx.dataset.i : lg.dataset.li));
+  };
+  if (cur.edits?.poster) {  // the poster's words are part of the picture: a click on it opens the poster
+    f.classList.add("pickable-poster");
+    let wait = null;
+    f.onclick = (e) => {
+      if (st.zoom.on || st.compare || e.target.closest(".tx, .lg, .tag, button")) return;
+      clearTimeout(wait);
+      wait = setTimeout(() => openPart(cur, "poster"), 260);  // (a double-click zooms instead)
+    };
+    f.addEventListener("dblclick", () => clearTimeout(wait));
+  }
+}
+function openPart(cur, tool, i) {
+  if (tool === "text") st.textSel = i;
+  if (tool === "logo") st.logoSel = i;
+  st.tool = null;
+  setTool(tool);
+  if (tool === "text") setTimeout(() => { const ta = $(`.text-in[data-ti="${i}"]`); ta?.focus(); ta?.select(); }, 80);
+}
+
 function bindTexts(cur) {
   const box = $("#texts"), f = $("#frame");
   if (!box) return;
@@ -452,10 +482,18 @@ function dragLogo(cur, el, e, f) {
 
 // Posters ---------------------------------------------------------------------------------------------
 const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], ["spotlight", "Spotlight", "The player breaking out of a card, their number behind"],
-  ["final", "Final Score", "The score on a clean panel"], ["mvp", "MVP", "A cover title behind the player"]];
+  ["final", "Final Score", "The score on a clean panel"], ["mvp", "MVP", "A cover title behind the player"],
+  ["name", "Name Stack", "Their name three times, big, behind them"], ["goal", "Goal", "GOAL behind the scorer, their name and the minute"],
+  ["teamcolor", "Team Color", "The background in your team color, the player in full color"],
+  ["matchday", "Matchday", "The opponent on a team-color band, when and where below"],
+  ["champions", "Champions", "Gold title behind the team, the event below"]];
 const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]], spotlight: [["title", "Name"], ["line", "Position"], ["number", "Number"]],
   final: [["title", "Above the score"], ["home", "Your team"], ["home_score", "Their score"], ["away", "The other team"], ["away_score", "Its score"]],
-  mvp: [["title", "Title"], ["line", "Line under it"]] };
+  mvp: [["title", "Title"], ["line", "Line under it"]],
+  name: [["title", "Name"], ["line", "Line under it"]], goal: [["title", "Title"], ["name", "Scorer"], ["minute", "Minute"]],
+  teamcolor: [["title", "Name or title"], ["line", "Line under it"]],
+  matchday: [["title", "Small title"], ["away", "Opponent"], ["line", "When and where"]],
+  champions: [["title", "Title"], ["line", "The event"]] };
 const TEAM_COLORS = ["#1f2a44", "#0b3d91", "#b3121a", "#0f5f3a", "#5b2a86", "#d97706", "#111111"];
 function posterSection(e) {
   const p = e.poster;
