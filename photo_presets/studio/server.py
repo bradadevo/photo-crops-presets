@@ -484,64 +484,79 @@ def keep_example(name: str, img: Image.Image) -> None:
         pass
 
 
-def _swatch(pid: int, name: str) -> bytes | None:
+def edit_token(pid: int, wanted: bool) -> str:
+    """Which edit of the photo the look previews start from ("" = the photo as shot)."""
+    slot = _edited_original(pid) if wanted else None
+    return f"{slot.id}-{slot.ver}" if slot is not None else ""
+
+
+def _start_from(pid: int, token: str) -> Path:
+    """The picture looks start from: the photo, or the photo as edited (saved once at full size)."""
+    slot = _edited_original(pid) if token else None
+    if slot is None:
+        return S.photo(pid).path
+    return E.bake(slot.result, EDITED)
+
+
+def _swatch(pid: int, name: str, token: str = "") -> bytes | None:
     recipe = presets.load_all().get(name)
     if recipe is None or timing.uses_ai(recipe):
         return None  # the AI looks take 20 s each: shown by their example instead
     recipe = dict(recipe, name=name)
-    path = S.photo(pid).path
+    path = _start_from(pid, token)
     if pipeline.needs_cutout(recipe) and not E.is_cut_out(path, "none"):
         S.cutting.setdefault((str(path), "none"), time.time())
     p = E.ready(path, "none", recipe)
     small = p.image.copy()
     small.thumbnail((SWATCH, SWATCH))
     img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
-    keep_example(name, img)
+    if not token:
+        keep_example(name, img)
     return jpeg(img, quality=84)
 
 
-SWATCHES: dict[tuple[int, str], Future] = {}
+SWATCHES: dict[tuple[int, str, str], Future] = {}
 
 
-def swatch_future(pid: int, name: str) -> Future:
-    key = (pid, name)
+def swatch_future(pid: int, name: str, token: str = "") -> Future:
+    key = (pid, name, token)
     with S.lock:
         fut = SWATCHES.get(key)
         if fut is None or fut.cancelled():
             for k, f in list(SWATCHES.items()):  # another photo's previews: not needed now
-                if k[0] != pid and not f.done():
+                if (k[0] != pid or k[2] != token) and not f.done():
                     f.cancel()
             recipe = presets.load_all().get(name, {})
             slow = pipeline.needs_cutout(recipe) or bool(recipe.get("frame"))  # wait for the cut-out: after the quick ones
-            fut = SWATCHES[key] = W.submit(PREVIEW + slow, _swatch, pid, name)
+            fut = SWATCHES[key] = W.submit(PREVIEW + slow, _swatch, pid, name, token)
         return fut
 
 
-def _try(pid: int, name: str) -> bytes | None:
+def _try(pid: int, name: str, token: str = "") -> bytes | None:
     recipe = presets.load_all().get(name)
     if recipe is None or timing.uses_ai(recipe):
         return None
     recipe = dict(recipe, name=name)
-    p = E.ready(S.photo(pid).path, "none", recipe)
+    p = E.ready(_start_from(pid, token), "none", recipe)
     small = p.image.copy()
     small.thumbnail((TRY, TRY))
     img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
     return jpeg(img, quality=86)
 
 
-TRIES: dict[tuple[int, str], Future] = {}
+TRIES: dict[tuple[int, str, str], Future] = {}
 
 
-def try_future(pid: int, name: str) -> Future:
+def try_future(pid: int, name: str, token: str = "") -> Future:
     """One look tried on at a time: moving to another card drops the one not started."""
-    key = (pid, name)
+    key = (pid, name, token)
     with S.lock:
         for k, f in list(TRIES.items()):
             if k != key and not f.done():
                 f.cancel()
         fut = TRIES.get(key)
         if fut is None or fut.cancelled():
-            fut = TRIES[key] = W.submit(RUN, _try, pid, name)
+            fut = TRIES[key] = W.submit(RUN, _try, pid, name, token)
         return fut
 
 
@@ -701,7 +716,8 @@ def _shut_down() -> None:
 @app.get("/api/state")
 def state():
     with S.lock:
-        photos = [{"id": p.id, "name": p.name, "edited": _edited_original(p.id) is not None} for p in S.photos.values()]
+        photos = [{"id": p.id, "name": p.name, "edited": _edited_original(p.id) is not None,
+                   "edit": edit_token(p.id, True)} for p in S.photos.values()]
         slots = [s.public() for s in S.slots.values()]
         tasks = [t.public() for t in S.tasks.values() if t.state == "running" or time.time() - t.started < 600]
     credit = deliver.Credit.load()
@@ -798,30 +814,32 @@ def photo_image(pid: int, size: str):
 
 @app.post("/api/swatches/{pid}")
 async def swatches(pid: int, req: Request):
-    """{names: [...]}: starts making these looks' cards on the photo, and says which are ready
-    (the page asks again until all are; nothing waits on an open connection)."""
+    """{names: [...], edits: bool}: starts making these looks' cards on the photo (or on the photo
+    as edited), and says which are ready (the page asks again until all are)."""
     S.photo(pid)
+    body = await req.json()
+    token = edit_token(pid, bool(body.get("edits")))
     ready, failed = [], []
-    for name in (await req.json()).get("names", [])[:80]:
-        fut = swatch_future(pid, name)
+    for name in body.get("names", [])[:80]:
+        fut = swatch_future(pid, name, token)
         if fut.done():
             (failed if fut.cancelled() or fut.exception() or fut.result() is None else ready).append(name)
-    return {"ready": ready, "failed": failed}
+    return {"ready": ready, "failed": failed, "token": token}
 
 
 @app.get("/img/swatch/{pid}/{name}.jpg")
-def swatch(pid: int, name: str):
-    fut = SWATCHES.get((pid, name))
+def swatch(pid: int, name: str, e: str = ""):
+    fut = SWATCHES.get((pid, name, e))
     if fut is None or not fut.done() or fut.cancelled() or fut.exception() or fut.result() is None:
         raise HTTPException(404, "Not made yet")
     return picture(fut.result())
 
 
 @app.get("/img/try/{pid}/{name}.jpg")
-async def try_on(pid: int, name: str):
+async def try_on(pid: int, name: str, edits: int = 0):
     S.photo(pid)
     try:
-        data = await asyncio.wrap_future(try_future(pid, name))
+        data = await asyncio.wrap_future(try_future(pid, name, edit_token(pid, bool(edits))))
     except (CancelledError, asyncio.CancelledError):
         raise HTTPException(409, "Another look is being tried on")
     if data is None:

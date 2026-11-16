@@ -198,6 +198,8 @@ async function refresh() {
   const wasActive = st.activePhoto;
   st.photos = data.photos; st.slots = data.slots; st.tasks = data.tasks; st.busy = data.busy; st.left = data.left;
   st.phase = data.phase;
+  // the look previews start from your edit: when it changes, they are made again
+  stalePreviews();
   // time left, smoothed: the finish time moves gently toward each new estimate, and counts down by itself
   if (st.busy && data.left > 0) {
     const target = Date.now() + data.left * 1000;
@@ -979,7 +981,7 @@ function tryOn(name) {
       ov.classList.add("ready");
       ov.prepend(img);
     };
-    img.src = `/img/try/${st.activePhoto}/${enc(name)}.jpg`;
+    img.src = `/img/try/${st.activePhoto}/${enc(name)}.jpg?edits=${editKey() ? 1 : 0}&v=${enc(editKey())}`;
   }, 140);
 }
 function tryOff() {
@@ -1008,11 +1010,20 @@ function gradientFor(name) {
 /* Each quick look is shown on the photo you are working on, as its card scrolls into view
    (the AI looks show their latest picture instead: they take 20 s each). The page asks the
    app every second which are ready, then shows them; "preview coming" until then. */
+/* The edit the look previews start from ("" = the photo as shot): with "From: My edit" on and the photo edited. */
+function stalePreviews() {
+  if (st.tab === "looks" && st.gridEdit !== undefined && st.gridEdit !== editKey()) renderLooks(true);
+}
+function editKey(pid = st.activePhoto) {
+  const p = st.photos.find((x) => x.id === pid);
+  return st.fromEdits && p?.edit ? p.edit : "";
+}
 let swatchObserver = null, swatchWanted = new Map(), swatchTimer = null, swatchSince = 0;
 function watchSwatches() {
   swatchObserver?.disconnect();
   swatchWanted = new Map(); clearTimeout(swatchTimer);
   const pid = st.activePhoto;
+  st.gridEdit = editKey();
   if (!pid) return;
   swatchSince = Date.now();
   swatchObserver = new IntersectionObserver((entries) => {
@@ -1036,7 +1047,7 @@ async function pollSwatches(pid) {
   let r;
   try {  // quietly: a hiccup here just means asking again
     r = await fetch(`/api/swatches/${pid}`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ names: [...swatchWanted.keys()] }) }).then((x) => x.json());
+      body: JSON.stringify({ names: [...swatchWanted.keys()], edits: !!editKey(pid) }) }).then((x) => x.json());
   } catch { r = {}; }
   r.ready ||= []; r.failed ||= [];
   if (st.activePhoto !== pid) return;
@@ -1052,7 +1063,7 @@ async function pollSwatches(pid) {
       img.src = live.src; img.hidden = false; img.classList.remove("loading"); coming.hidden = true;
       card.querySelector(".ph-art")?.remove();
     };
-    live.src = `/img/swatch/${pid}/${enc(name)}.jpg?t=${Date.now()}`;
+    live.src = `/img/swatch/${pid}/${enc(name)}.jpg?e=${enc(r.token || "")}&t=${Date.now()}`;
   }
   if (Date.now() - swatchSince > 5000) {  // the looks that cut out the players wait for the cut-out
     for (const card of swatchWanted.values()) {
@@ -1101,7 +1112,9 @@ function renderMake() {
     b.onmouseenter = () => { $("#m-crop-hint").textContent = cropHint(b.dataset.v); previewFrame(b.dataset.v); };
     b.onmouseleave = () => { $("#m-crop-hint").textContent = cropHint(st.crop); previewFrame(null); };
   });
-  box.querySelectorAll("#m-from button").forEach((b) => b.onclick = () => { st.fromEdits = b.dataset.v === "1"; store.set("fromEdits", st.fromEdits); renderMake(); });
+  box.querySelectorAll("#m-from button").forEach((b) => b.onclick = () => {
+    st.fromEdits = b.dataset.v === "1"; store.set("fromEdits", st.fromEdits); renderMake(); renderLooks(true);
+  });
   $("#m-clear", box)?.addEventListener("click", () => { st.picked.clear(); store.set("looks", []); renderLooks(); renderMake(); });
   $("#m-go", box).onclick = () => make({ looks: looks.map((l) => l.name) });
   $("#m-random", box).onclick = () => make({ random: 6 });
@@ -1176,6 +1189,7 @@ function renderTabs() {
     }
   });
   $("#pane-looks").hidden = st.tab !== "looks";
+  stalePreviews();
   $("#pane-edit").hidden = st.tab !== "edit";
   if (st.tab === "edit") renderEdit(cur);
 }
