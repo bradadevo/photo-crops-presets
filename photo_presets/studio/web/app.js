@@ -44,6 +44,7 @@ const ICONS = {
   message: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
   mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
   photos: '<circle cx="12" cy="7" r="3.2"/><circle cx="12" cy="17" r="3.2"/><circle cx="7" cy="12" r="3.2"/><circle cx="17" cy="12" r="3.2"/>',
+  layout: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 21V9"/>',
   person: '<circle cx="10" cy="8" r="4"/><path d="M3 21v-1a7 7 0 0 1 11-5.7"/><circle cx="17.5" cy="17.5" r="3"/><path d="m21 21-1.4-1.4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   badge: '<path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5z"/><path d="m9 12 2 2 4-4"/>',

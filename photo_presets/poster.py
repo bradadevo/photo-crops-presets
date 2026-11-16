@@ -147,11 +147,12 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
                 out = out * (1 - m) + pic.astype(np.float32) * m
             lay, d = _layer((W, H))
             line = p.get("line", "")
-            if line:
-                lf = _fit_font(line, DEMI, W * 0.86, H * 0.034)
-                d.text((W / 2, H * 0.93), line, font=lf, fill=(255, 255, 255, 235), anchor="mm")
+            if line:  # (with a logo at the right, the line keeps clear of it)
+                lx, lwid = (W * 0.43, W * 0.66) if logo is not None else (W / 2, W * 0.86)
+                lf = _fit_font(line, DEMI, lwid, H * 0.034)
+                d.text((lx, H * 0.93), line, font=lf, fill=(255, 255, 255, 235), anchor="mm")
                 bar_w = min(W * 0.18, lf.getlength(line) * 0.3)
-                d.rectangle((W / 2 - bar_w / 2, H * 0.893, W / 2 + bar_w / 2, H * 0.897), fill=tuple(int(c * 255) for c in color) + (255,))
+                d.rectangle((lx - bar_w / 2, H * 0.893, lx + bar_w / 2, H * 0.897), fill=tuple(int(c * 255) for c in color) + (255,))
             out = _over(out, lay)
         else:  # final score
             out = out * (1 - _gradient(H, W, 0.0, 0.8, 0.45))
@@ -189,9 +190,9 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
     lay, d = _layer((W, H))
     num = p.get("number", "")
     if num:
-        f = _fit_font(num, HEAVY, W * 0.95, H * 0.62)
-        d.text((W / 2, H * 0.36), num, font=f, fill=(255, 255, 255, 34), anchor="mm", stroke_width=max(2, int(W * 0.004)),
-               stroke_fill=(255, 255, 255, 90))
+        f = _fit_font(num, HEAVY, W * 0.5, H * 0.34)  # an outlined number behind the card's top right corner
+        d.text((W * 0.74, H * 0.2), num, font=f, fill=(255, 255, 255, 22), anchor="mm", stroke_width=max(2, int(W * 0.004)),
+               stroke_fill=(255, 255, 255, 110))
     out = _over(out, lay)
     # the card: the picture, cut so the player's head sits at the card's top edge
     cx0, cx1, cy0, cy1 = int(W * 0.09), int(W * 0.91), int(H * 0.2), int(H * 0.8)

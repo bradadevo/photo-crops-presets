@@ -663,3 +663,8 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .chosen-bar b { color: var(--text); }
 .seg.full button { padding: 0 6px; white-space: nowrap; min-width: 0; }
 .seg.full button { overflow: hidden; text-overflow: ellipsis; }
+
+.poster-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.poster-picks button { height: 34px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--muted); font-weight: 600; }
+.poster-picks button:hover { color: var(--text); }
+.poster-picks button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }

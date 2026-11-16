@@ -172,6 +172,14 @@ the tab too). Tools used on the picture itself:
   **Black**. Logos are kept in `~/.config/photo-crops-presets/logos`. The
   export window's **Add my logo** puts one in a corner of every picture that
   has none placed, sized to each export size.
+- **Poster**: makes the picture a social post, as a team's designer would.
+  **Game Day** (the player in front of a big title, a line under it), **Spotlight**
+  (team color, their number behind, the picture in a card with the player
+  breaking out over its edge, their name and position), **Final Score** (the
+  score on a clean panel) and **MVP** (a cover title behind the player); as an
+  Instagram **Post** (4:5) or **Story** (9:16), in a team color, with your logo.
+  The player's cut-out gives the depth: they are drawn again in front of the
+  title or the card. Works on any look, and the export is full size.
 - **Cut-out**: fix what counts as the player (below).
 
 Sliders:

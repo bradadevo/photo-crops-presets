@@ -112,6 +112,7 @@ function renderEdit(cur) {
       ${tool("wb", "pipette", "White balance", "Click something white or gray")}
       ${tool("text", "type", "Text", "Add a name, a score or a date (T)")}
       ${tool("logo", "badge", "Logo", "Put your logo on it: a team crest, a sponsor, your own mark")}
+      ${tool("poster", "layout", "Poster", "Make it a social post: Game Day, Spotlight, Final Score, MVP")}
       ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player")}
     </div>
     <div class="section"><h3>Light</h3>${SLIDERS.light.map(sliderRow).join("")}</div>
@@ -129,6 +130,7 @@ function renderEdit(cur) {
       <div class="slider"><label>Size</label><output>${Math.round(t.size * 100)}</output><input type="range" data-size-of="${i}" min="0.02" max="0.2" step="0.005" value="${t.size}"></div>
       <div class="swatches" data-color-of="${i}">${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>` : ""}
       </div>`).join("")}</div>` : ""}
+    ${st.tool === "poster" || e.poster ? posterSection(e) : ""}
     ${st.tool === "logo" || (e.logos || []).length ? logoSection(e) : ""}
     <div class="inline"><button class="btn" id="e-reset" title="Back to the look as it was made">Reset all</button>
       ${same > 1 ? `<button class="btn" id="e-all" style="flex:1" title="These light, color and look settings on every picture in this look">${icon("copy")} Use on all ${same}</button>` : ""}</div>
@@ -223,6 +225,7 @@ function bindEditPane(cur, pane) {
     }, 400);
   });
   bindLogoSection(cur, pane);
+  bindPosterSection(cur, pane);
   // text
   pane.querySelectorAll(".text-in").forEach((ta) => {
     const i = +ta.dataset.ti;
@@ -299,6 +302,9 @@ function setTool(tool) {
   st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null;
   st.brush.strokes = []; st.brush.points = []; st.brush.preview = null;
   if (tool === "text" && st.tool === "text" && !(cur.edits?.texts || []).length) { addText(cur); }
+  if (tool === "poster" && st.tool === "poster" && !cur.edits?.poster) {  // a first layout, to start from
+    changeEdits(cur, (ed) => { ed.poster = { template: "gameday", shape: "post", color: "#1f2a44", logo: st.kit?.[0]?.id || "" }; });
+  }
   if (tool === "logo" && st.tool === "logo" && st.kit?.length === 1 && !(cur.edits?.logos || []).length) {
     // one logo in the kit: on it goes, bottom right (drag it, or pick a corner)
     const k = st.kit[0], [x, y] = cornerPlace("br", 0.18, k.width / k.height, cur.width, cur.height);
@@ -330,6 +336,7 @@ function renderTool(v, cur) {
     wb: `<span class="title"><b>White balance</b><span>Click something that should be white or gray</span></span><span class="sep"></span><button data-done>Cancel</button>`,
     text: `<span class="title"><b>Text</b><span>Drag to place it · type in the panel</span></span><span class="sep"></span><button data-add-text>${icon("plus")} Add text</button><button data-done>Done</button>`,
     logo: `<span class="title"><b>Logo</b><span>Pick one in the panel · drag it to place it</span></span><span class="sep"></span><button data-done>Done</button>`,
+    poster: `<span class="title"><b>Poster</b><span>Pick a layout and type its words in the panel</span></span><span class="sep"></span><button data-done>Done</button>`,
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
       ${t === "text" || t === "logo" ? `<div class="texts" id="texts"></div>` : ""}</div>
@@ -435,6 +442,53 @@ function dragLogo(cur, el, e, f) {
     el.onpointermove = null; f.classList.remove("snap-x");
     if (moved) changeEdits(slotById(cur.id), (ed) => { ed.logos[i].x = pos.x; ed.logos[i].y = pos.y; }, { keepPane: true });
   };
+}
+
+// Posters ---------------------------------------------------------------------------------------------
+const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], ["spotlight", "Spotlight", "The player breaking out of a card, their number behind"],
+  ["final", "Final Score", "The score on a clean panel"], ["mvp", "MVP", "A cover title behind the player"]];
+const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]], spotlight: [["title", "Name"], ["line", "Position"], ["number", "Number"]],
+  final: [["title", "Above the score"], ["home", "Your team"], ["home_score", "Their score"], ["away", "The other team"], ["away_score", "Its score"]],
+  mvp: [["title", "Title"], ["line", "Line under it"]] };
+const TEAM_COLORS = ["#1f2a44", "#0b3d91", "#b3121a", "#0f5f3a", "#5b2a86", "#d97706", "#111111"];
+function posterSection(e) {
+  const p = e.poster;
+  return `<div class="section"><h3>Poster</h3>
+    <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
+    ${p ? `<div class="seg full small" id="pp-shape"><button data-v="post" class="${p.shape === "post" ? "on" : ""}" title="Instagram post, 4:5">Post</button><button data-v="story" class="${p.shape === "story" ? "on" : ""}" title="Instagram story or reel cover, 9:16">Story</button></div>
+      ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><input class="field poster-in" data-pk="${k}" value="${esc(p[k] ?? "")}"></div>`).join("")}
+      <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
+      ${(st.kit || []).length ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
+        <button class="kit-logo${!p.logo ? " on" : ""}" data-v="" title="No logo">${icon("x")}</button>${st.kit.map((k) => `<button class="kit-logo${p.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>` : ""}
+      <button class="btn ghost" id="pp-off">${icon("trash")} No poster</button>` : ""}
+  </div>`;
+}
+function bindPosterSection(cur, pane) {
+  const s0 = () => slotById(cur.id);
+  const set = (fn) => changeEdits(s0(), (ed) => { ed.poster ||= { template: "gameday", shape: "post", color: "#1f2a44" }; fn(ed.poster); });
+  pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => set((p) => {
+    const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || "") };
+    for (const k of Object.keys(p)) delete p[k];
+    Object.assign(p, keep, { template: b.dataset.poster });
+  }));
+  pane.querySelectorAll("#pp-shape button").forEach((b) => b.onclick = () => set((p) => { p.shape = b.dataset.v; }));
+  pane.querySelectorAll("#pp-color button").forEach((b) => b.onclick = () => set((p) => { p.color = b.dataset.v; }));
+  pane.querySelectorAll("#pp-logo button").forEach((b) => b.onclick = () => set((p) => { p.logo = b.dataset.v; }));
+  $("#pp-off", pane)?.addEventListener("click", () => { st.tool = null; changeEdits(s0(), (ed) => { delete ed.poster; }); });
+  pane.querySelectorAll(".poster-in").forEach((inp) => {
+    let snap = null, timer = null;
+    inp.onfocus = () => { snap = snapshot(s0()); };
+    inp.oninput = () => {
+      const s = s0(), e2 = clone(s.edits);
+      e2.poster[inp.dataset.pk] = inp.value;
+      clearTimeout(timer);
+      timer = setTimeout(async () => { updateSlot(await api(`/api/slots/${cur.id}/edit`, { edits: e2 }), { keepPane: true }); }, 450);
+    };
+    inp.onblur = () => setTimeout(() => {
+      if (snap && JSON.stringify(snap.edits) !== JSON.stringify(s0().edits)) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(s0()) });
+      snap = null;
+    }, 600);
+  });
 }
 
 // The brand kit and the logos on this picture ------------------------------------------------------
