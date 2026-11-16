@@ -577,7 +577,7 @@ function logoSection(e) {
     <div class="kit kit-drop" id="kit"><span class="kit-title">Your logos <small>· click one to put it on</small></span>
       <div class="kit-grid">${kit.map((k) => `<button class="kit-logo" data-kit="${k.id}" title="${esc(k.name)}: put it on this picture"><img src="/img/logo/${enc(k.id)}/original.png" alt="${esc(k.name)}">
         <span class="kit-x" data-kit-del="${k.id}" title="Delete it from your logos">${icon("x")}</span></button>`).join("")}
-        <label class="kit-add" title="Add a logo: a PNG, a JPG on white, or a screenshot of it">${icon("plus")}<span>Add a logo</span><input type="file" id="kit-file" accept="image/*" hidden></label></div>
+        <label class="kit-add" title="Add a logo: SVG, PDF, Illustrator (.ai), PNG, a JPG on white, or a screenshot of it">${icon("plus")}<span>Add a logo</span><input type="file" id="kit-file" accept="image/*,.svg,.svgz,.pdf,.ai,image/svg+xml,application/pdf" hidden></label></div>
       <small class="notes">Drop a logo here. Any background is taken away: a JPG on white or a screenshot works.</small></div>
   </div>`;
 }

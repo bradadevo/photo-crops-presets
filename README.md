@@ -272,6 +272,14 @@ nothing made, Undo with nothing to undo...). **Edit** works on any photo:
 with no look made, the photo itself opens for editing (as the look
 **Original**).
 
+**Logos in any format**: SVG, PDF and Illustrator (.ai, saved with PDF
+compatibility) are drawn sharp at full size with their clear background kept;
+PNG, JPG (on white), HEIC and screenshots work too. Add one with **Add a
+logo**, or drop the file anywhere on the window (an SVG, PDF or .ai file
+always goes to your logos). EPS cannot be read: save it as SVG, PDF or PNG.
+**White** and **Black** make a two-tone crest one color, its light parts
+see-through (its letters show the picture), not a blank shape.
+
 **Click what you built to edit it**: a text, a logo or a poster on the
 picture opens its tool with it chosen (a text is ready to type in).
 

@@ -1335,9 +1335,14 @@ window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", async (e) => {
   e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
   if (e.target.closest?.("#r-order")) return;
-  if (e.target.closest?.(".kit-drop")) { const f = e.dataTransfer?.files?.[0]; if (f) addLogo(f); return; }
-  upload(await droppedFiles(e.dataTransfer));
+  if (e.target.closest?.(".kit-drop")) { for (const f of e.dataTransfer?.files || []) await addLogo(f); return; }
+  const files = await droppedFiles(e.dataTransfer);
+  const drawn = files.filter((f) => DRAWN.test(f.name));  // an SVG, PDF or Illustrator file is a logo, never a photo
+  for (const f of drawn) await addLogo(f);
+  const photos = files.filter((f) => !DRAWN.test(f.name));
+  if (photos.length || !drawn.length) upload(photos);
 });
+const DRAWN = /\.(svgz?|pdf|ai)$/i;
 /* Files dropped on the page, the photos inside dropped folders included. */
 async function droppedFiles(dt) {
   const entries = [...(dt?.items || [])].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);

@@ -1627,13 +1627,12 @@ def logos():
 
 @app.post("/api/logos")
 async def add_logo(file: UploadFile = File(...)):
-    """A logo for the kit, any way it comes (PNG, JPG on white, a screenshot): made transparent."""
+    """A logo for the kit, any way it comes (PNG, JPG on white, SVG, PDF, Illustrator, a screenshot): made transparent."""
     data = await file.read()
     try:
-        img = Image.open(io.BytesIO(data))
-        img.load()
-    except Exception:
-        raise HTTPException(400, "That file is not a picture. Use a PNG, JPG or screenshot of the logo.")
+        img = await asyncio.to_thread(brand.open_any, data, file.filename or "")
+    except brand.NotALogo as e:
+        raise HTTPException(400, str(e))
     name = Path(file.filename or "Logo").stem[:40]
     return await asyncio.wrap_future(W.submit(FIX, brand.add, E.brand_dir, img, name))
 

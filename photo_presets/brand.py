@@ -13,6 +13,7 @@ as it is.
 
 from __future__ import annotations
 
+import io
 import json
 import uuid
 from pathlib import Path
@@ -57,6 +58,64 @@ def flat(logo: Image.Image) -> bool:
     lum = a[..., 0] * 0.299 + a[..., 1] * 0.587 + a[..., 2] * 0.114
     colors = a[..., :3][solid]
     return float(lum[solid].std()) < 0.12 and float(colors.std(0).max()) < 0.12  # one shade and one color
+
+
+DRAW_EDGE = 2400  # a drawn logo (SVG, PDF, Illustrator) is made this many pixels on its long side
+FILE_TYPES = ".png .jpg .jpeg .webp .heic .gif .tif .tiff .bmp .svg .svgz .pdf .ai"
+
+
+class NotALogo(ValueError):
+    """The file could not be read as a logo (the message says what to use instead)."""
+
+
+def open_any(data: bytes, filename: str = "") -> Image.Image:
+    """A logo file of any kind as a picture: a photo format, or drawn (SVG, PDF, an Illustrator
+    .ai file), drawn sharp at DRAW_EDGE px with its clear background kept."""
+    name = filename.lower()
+    head = data[:512].lstrip()
+    if name.endswith((".svg", ".svgz")) or head.startswith((b"<svg", b"<?xml")) or data[:2] == b"\x1f\x8b" and name.endswith(".svgz"):
+        return _svg(data)
+    if data[:5] == b"%PDF-" or name.endswith((".pdf", ".ai")):
+        return _pdf(data)
+    if name.endswith((".eps", ".ps")) or data[:4] in (b"%!PS", b"\xc5\xd0\xd3\xc6"):
+        raise NotALogo("EPS files can't be read here. Save the logo as SVG, PDF or PNG and add that instead.")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        return img
+    except Exception:
+        raise NotALogo("That file is not a picture. Use a PNG, JPG, SVG, PDF or a screenshot of the logo.")
+
+
+def _svg(data: bytes) -> Image.Image:
+    import gzip
+    import resvg_py
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    text = data.decode("utf-8", errors="replace")
+    try:
+        first = bytes(resvg_py.svg_to_bytes(svg_string=text))
+        w, h = Image.open(io.BytesIO(first)).size
+        side = {"width": DRAW_EDGE} if w >= h else {"height": DRAW_EDGE}
+        img = Image.open(io.BytesIO(bytes(resvg_py.svg_to_bytes(svg_string=text, **side))))
+        img.load()
+    except Exception:
+        raise NotALogo("That SVG could not be drawn. Try saving it again as SVG, PDF or PNG.")
+    return img.convert("RGBA")
+
+
+def _pdf(data: bytes) -> Image.Image:
+    import pypdfium2 as pdfium
+    try:
+        doc = pdfium.PdfDocument(data)
+        page = doc[0]
+        w, h = page.get_size()
+        scale = DRAW_EDGE / max(w, h, 1)
+        img = page.render(scale=scale, fill_color=(0, 0, 0, 0), may_draw_forms=True).to_pil()
+    except Exception:
+        raise NotALogo("That PDF or Illustrator file could not be read. Save it with PDF compatibility on, "
+                       "or as SVG or PNG.")
+    return img.convert("RGBA")
 
 
 def transparent(img: Image.Image) -> Image.Image:
@@ -123,7 +182,13 @@ def colored(logo: Image.Image, color: str) -> Image.Image:
         return logo
     a = np.asarray(logo)
     v = 255 if color == "white" else 0
-    out = np.dstack([np.full(a.shape[:2] + (3,), v, np.uint8), a[..., 3]])
+    alpha = a[..., 3]
+    if not flat(logo):  # a crest with its own light and dark parts: one color, the light parts see-through
+        rgb = a[..., :3].astype(np.float32) / 255
+        lum = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
+        ink = np.clip((0.82 - lum) / 0.5, 0, 1)  # dark ink solid, white parts clear
+        alpha = (alpha.astype(np.float32) * ink + 0.5).astype(np.uint8)
+    out = np.dstack([np.full(a.shape[:2] + (3,), v, np.uint8), alpha])
     return Image.fromarray(out, "RGBA")
 
 
