@@ -272,6 +272,15 @@ nothing made, Undo with nothing to undo...). **Edit** works on any photo:
 with no look made, the photo itself opens for editing (as the look
 **Original**).
 
+**Every word on a poster can be changed or taken off**: click a word on the
+picture (GAME DAY, the line under it, a number) and its box opens in the
+panel with the words selected, ready to type over. The **×** beside a box
+takes those words off the poster (type in the box to put them back).
+
+**The edit panel puts what you are working on first**: with Poster, Text,
+Logo or Adjust a part open, its options sit right under the tools, and
+Light, Color and The look fold away below (click one to open it).
+
 **Logos in any format**: SVG, PDF and Illustrator (.ai, saved with PDF
 compatibility) are drawn sharp at full size with their clear background kept;
 PNG, JPG (on white), HEIC and screenshots work too. Add one with **Add a

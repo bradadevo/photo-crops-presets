@@ -46,7 +46,7 @@ function updateSlot(s, { keepPane = false } = {}) {
       pre.onload = () => { if (img.isConnected) img.src = pre.src; };
       pre.src = slotImg(s);
       viewerSig = viewerSignature(s);
-      paintTexts(s);
+      paintTexts(s); paintWords(s);
     } else { viewerSig = ""; renderViewer(); }
   }
   if (keepPane) editSig = paneSignature(s);
@@ -101,6 +101,26 @@ function renderEdit(cur) {
   const sliderRow = ([k, label, min, max, stp, unit, cls]) => `<div class="slider"><label for="e-${k}" title="${esc(SLIDER_TIPS[k])} · double-click the slider to reset">${label}</label>
     <output for="e-${k}">${fmtVal(k, val(k), unit)}</output><input type="range" class="${cls || ""}" id="e-${k}" data-k="${k}" data-unit="${unit || ""}" min="${min}" max="${max}" step="${stp}" value="${val(k)}"></div>`;
   const tool = (id, ic, label, tip) => `<button class="tool${st.tool === id || (id === "cutout" && st.fixing) ? " on" : ""}" data-tool="${id}" title="${esc(tip)}">${icon(ic)}<span>${label}</span></button>`;
+  // what you are working on (a poster, text, a logo, a part) sits right under the tools;
+  // the light and color sliders fold away meanwhile (open them any time)
+  const parts = {
+    area: areas.length ? `<div class="section"><h3>Parts adjusted</h3>${areas.map((ar, i) => `<div class="item${st.areaSel === i ? " on" : ""}" data-area="${i}">
+      <div class="item-head"><button class="item-name" data-pick-area="${i}">${icon("target")} Part ${i + 1}</button><button class="icon-btn" data-del-area="${i}" title="Remove this adjustment">${icon("trash")}</button></div>
+      ${st.areaSel === i ? [["exposure", "Brightness", -2, 2, 0.05, "ev"], ["warmth", "Warmth", -1.5, 1.5, 0.05, "", "warm"], ["saturation", "Saturation", -1, 1, 0.05]].map(([k, label, min, max, stp, unit, cls]) =>
+        `<div class="slider"><label>${label}</label><output>${fmtVal(k, ar[k] || 0, unit)}</output><input type="range" class="${cls || ""}" data-area-k="${k}" data-i="${i}" data-unit="${unit || ""}" min="${min}" max="${max}" step="${stp}" value="${ar[k] || 0}"></div>`).join("") : ""}
+      </div>`).join("")}</div>` : "",
+    poster: st.tool === "poster" || e.poster ? posterSection(e) : "",
+    text: texts.length ? `<div class="section"><h3>Text</h3>${texts.map((t, i) => `<div class="item${st.textSel === i ? " on" : ""}" data-text="${i}">
+      <div class="item-head"><textarea class="field text-in" rows="1" data-ti="${i}" placeholder="Type here">${esc(t.text)}</textarea><button class="icon-btn" data-del-text="${i}" title="Remove this text">${icon("trash")}</button></div>
+      ${st.textSel === i ? `<div class="seg full small" data-style-of="${i}">${TEXT_STYLES.map(([v, l]) => `<button data-v="${v}" class="${t.style === v ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="slider"><label>Size</label><output>${Math.round(t.size * 100)}</output><input type="range" data-size-of="${i}" min="0.02" max="0.2" step="0.005" value="${t.size}"></div>
+      <div class="swatches" data-color-of="${i}">${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>` : ""}
+      </div>`).join("")}</div>` : "",
+    logo: st.tool === "logo" || (e.logos || []).length ? logoSection(e) : "",
+  };
+  const design = ["poster", "text", "logo", "area"].includes(st.tool) && parts[st.tool] ? st.tool : null;
+  const group = (g, title, body) => `<details class="group" data-g="${g}" ${(st.openGroups[g] ?? !design) ? "open" : ""}>
+    <summary><h3>${title}</h3>${icon("chev")}</summary><div class="group-body">${body}</div></details>`;
   pane.innerHTML = `
     <div class="edit-head"><div class="adj-title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span></div>
       <div class="undo-btns"><button class="icon-btn" id="e-undo" title="Undo (⌘Z)" ${off(!hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.")}>${icon("undo")}</button>
@@ -116,23 +136,12 @@ function renderEdit(cur) {
       ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player")}
     </div>
     ${cur.look === "Original" ? `<button class="btn wide on-top" id="e-on-top" ${off(!photo?.edited, "Edit the photo first (light, color, crop, or remove something), then put a look on top of it. Example: lower the player's light, then add Stadium Lights for a night shot.")} title="Pick looks to go on top of this edit (they keep your light, color, crop and removals)">${icon("layers")} Add a look on top of this edit</button>` : ""}
-    <div class="section"><h3>Light</h3>${SLIDERS.light.map(sliderRow).join("")}</div>
-    <div class="section"><h3>Color</h3>${SLIDERS.color.map(sliderRow).join("")}</div>
-    <div class="section"><h3>The look</h3>${SLIDERS.look.map(sliderRow).join("")}
-      <label class="toggle"><input type="checkbox" id="e-fill" ${a.auto_fill ? "checked" : ""}><span><b>Auto fill light</b><small>Lifts a backlit or shaded player</small></span></label></div>
-    ${areas.length ? `<div class="section"><h3>Parts adjusted</h3>${areas.map((ar, i) => `<div class="item${st.areaSel === i ? " on" : ""}" data-area="${i}">
-      <div class="item-head"><button class="item-name" data-pick-area="${i}">${icon("target")} Part ${i + 1}</button><button class="icon-btn" data-del-area="${i}" title="Remove this adjustment">${icon("trash")}</button></div>
-      ${st.areaSel === i ? [["exposure", "Brightness", -2, 2, 0.05, "ev"], ["warmth", "Warmth", -1.5, 1.5, 0.05, "", "warm"], ["saturation", "Saturation", -1, 1, 0.05]].map(([k, label, min, max, stp, unit, cls]) =>
-        `<div class="slider"><label>${label}</label><output>${fmtVal(k, ar[k] || 0, unit)}</output><input type="range" class="${cls || ""}" data-area-k="${k}" data-i="${i}" data-unit="${unit || ""}" min="${min}" max="${max}" step="${stp}" value="${ar[k] || 0}"></div>`).join("") : ""}
-      </div>`).join("")}</div>` : ""}
-    ${texts.length ? `<div class="section"><h3>Text</h3>${texts.map((t, i) => `<div class="item${st.textSel === i ? " on" : ""}" data-text="${i}">
-      <div class="item-head"><textarea class="field text-in" rows="1" data-ti="${i}" placeholder="Type here">${esc(t.text)}</textarea><button class="icon-btn" data-del-text="${i}" title="Remove this text">${icon("trash")}</button></div>
-      ${st.textSel === i ? `<div class="seg full small" data-style-of="${i}">${TEXT_STYLES.map(([v, l]) => `<button data-v="${v}" class="${t.style === v ? "on" : ""}">${l}</button>`).join("")}</div>
-      <div class="slider"><label>Size</label><output>${Math.round(t.size * 100)}</output><input type="range" data-size-of="${i}" min="0.02" max="0.2" step="0.005" value="${t.size}"></div>
-      <div class="swatches" data-color-of="${i}">${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>` : ""}
-      </div>`).join("")}</div>` : ""}
-    ${st.tool === "poster" || e.poster ? posterSection(e) : ""}
-    ${st.tool === "logo" || (e.logos || []).length ? logoSection(e) : ""}
+    ${design ? `<div class="working">${parts[design]}</div>` : ""}
+    ${group("light", "Light", SLIDERS.light.map(sliderRow).join(""))}
+    ${group("color", "Color", SLIDERS.color.map(sliderRow).join(""))}
+    ${group("look", "The look", SLIDERS.look.map(sliderRow).join("") + `
+      <label class="toggle"><input type="checkbox" id="e-fill" ${a.auto_fill ? "checked" : ""}><span><b>Auto fill light</b><small>Lifts a backlit or shaded player</small></span></label>`)}
+    ${Object.entries(parts).filter(([k, html]) => k !== design && html).map(([, html]) => html).join("")}
     <div class="inline"><button class="btn" id="e-reset" title="Back to the look as it was made">Reset all</button>
       ${same > 1 ? `<button class="btn" id="e-all" style="flex:1" title="These light, color and look settings on every picture in this look">${icon("copy")} Use on all ${same}</button>` : ""}</div>
     <div class="section"><h3>This photo</h3><div class="actions">
@@ -147,6 +156,8 @@ function renderEdit(cur) {
         <span>Keep the ${[e.poster && "poster", texts.length && "text", (e.logos || []).length && "logo"].filter(Boolean).join(", ")} in it<small>Make it on any photo: the same design, with that photo in it</small></span></label>` : ""}</div>
     ${cur.notes?.length ? `<p class="notes">${esc(cur.notes.join("; "))}</p>` : ""}`;
   paintIcons(pane);
+  pane.querySelectorAll("details.group").forEach((d) => d.ontoggle = () => { st.openGroups[d.dataset.g] = d.open; });
+  if (st.focusField && Date.now() < st.focusField.until) { const k = st.focusField.k; requestAnimationFrame(() => focusPosterField(k)); }
   bindEditPane(cur, pane);
 }
 
@@ -308,7 +319,7 @@ function setTool(tool) {
   if (!cur || cur.state !== "done") return;
   if (tool === "cutout") { st.fixing = !st.fixing; st.tool = null; }
   else { st.tool = st.tool === tool ? null : tool; st.fixing = false; }
-  st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null;
+  st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null; st.openGroups = {};
   st.brush.strokes = []; st.brush.points = []; st.brush.preview = null;
   if (tool === "text" && st.tool === "text" && !(cur.edits?.texts || []).length) { addText(cur); }
   if (tool === "poster" && st.tool === "poster" && !cur.edits?.poster) {  // a first layout, to start from
@@ -353,6 +364,7 @@ function renderTool(v, cur) {
   paintIcons(v);
   if (base) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
+  if (t === "poster") paintWords(cur);
   $("[data-done]", v).onclick = () => setTool(t);
   $("[data-add-text]", v)?.addEventListener("click", () => addText(slotById(cur.id)));
   const f = $("#frame");
@@ -413,16 +425,53 @@ function bindPicks(cur) {
     e.preventDefault(); e.stopPropagation();
     openPart(cur, tx ? "text" : "logo", +(tx ? tx.dataset.i : lg.dataset.li));
   };
+  paintWords(cur);
   if (cur.edits?.poster) {  // the poster's words are part of the picture: a click on it opens the poster
     f.classList.add("pickable-poster");
     let wait = null;
     f.onclick = (e) => {
-      if (st.zoom.on || st.compare || e.target.closest(".tx, .lg, .tag, button")) return;
+      if (st.zoom.on || st.compare || e.target.closest(".tx, .lg, .tag, button, .pw")) return;
+      if (st.focusField && Date.now() < st.focusField.until) return;  // (a word was just clicked)
       clearTimeout(wait);
       wait = setTimeout(() => openPart(cur, "poster"), 260);  // (a double-click zooms instead)
     };
     f.addEventListener("dblclick", () => clearTimeout(wait));
   }
+}
+/* The poster's words on the picture: click one to type over it (its box in the panel opens, selected). */
+let wordsKey = "", wordsList = [], wordsTurn = 0;
+async function paintWords(cur) {
+  const turn = ++wordsTurn;  // only the latest call draws them
+  const f = $("#frame"), p = cur.edits?.poster;
+  f?.querySelectorAll(".pwords").forEach((x) => x.remove());
+  if (!f || !p || st.compare || st.zoom.on || st.fixing) return;
+  const key = JSON.stringify(p);
+  if (key !== wordsKey) {
+    try { wordsList = (await api("/api/poster/words", { poster: p, logo: !!p.logo })).words; wordsKey = key; } catch { return; }
+  }
+  if (turn !== wordsTurn || !f.isConnected || slotById(st.current)?.id !== cur.id) return;
+  f.querySelectorAll(".pwords").forEach((x) => x.remove());
+  const box = document.createElement("div");
+  box.className = "pwords" + (st.tool === "poster" ? " live" : "");
+  const label = (k) => (POSTER_FIELDS[p.template] || []).find(([x]) => x === k)?.[1] || "Text";
+  box.innerHTML = wordsList.map((w) => `<button class="pw" data-pk="${w.key}" aria-label="Edit ${esc(label(w.key))}"
+    style="left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%"></button>`).join("");
+  f.appendChild(box);
+  box.querySelectorAll(".pw").forEach((b) => b.onpointerdown = (e) => {  // (on press: the layer may be drawn again before release)
+    e.preventDefault(); e.stopPropagation();
+    const k = b.dataset.pk;
+    st.focusField = { k, until: Date.now() + 2500 };  // (kept through the panel being drawn again)
+    if (st.tool !== "poster") openPart(cur, "poster");
+    focusPosterField(k);
+  });
+}
+document.addEventListener("input", (e) => { if (e.target.classList?.contains("poster-in")) st.focusField = null; });
+function focusPosterField(k) {
+  const inp = $(`.poster-in[data-pk="${k}"]`);
+  if (!inp) return;
+  inp.scrollIntoView({ block: "center", behavior: "smooth" });
+  inp.focus(); inp.select();
+  inp.closest(".fld")?.classList.add("flash"); setTimeout(() => inp.closest(".fld")?.classList.remove("flash"), 900);
 }
 function openPart(cur, tool, i) {
   if (tool === "text") st.textSel = i;
@@ -503,7 +552,8 @@ function posterSection(e) {
   return `<div class="section"><h3>Poster</h3>
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
     ${p ? `<div class="seg full small" id="pp-shape"><button data-v="post" class="${p.shape === "post" ? "on" : ""}" title="Instagram post, 4:5">Post</button><button data-v="story" class="${p.shape === "story" ? "on" : ""}" title="Instagram story or reel cover, 9:16">Story</button></div>
-      ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><input class="field poster-in" data-pk="${k}" value="${esc(p[k] ?? "")}"></div>`).join("")}
+      ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><div class="fld-row"><input class="field poster-in" data-pk="${k}" value="${esc(p[k] ?? "")}" placeholder="(left off the poster)">
+        <button class="icon-btn" data-clear-pk="${k}" title="Take this off the poster" ${off(!(p[k] ?? ""), "It's already off the poster: type in the box to put it back.")}>${icon("x")}</button></div></div>`).join("")}
       <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
       ${(st.kit || []).length ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
         <button class="kit-logo${!p.logo ? " on" : ""}" data-v="" title="No logo">${icon("x")}</button>${st.kit.map((k) => `<button class="kit-logo${p.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>` : ""}
@@ -537,6 +587,11 @@ function bindPosterSection(cur, pane) {
     await fetch(`/api/posters/${enc(b.dataset.delPoster)}`, { method: "DELETE" });
     await loadPosters(); editSig = ""; renderTabs();
     toast(`Deleted the saved poster “${b.dataset.delPoster}”`);
+  });
+  pane.querySelectorAll("[data-clear-pk]").forEach((b) => b.onclick = () => {
+    const k = b.dataset.clearPk;
+    set((p) => { p[k] = ""; });
+    toast("Taken off the poster", { small: "Type in its box to put it back, or ⌘Z" });
   });
   pane.querySelectorAll("#pp-shape button").forEach((b) => b.onclick = () => set((p) => { p.shape = b.dataset.v; }));
   pane.querySelectorAll("#pp-color button").forEach((b) => b.onclick = () => set((p) => { p.color = b.dataset.v; }));

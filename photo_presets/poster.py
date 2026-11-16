@@ -129,6 +129,37 @@ def _gradient(h: int, w: int, top: float, bottom: float, start: float) -> np.nda
     return np.repeat(g, w, axis=1)[..., None]
 
 
+import threading
+
+_NOTE = threading.local()  # while words() runs (on this thread): where each word was drawn
+
+
+def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
+    """Draws one of the poster's words (nothing when it was cleared), noting where (for words())."""
+    if not text:
+        return
+    d.text(xy, text, font=font, **kw)
+    boxes = getattr(_NOTE, "boxes", None)
+    if boxes is not None:
+        boxes.append((key, d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))))
+
+
+def words(p: dict, has_logo: bool = False) -> list[dict]:
+    """Where each of the poster's words sits ({"key", "x0", "y0", "x1", "y1"}, shares of the poster):
+    for clicking a word on the picture to edit it. The layout does not depend on the picture."""
+    p = clean(p)
+    if p is None:
+        return []
+    W, H = size_for(800, 1000, p)
+    logo = Image.new("RGBA", (10, 10), (255, 255, 255, 255)) if has_logo else None
+    _NOTE.boxes = found = []
+    try:
+        compose(np.zeros((H, W, 3), np.float32), None, p, logo)
+    finally:
+        _NOTE.boxes = None
+    return [{"key": k, "x0": b[0] / W, "y0": b[1] / H, "x1": b[2] / W, "y1": b[3] / H} for k, b in found]
+
+
 def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np.ndarray:
     """The poster (floats 0-1). arr: the picture as edited; matte: its players (0-1, same size);
     logo: an RGBA logo (or None)."""
@@ -159,7 +190,7 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
             f = _fit_font(title, HEAVY, W * 0.92, H * (0.24 if t == "gameday" else 0.3))
             lay, d = _layer((W, H))
             ty = H * 0.035
-            d.text((W / 2, ty), title, font=f, fill=(255, 255, 255, 240), anchor="mt")
+            _say(d, "title", (W / 2, ty), title, font=f, fill=(255, 255, 255, 240), anchor="mt")
             out = _over(out, _shadowed(lay, H * 0.012, 0.35))
             if m is not None:  # the player in front of the title
                 out = out * (1 - m) + pic.astype(np.float32) * m
@@ -168,7 +199,7 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
             if line:  # (with a logo at the right, the line keeps clear of it)
                 lx, lwid = (W * 0.43, W * 0.66) if logo is not None else (W / 2, W * 0.86)
                 lf = _fit_font(line, DEMI, lwid, H * 0.034)
-                d.text((lx, H * 0.93), line, font=lf, fill=(255, 255, 255, 235), anchor="mm")
+                _say(d, "line", (lx, H * 0.93), line, font=lf, fill=(255, 255, 255, 235), anchor="mm")
                 bar_w = min(W * 0.18, lf.getlength(line) * 0.3)
                 d.rectangle((lx - bar_w / 2, H * 0.893, lx + bar_w / 2, H * 0.897), fill=tuple(int(c * 255) for c in color) + (255,))
             out = _over(out, lay)
@@ -178,14 +209,14 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
             panel = (W * 0.07, H * 0.72, W * 0.93, H * 0.92)
             d.rounded_rectangle(panel, radius=H * 0.018, fill=(10, 12, 16, 170))
             d.rectangle((panel[0], panel[1], panel[0] + W * 0.012, panel[3]), fill=tuple(int(c * 255) for c in color) + (255,))
-            d.text((W / 2, H * 0.745), p.get("title", "FINAL"), font=_font(BOLD, H * 0.026), fill=(255, 255, 255, 200), anchor="mt")
+            _say(d, "title", (W / 2, H * 0.745), p.get("title", "FINAL"), font=_font(BOLD, H * 0.026), fill=(255, 255, 255, 200), anchor="mt")
             sf = _font(HEAVY, H * 0.075)
-            score = f"{p.get('home_score', '')}  –  {p.get('away_score', '')}"
-            d.text((W / 2, H * 0.82), score, font=sf, fill=(255, 255, 255, 255), anchor="mm")
+            score = f"{p.get('home_score', '')}  –  {p.get('away_score', '')}" if (p.get("home_score") or p.get("away_score")) else ""
+            _say(d, "home_score", (W / 2, H * 0.82), score, font=sf, fill=(255, 255, 255, 255), anchor="mm")
             nf = _fit_font(p.get("home", ""), DEMI, W * 0.28, H * 0.03)
-            d.text((W * 0.24, H * 0.82), p.get("home", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
+            _say(d, "home", (W * 0.24, H * 0.82), p.get("home", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
             nf = _fit_font(p.get("away", ""), DEMI, W * 0.28, H * 0.03)
-            d.text((W * 0.76, H * 0.82), p.get("away", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
+            _say(d, "away", (W * 0.76, H * 0.82), p.get("away", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
             out = _over(out, lay)
     if logo is not None and t in MORE:
         out = _logo_at(out, logo, W, H, LOGO_AT[t])
@@ -211,7 +242,7 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
     num = p.get("number", "")
     if num:
         f = _fit_font(num, HEAVY, W * 0.5, H * 0.34)  # an outlined number behind the card's top right corner
-        d.text((W * 0.74, H * 0.2), num, font=f, fill=(255, 255, 255, 22), anchor="mm", stroke_width=max(2, int(W * 0.004)),
+        _say(d, "number", (W * 0.74, H * 0.2), num, font=f, fill=(255, 255, 255, 22), anchor="mm", stroke_width=max(2, int(W * 0.004)),
                stroke_fill=(255, 255, 255, 110))
     out = _over(out, lay)
     # the card: the picture, cut so the player's head sits at the card's top edge
@@ -256,11 +287,11 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
     lay, d = _layer((W, H))
     title = p.get("title", "")
     f = _fit_font(title, HEAVY, W * 0.84, H * 0.075)
-    d.text((W / 2, H * 0.875), title, font=f, fill=(255, 255, 255, 255), anchor="mm")
+    _say(d, "title", (W / 2, H * 0.875), title, font=f, fill=(255, 255, 255, 255), anchor="mm")
     line = p.get("line", "")
     if line:
         lf = _font(DEMI, H * 0.026)
-        d.text((W / 2, H * 0.935), line + (f"  ·  #{num}" if num else ""), font=lf, fill=(255, 255, 255, 200), anchor="mm")
+        _say(d, "line", (W / 2, H * 0.935), line + (f"  ·  #{num}" if num else ""), font=lf, fill=(255, 255, 255, 200), anchor="mm")
     return _over(out, lay)
 
 
@@ -287,9 +318,9 @@ def _name_stack(pic, m, p, W, H, color, has_logo):
     mid = H * 0.36
     for i, y in enumerate((mid - step, mid, mid + step)):
         if i == 1:
-            d.text((W / 2, y), title, font=f, fill=(255, 255, 255, 235), anchor="mm")
+            _say(d, "title", (W / 2, y), title, font=f, fill=(255, 255, 255, 235), anchor="mm")
         else:
-            d.text((W / 2, y), title, font=f, fill=(255, 255, 255, 0), anchor="mm",
+            _say(d, "title", (W / 2, y), title, font=f, fill=(255, 255, 255, 0), anchor="mm",
                    stroke_width=max(2, int(W * 0.0035)), stroke_fill=(255, 255, 255, 150))
     out = _over(out, _shadowed(lay, H * 0.01, 0.3))
     out = _front(out, pic, m)
@@ -298,7 +329,7 @@ def _name_stack(pic, m, p, W, H, color, has_logo):
     if line:
         lf = _fit_font(line, DEMI, W * (0.6 if has_logo else 0.84), H * 0.032)
         d.rectangle((W * 0.06, H * 0.905, W * 0.06 + W * 0.012, H * 0.945), fill=_c255(color))
-        d.text((W * 0.06 + W * 0.03, H * 0.925), line, font=lf, fill=(255, 255, 255, 240), anchor="lm")
+        _say(d, "line", (W * 0.06 + W * 0.03, H * 0.925), line, font=lf, fill=(255, 255, 255, 240), anchor="lm")
     return _over(out, lay)
 
 
@@ -308,21 +339,21 @@ def _goal(pic, m, p, W, H, color, has_logo):
     lay, d = _layer((W, H))
     title = p.get("title", "")
     f = _fit_font(title, HEAVY, W * 0.96, H * 0.3)
-    d.text((W / 2, H * 0.3), title, font=f, fill=_c255(color, 170), anchor="mm",
+    _say(d, "title", (W / 2, H * 0.3), title, font=f, fill=_c255(color, 170), anchor="mm",
            stroke_width=max(3, int(W * 0.005)), stroke_fill=(255, 255, 255, 235))
     out = _over(out, _shadowed(lay, H * 0.012, 0.35))
     out = _front(out, pic, m)
     lay, d = _layer((W, H))
     name, minute = p.get("name", ""), p.get("minute", "")
     nf = _fit_font(name, HEAVY, W * 0.62, H * 0.07)
-    d.text((W * 0.06, H * 0.915), name, font=nf, fill=(255, 255, 255, 250), anchor="ls")
+    _say(d, "name", (W * 0.06, H * 0.915), name, font=nf, fill=(255, 255, 255, 250), anchor="ls")
     if minute:
         mf = _font(HEAVY, H * 0.04)
         x0 = W * 0.06 + nf.getlength(name) + W * 0.03
         tw = mf.getlength(minute)
         d.rounded_rectangle((x0, H * 0.915 - H * 0.058, x0 + tw + W * 0.04, H * 0.915 - H * 0.004),
                             radius=H * 0.008, fill=_c255(color))
-        d.text((x0 + W * 0.02, H * 0.915 - H * 0.031), minute, font=mf, fill=(255, 255, 255, 255), anchor="lm")
+        _say(d, "minute", (x0 + W * 0.02, H * 0.915 - H * 0.031), minute, font=mf, fill=(255, 255, 255, 255), anchor="lm")
     return _over(out, lay)
 
 
@@ -335,7 +366,7 @@ def _team_color(pic, m, p, W, H, color, has_logo):
     lay, d = _layer((W, H))
     title = p.get("title", "")
     f = _fit_font(title, HEAVY, W * 0.94, H * 0.22)
-    d.text((W / 2, H * 0.04), title, font=f, fill=(255, 255, 255, 235), anchor="mt")
+    _say(d, "title", (W / 2, H * 0.04), title, font=f, fill=(255, 255, 255, 235), anchor="mt")
     out = _over(out, _shadowed(lay, H * 0.012, 0.3))
     out = _front(out, pic, m)
     lay, d = _layer((W, H))
@@ -343,7 +374,7 @@ def _team_color(pic, m, p, W, H, color, has_logo):
     if line:
         lx, lwid = (W * 0.43, W * 0.66) if has_logo else (W / 2, W * 0.86)
         lf = _fit_font(line, DEMI, lwid, H * 0.032)
-        d.text((lx, H * 0.93), line, font=lf, fill=(255, 255, 255, 240), anchor="mm")
+        _say(d, "line", (lx, H * 0.93), line, font=lf, fill=(255, 255, 255, 240), anchor="mm")
     return _over(out, lay)
 
 
@@ -359,16 +390,16 @@ def _matchday(pic, m, p, W, H, color, has_logo):
     out = _front(out, pic, m)  # the players stand in front of the band; its words in front of them
     lay, d = _layer((W, H))
     small = _font(BOLD, H * 0.026)
-    d.text((W * 0.06, H * 0.085), p.get("title", ""), font=small, fill=(255, 255, 255, 215), anchor="lt")
+    _say(d, "title", (W * 0.06, H * 0.085), p.get("title", ""), font=small, fill=(255, 255, 255, 215), anchor="lt")
     away = p.get("away", "")
     af = _fit_font(away, HEAVY, W * (0.62 if has_logo else 0.88), H * 0.085)
-    d.text((W * 0.06, H * 0.215), away, font=af, fill=(255, 255, 255, 255), anchor="ls")
+    _say(d, "away", (W * 0.06, H * 0.215), away, font=af, fill=(255, 255, 255, 255), anchor="ls")
     out = _over(out, _shadowed(lay, H * 0.006, 0.45))
     lay, d = _layer((W, H))
     line = p.get("line", "")
     if line:
         lf = _fit_font(line, DEMI, W * 0.86, H * 0.034)
-        d.text((W / 2, H * 0.93), line, font=lf, fill=(255, 255, 255, 240), anchor="mm")
+        _say(d, "line", (W / 2, H * 0.93), line, font=lf, fill=(255, 255, 255, 240), anchor="mm")
     return _over(out, lay)
 
 
@@ -378,7 +409,7 @@ def _champions(pic, m, p, W, H, color, has_logo):
     lay, d = _layer((W, H))
     title = p.get("title", "")
     f = _fit_font(title, HEAVY, W * 0.92, H * 0.2)
-    d.text((W / 2, H * 0.035), title, font=f, fill=GOLD + (245,), anchor="mt")
+    _say(d, "title", (W / 2, H * 0.035), title, font=f, fill=GOLD + (245,), anchor="mt")
     out = _over(out, _shadowed(lay, H * 0.012, 0.4))
     out = _front(out, pic, m)
     lay, d = _layer((W, H))
@@ -387,7 +418,7 @@ def _champions(pic, m, p, W, H, color, has_logo):
         lf = _fit_font(line, DEMI, W * 0.6, H * 0.034)
         y = H * (0.825 if has_logo else 0.93)
         half = lf.getlength(line) / 2 + W * 0.03
-        d.text((W / 2, y), line, font=lf, fill=(255, 255, 255, 245), anchor="mm")
+        _say(d, "line", (W / 2, y), line, font=lf, fill=(255, 255, 255, 245), anchor="mm")
         for x0, x1 in ((W * 0.08, W / 2 - half), (W / 2 + half, W * 0.92)):
             if x1 > x0:
                 d.rectangle((x0, y - max(1, H * 0.0015), x1, y + max(1, H * 0.0015)), fill=GOLD + (230,))

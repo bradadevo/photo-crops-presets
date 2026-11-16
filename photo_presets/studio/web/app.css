@@ -687,3 +687,23 @@ h4.sub small { text-transform: none; letter-spacing: 0; margin-left: 6px; font-w
 .chip-x button:hover { background: var(--accent-soft); }
 .chip-x .x { padding: 6px 7px; color: var(--faint); border-left: 1px solid var(--line-2); }
 .chip-x .x svg { width: 12px; height: 12px; }
+/* the poster's words on the picture: click one to type over it */
+.pwords { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.pwords .pw { position: absolute; pointer-events: auto; background: none; border: 0; padding: 0; cursor: text; border-radius: 4px; }
+.pwords .pw:hover, .pwords.live .pw:hover { outline: 1.5px dashed rgba(255, 255, 255, .85); outline-offset: 3px; }
+.pwords.live .pw { outline: 1px dashed rgba(255, 255, 255, .35); outline-offset: 3px; }
+.fld-row { display: flex; gap: 6px; align-items: center; }
+.fld-row .field { flex: 1; }
+.fld.flash .field { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .2s; }
+/* the edit panel: what you are working on first, the sliders in groups that fold away */
+.working { margin: 4px 0 6px; padding: 2px 12px 10px; border: 1px solid var(--accent); border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.working > .section { border-top: 0; margin-top: 0; }
+details.group { border-top: 1px solid var(--line); }
+details.group > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 12px 0 8px; }
+details.group > summary::-webkit-details-marker { display: none; }
+details.group > summary h3 { margin: 0; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); }
+details.group > summary svg { width: 14px; height: 14px; color: var(--faint); transition: transform .15s; }
+details.group:not([open]) > summary svg { transform: rotate(-90deg); }
+details.group > summary:hover h3, details.group > summary:hover svg { color: var(--text); }
+.group-body { padding-bottom: 8px; }

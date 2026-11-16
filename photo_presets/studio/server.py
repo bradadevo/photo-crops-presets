@@ -1310,6 +1310,13 @@ def saved_posters() -> list[dict]:
         return []
 
 
+@app.post("/api/poster/words")
+async def poster_words(req: Request):
+    """{poster, logo}: where each of its words sits (shares), for clicking one on the picture."""
+    body = await req.json()
+    return {"words": await asyncio.to_thread(poster.words, body.get("poster") or {}, bool(body.get("logo")))}
+
+
 @app.get("/api/posters")
 def list_posters():
     return {"posters": [{"name": p["name"], "about": ", ".join(design_words(p["design"]))} for p in saved_posters()]}

@@ -177,7 +177,7 @@ const st = {
   reelSource: "kept", reelTask: null, reelOrder: [], reelOut: new Set(),
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
   tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [], points: [], order: [] }, areaSel: null, textSel: null,
-  show: "all", kit: [], logoSel: null,
+  show: "all", kit: [], logoSel: null, openGroups: {},
   player: null, finding: false, railShow: "all", chosen: new Set(),
 };
 const slotById = (id) => st.slots.find((s) => s.id === id);

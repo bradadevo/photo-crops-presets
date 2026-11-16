@@ -54,3 +54,13 @@ def test_every_new_layout_draws_its_words_and_keeps_its_size():
         out = poster.compose(arr, matte, p, None)
         assert out.shape[:2] == poster.size_for(300, 400, p)[::-1]
         assert out.max() > 0.8  # its title is drawn
+
+
+def test_each_poster_word_can_be_found_even_when_asked_at_once():
+    from concurrent.futures import ThreadPoolExecutor
+    from photo_presets import poster
+    with ThreadPoolExecutor(8) as pool:
+        found = list(pool.map(lambda _: poster.words({"template": "gameday"}), range(16)))
+    assert all([w["key"] for w in f] == ["title", "line"] for f in found)
+    assert poster.words({"template": "gameday", "line": ""})[0]["key"] == "title"  # a word taken off is not there
+    assert len(poster.words({"template": "gameday", "line": ""})) == 1
