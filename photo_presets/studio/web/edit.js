@@ -395,7 +395,7 @@ function renderTool(v, cur) {
     wb: `<span class="title"><b>White balance</b><span>Click something that should be white or gray</span></span><span class="sep"></span><button data-done>Cancel</button>`,
     text: `<span class="title"><b>Text</b><span>Drag to place it · type in the panel</span></span><span class="sep"></span><button data-add-text>${icon("plus")} Add text</button><button data-done>Done</button>`,
     logo: `<span class="title"><b>Logo</b><span>Pick one in the panel · drag it to place it</span></span><span class="sep"></span><button data-done>Done</button>`,
-    poster: `<span class="title"><b>Poster</b><span>Pick a layout and type its words in the panel</span></span><span class="sep"></span><button data-done>Done</button>`,
+    poster: `<span class="title"><b>Poster</b><span>${cur.edits?.poster?.template === "custom" ? "Drag a piece to move it · its corner resizes it · arrows nudge" : "Click a word to change it · or pick a layout in the panel"}</span></span><span class="sep"></span><button data-done>Done</button>`,
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
       ${t === "text" || t === "logo" ? `<div class="texts" id="texts"></div>` : ""}</div>
@@ -490,6 +490,7 @@ async function paintWords(cur) {
   }
   if (turn !== wordsTurn || !f.isConnected || slotById(st.current)?.id !== cur.id) return;
   f.querySelectorAll(".pwords").forEach((x) => x.remove());
+  if (p.template === "custom") return paintPieces(cur, f, wordsList);
   const box = document.createElement("div");
   box.className = "pwords" + (st.tool === "poster" ? " live" : "");
   const label = (k) => (POSTER_FIELDS[p.template] || []).find(([x]) => x === k)?.[1] || "Text";
@@ -577,7 +578,8 @@ const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], 
   ["name", "Name Stack", "Their name three times, big, behind them"], ["goal", "Goal", "GOAL behind the scorer, their name and the minute"],
   ["teamcolor", "Team Color", "The background in your team color, the player in full color"],
   ["matchday", "Matchday", "The opponent on a team-color band, when and where below"],
-  ["champions", "Champions", "Gold title behind the team, the event below"]];
+  ["champions", "Champions", "Gold title behind the team, the event below"],
+  ["custom", "Custom ✦", "Your own: move, resize and restyle every piece (starts from the layout you are on)"]];
 const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]], spotlight: [["title", "Name"], ["line", "Position"], ["number", "Number"]],
   final: [["title", "Above the score"], ["home", "Your team"], ["home_score", "Their score"], ["away", "The other team"], ["away_score", "Its score"]],
   mvp: [["title", "Title"], ["line", "Line under it"]],
@@ -595,6 +597,7 @@ function posterSection(e) {
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
     ${p ? `<div class="fld"><label>Shape <small class="faint">· what you see is what's exported</small></label><div class="shape-picks" id="pp-shape">${POSTER_SHAPES.map(([v, l, sub, w, h]) => `<button data-v="${v}" class="${p.shape === v ? "on" : ""}" title="${esc(sub)}"><i style="aspect-ratio:${w}/${h}"></i><b>${l}</b><small>${esc(sub)}</small></button>`).join("")}</div></div>
       <div class="slider"><label title="Make every word and banner smaller or bigger (they already fit the shape you pick)">Words and banners size</label><output>${Math.round((p.size || 1) * 100)}%</output><input type="range" id="pp-size" min="0.6" max="1.5" step="0.05" value="${p.size || 1}"></div>
+      ${p.template === "custom" ? customSection(p) : `<button class="btn wide" id="pp-customize" title="Make this layout your own: every word, panel and band becomes a piece you can move, resize and restyle">${icon("layout")} Customize this layout</button>`}
       ${p.template === "spotlight" ? `<div class="fld"><label>Number</label><div class="seg full small" id="pp-numstyle">
         <button data-v="badge" class="${(p.number_style || "badge") === "badge" ? "on" : ""}" title="A solid badge on the card's corner, in front">Badge</button>
         <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
@@ -604,7 +607,7 @@ function posterSection(e) {
         ${st.colorPk === k ? `<div class="swatches word-colors" data-word-colors="${k}"><button data-v="" class="auto${p.colors?.[k] ? "" : " on"}" title="As the layout has it" aria-label="As the layout has it">A</button>${WORD_COLORS.map((c) => `<button data-v="${c}" class="${p.colors?.[k] === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}
           <label class="pick-own" title="Any color"><input type="color" data-own-color="${k}" value="${p.colors?.[k] || "#ffffff"}"></label></div>` : ""}</div>`).join("")}
       <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
-      ${(st.kit || []).length ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
+      ${(st.kit || []).length && p.template !== "custom" ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
         <button class="kit-logo${!p.logo ? " on" : ""}" data-v="" title="No logo">${icon("x")}</button>${st.kit.map((k) => `<button class="kit-logo${p.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>` : ""}
       <div class="inline save-poster"><input class="field" id="pp-name" placeholder="Name this poster">
         <button class="btn" id="pp-save" title="Save this poster (layout, words, text, logo) to put any picture into it">${icon("save")} Save poster</button></div>
@@ -615,8 +618,19 @@ function posterSection(e) {
 function bindPosterSection(cur, pane) {
   const s0 = () => slotById(cur.id);
   const set = (fn) => changeEdits(s0(), (ed) => { ed.poster ||= { template: "gameday", shape: "post", color: "#1f2a44" }; fn(ed.poster); });
+  const customize = async () => {  // the layout you are on, as pieces you can move and restyle
+    const now = s0().edits?.poster;
+    if (!now || now.template === "custom") return;
+    const r = await api("/api/poster/customize", { poster: now });
+    st.pieceSel = null;
+    await changeEdits(s0(), (ed) => { ed.poster = r.poster; });
+    toast("Your own layout now", { small: "Drag any piece on the picture; its corner resizes it. Add more above." });
+  };
+  $("#pp-customize", pane)?.addEventListener("click", customize);
+  bindCustom(cur, pane, set);
   pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => {
     if (s0().edits?.poster?.template === b.dataset.poster) return;  // the layout you are on: its words stay
+    if (b.dataset.poster === "custom") return customize();
     set((p) => {
       const words = Object.fromEntries((POSTER_FIELDS[p.template] || []).map(([k]) => [k, p[k] ?? ""]));
       const kept = { ...(p.kept || {}), [p.template]: words };  // what you typed, for coming back to this layout

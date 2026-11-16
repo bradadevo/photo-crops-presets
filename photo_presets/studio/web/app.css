@@ -734,3 +734,25 @@ details.group > summary:hover h3, details.group > summary:hover svg { color: var
 .grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background .12s; }
 .grip:hover::after, .grip.dragging::after { background: var(--accent); width: 2px; left: 3.5px; }
 body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+/* the custom poster */
+.add-pieces { display: flex; flex-wrap: wrap; gap: 6px; }
+.add-pieces .chip-btn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line-2); border-radius: 8px; padding: 5px 9px; }
+.add-pieces .chip-btn svg { width: 12px; height: 12px; }
+.pieces { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.piece-row { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 4px 2px 2px; background: var(--panel-2); }
+.piece-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.piece-row .pick { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: center; background: none; border: 0; padding: 6px 8px; cursor: pointer; text-align: left; }
+.piece-row .kind { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; flex: none; }
+.piece-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.piece-row .behind { margin-left: auto; font-size: 10.5px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 5px; }
+.piece-row .icon-btn { width: 24px; height: 24px; font-size: 10px; }
+.piece-props { margin: 6px 0 10px; padding: 10px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.piece-props .seg { margin: 8px 0; }
+.piece-props .sub-label { display: block; margin-top: 8px; font-size: 11px; color: var(--faint); }
+.piece-acts { margin-top: 10px; }
+.pieces-layer .pc { position: absolute; pointer-events: auto; cursor: move; border-radius: 3px; }
+.pieces-layer .pc:hover { outline: 1.5px dashed rgba(255, 255, 255, .85); outline-offset: 2px; }
+.pieces-layer.live .pc { outline: 1px dashed rgba(255, 255, 255, .35); outline-offset: 2px; }
+.pieces-layer .pc.sel { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
+.pc-h { position: absolute; right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 50%; background: #fff;
+  border: 2px solid var(--accent); cursor: nwse-resize; box-shadow: 0 1px 4px rgba(0,0,0,.5); }

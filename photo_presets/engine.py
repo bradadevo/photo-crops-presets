@@ -264,7 +264,7 @@ class Engine:
                 if m is not None:
                     m = edits.geometry(cv2.resize(m, (w0, h0), interpolation=cv2.INTER_LINEAR), e)
                 logo = brand.load(self.brand_dir, e["poster"].get("logo") or "") if e["poster"].get("logo") else None
-                out = poster.compose(out, m, e["poster"], logo)
+                out = poster.compose(out, m, e["poster"], logo, lambda lid: brand.load(self.brand_dir, lid) if lid else None)
         if texts:  # (and logos: drawn on top like text)
             out = edits.draw_texts(out, e.get("texts"))
             out = brand.draw(out, e.get("logos"), self.brand_dir)

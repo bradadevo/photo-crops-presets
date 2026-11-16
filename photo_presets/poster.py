@@ -28,6 +28,7 @@ TEMPLATES = {
     "teamcolor": "Team Color",
     "matchday": "Matchday",
     "champions": "Champions",
+    "custom": "Custom",
 }
 SHAPES = {"post": 4 / 5, "square": 1.0, "story": 9 / 16, "wide": 16 / 9}  # width / height
 SIZE_RANGE = (0.6, 1.5)  # the words and banners: smaller or bigger than the layout's own
@@ -41,6 +42,7 @@ DEFAULTS = {
     "teamcolor": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  U11"},
     "matchday": {"title": "MATCHDAY", "away": "VS WEST PARK", "line": "SAT 9:00 AM  ·  FIELD 4"},
     "champions": {"title": "CHAMPIONS", "line": "SPRING CUP 2026"},
+    "custom": {},
 }
 GOLD = (212, 175, 55)
 
@@ -72,6 +74,14 @@ def clean(p: dict | None) -> dict | None:
             for t, w in (p.get("kept") or {}).items() if t in TEMPLATES and isinstance(w, dict)}
     if kept:
         out["kept"] = kept  # the words typed for the other layouts: back when you switch back
+    if p["template"] == "custom":  # your own layout: its pieces and its fades
+        from photo_presets import custom_poster
+        out["elements"] = custom_poster.clean(p.get("elements"))
+        for k, d in (("fade_top", 0.35), ("fade_bottom", 0.55)):
+            try:
+                out[k] = round(float(np.clip(float(p.get(k, d)), 0, 0.9)), 3)
+            except (TypeError, ValueError):
+                out[k] = d
     if p["template"] == "spotlight":
         out["number_style"] = p.get("number_style") if p.get("number_style") in NUMBER_STYLES else "badge"
     return out
@@ -195,10 +205,11 @@ def words(p: dict, has_logo: bool = False) -> list[dict]:
     return [{"key": k, "x0": b[0] / W, "y0": b[1] / H, "x1": b[2] / W, "y1": b[3] / H} for k, b in found]
 
 
-def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np.ndarray:
+def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos=None) -> np.ndarray:
     """The poster (floats 0-1). arr: the picture as edited; matte: its players (0-1, same size);
-    logo: an RGBA logo (or None)."""
+    logo: an RGBA logo (or None); logos: a logo by its id (for a custom poster's logo pieces)."""
     _NOTE.colors = p.get("colors")
+    _NOTE.logos = logos
     try:
         return _compose(arr, matte, p, logo)
     finally:
@@ -226,6 +237,16 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
     color = np.array(_rgb(p.get("color", "#1f2a44")), np.float32)
     if t == "spotlight":
         out = _spotlight(arr, matte, p, W, H, color, box)
+    elif t == "custom":
+        from photo_presets import custom_poster
+        pic, _ = _cover(arr, W, H, (fx, fy - 0.05))
+        m = None
+        if matte is not None:
+            m, _ = _cover(matte.astype(np.float32), W, H, (fx, fy - 0.05))
+            m = cv2.GaussianBlur(np.clip((m - 0.35) / 0.4, 0, 1), (0, 0), 0.8)[..., None]
+        boxes = getattr(_NOTE, "boxes", None)
+        out = custom_poster.draw(pic.astype(np.float32), m, p, W, H, u, color, getattr(_NOTE, "logos", None),
+                                 _over, _shadowed, _say, _font, boxes if boxes is not None else [])
     elif t in MORE:
         pic, _ = _cover(arr, W, H, (fx, fy - 0.05))
         m = None
@@ -277,7 +298,9 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
             nf = _fit_font(p.get("away", ""), DEMI, W * 0.24, u * 0.03)
             _say(d, "away", (W * 0.76, mid), p.get("away", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
             out = _over(out, lay)
-    if logo is not None and t in MORE:
+    if logo is not None and t == "custom":
+        pass  # (its logo is one of its pieces)
+    elif logo is not None and t in MORE:
         out = _logo_at(out, logo, W, H, LOGO_AT[t])
     elif logo is not None:
         out = _logo_at(out, logo, W, H, "br" if t in ("gameday", "mvp") else "tl")
@@ -516,3 +539,20 @@ def _logo_at(out: np.ndarray, logo: Image.Image, W: int, H: int, where: str) -> 
     lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     lay.alpha_composite(art, (int(x), int(y)))
     return _over(out, lay)
+
+
+def customized(p: dict, has_logo: bool = False) -> dict:
+    """The poster as a custom one: its words, panels and bands as pieces, to move, resize and restyle."""
+    from photo_presets import custom_poster
+    p = clean(p)
+    if p is None:
+        return {}
+    if p["template"] == "custom":
+        return p
+    W, H = size_for(800, 1000, p)
+    u = _unit(W, H, p)
+    els = custom_poster.from_layout(p, words(p, has_logo), W, H, u)
+    keep = {k: p[k] for k in ("shape", "color", "logo", "size", "colors", "kept") if k in p}
+    return clean({**keep, "template": "custom", "elements": els,
+                  "fade_top": 0.3 if p["template"] in ("final", "spotlight") else 0.1,
+                  "fade_bottom": 0.62 if p["template"] != "spotlight" else 0.3})

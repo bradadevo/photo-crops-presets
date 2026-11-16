@@ -1318,6 +1318,14 @@ async def poster_words(req: Request):
     return {"words": await asyncio.to_thread(poster.words, body.get("poster") or {}, bool(body.get("logo")))}
 
 
+@app.post("/api/poster/customize")
+async def poster_customize(req: Request):
+    """{poster}: the same poster as a custom one (its words and panels as pieces to move and restyle)."""
+    body = await req.json()
+    p = body.get("poster") or {}
+    return {"poster": await asyncio.to_thread(poster.customized, p, bool(p.get("logo")))}
+
+
 @app.get("/api/posters")
 def list_posters():
     return {"posters": [{"name": p["name"], "about": ", ".join(design_words(p["design"]))} for p in saved_posters()]}

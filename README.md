@@ -298,6 +298,17 @@ width), and **Words and banners size** makes them all smaller or bigger.
 Exporting a poster in other sizes lays it out again for each size's shape
 (nothing is cropped off), and export has a **Wide 16:9** size too.
 
+**Custom posters**: **Custom ✦** (or **Customize this layout**) turns the
+layout you are on into your own: every word, panel and band becomes a piece.
+**Add** a title, text, number badge, score banner, color band, panel, line or
+logo. Drag a piece on the picture to move it (it snaps to the middle), drag
+its corner to make it bigger or smaller, arrow keys nudge it, Delete removes
+it. In the panel: its words, style (Heavy, Bold, Clean, Spaced, Outline,
+Banner), size and color, **Behind the players** (they stand in front of it),
+forward and back, duplicate. A dark fade at the top and bottom helps words
+read. It is drawn like every layout, so what you see is what is exported (in
+any shape), and it can be saved with **Save poster**.
+
 **Any word, any color**: the round dot beside each poster word opens its
 colors (white, black, gold, red, blue, navy, green, orange, purple, sky, or
 any color with the rainbow dot); **A** puts back the layout's own color.
