@@ -277,6 +277,12 @@ picture (GAME DAY, the line under it, a number) and its box opens in the
 panel with the words selected, ready to type over. The **×** beside a box
 takes those words off the poster (type in the box to put them back).
 
+**Resizable panels**: drag the edge between the photos panel (left) or the
+side panel (right) and the photo to make it wider or narrower; the photo fits
+the space left, the photos, looks, tools and poster layouts flow into more
+columns, and the widths are remembered. Double-click an edge for the normal
+width.
+
 **Export**: separate files go in a new folder of their own ("AllProPhoto
 <date> (<n> pictures)") inside the folder you choose, like the zip; each file
 is dated when it was exported (the date the photo was taken stays inside it,

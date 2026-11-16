@@ -1502,3 +1502,55 @@ function init() {
   document.addEventListener("DOMContentLoaded", () => loadKit());
 }
 init();
+
+/* Elastic side panels: drag the edge between a panel and the photo to widen or narrow it (the photo
+   fits itself to the space left); the widths are remembered. Double-click an edge: back to normal. */
+const PANELS = { rail: { min: 140, max: 0.42, sel: ".rail" }, inspector: { min: 280, max: 0.62, sel: ".inspector" } };
+const STAGE_MIN = 360;
+function setPanelWidth(name, px) {
+  const app = $("#app"), p = PANELS[name];
+  const other = name === "rail" ? $(".inspector")?.offsetWidth || 0 : $(".rail")?.offsetWidth || 0;
+  const most = Math.min(window.innerWidth * p.max, window.innerWidth - other - STAGE_MIN);
+  const w = Math.round(Math.max(p.min, Math.min(px, most)));
+  app.style.setProperty(`--${name}`, `${w}px`);
+  return w;
+}
+function refit() { const f = $("#frame"); if (f?.dataset.w) fitFrame(+f.dataset.w, +f.dataset.h); }
+function bindGrips() {
+  const saved = store.get("panels", {});
+  for (const [name, w] of Object.entries(saved)) if (PANELS[name] && w) setPanelWidth(name, w);
+  for (const name of Object.keys(PANELS)) {
+    const panel = $(PANELS[name].sel);
+    if (!panel || panel.querySelector(":scope > .grip")) continue;
+    const grip = document.createElement("div");
+    grip.className = "grip"; grip.setAttribute("role", "separator"); grip.setAttribute("aria-orientation", "vertical");
+    grip.setAttribute("aria-label", name === "rail" ? "Resize the photos panel" : "Resize the side panel");
+    panel.appendChild(grip);
+    let frame = 0;
+    grip.onpointerdown = (e) => {
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId); grip.classList.add("dragging"); document.body.classList.add("resizing");
+      grip.onpointermove = (m) => {
+        const px = name === "rail" ? m.clientX : window.innerWidth - m.clientX;
+        setPanelWidth(name, px);
+        cancelAnimationFrame(frame); frame = requestAnimationFrame(refit);
+      };
+      grip.onpointerup = () => {
+        grip.onpointermove = grip.onpointerup = null;
+        grip.classList.remove("dragging"); document.body.classList.remove("resizing");
+        store.set("panels", { ...store.get("panels", {}), [name]: panel.offsetWidth });
+        refit();
+      };
+    };
+    grip.ondblclick = () => {
+      $("#app").style.removeProperty(`--${name}`);
+      const keep = store.get("panels", {}); delete keep[name]; store.set("panels", keep);
+      requestAnimationFrame(refit);
+    };
+  }
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindGrips); else bindGrips();
+window.addEventListener("resize", () => {  // a smaller window: the panels give way, the photo keeps room
+  const saved = store.get("panels", {});
+  for (const [name, w] of Object.entries(saved)) if (PANELS[name] && w) setPanelWidth(name, w);
+});
