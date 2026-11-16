@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 from photo_crops import images
-from photo_presets import brand, deliver, edits, explore, match, pipeline, presets, reel, retouch
+from photo_presets import brand, deliver, edits, explore, match, pipeline, poster, presets, reel, retouch
 from photo_presets.assets import Library
 from photo_presets.scene import Fix, Prepared, prepare, resized, segment
 
@@ -255,7 +255,14 @@ class Engine:
             for a in e.get("areas", []):
                 out = edits.adjust_part(out, self.part(r, a["x"], a["y"], *out.shape[:2]), a)
         if geometry:
+            h0, w0 = out.shape[:2]
             out = edits.geometry(out, e)
+            if e.get("poster"):  # the layout around the picture, the players popping out of it
+                m = self.cutout(r)
+                if m is not None:
+                    m = edits.geometry(cv2.resize(m, (w0, h0), interpolation=cv2.INTER_LINEAR), e)
+                logo = brand.load(self.brand_dir, e["poster"].get("logo") or "") if e["poster"].get("logo") else None
+                out = poster.compose(out, m, e["poster"], logo)
         if texts:  # (and logos: drawn on top like text)
             out = edits.draw_texts(out, e.get("texts"))
             out = brand.draw(out, e.get("logos"), self.brand_dir)

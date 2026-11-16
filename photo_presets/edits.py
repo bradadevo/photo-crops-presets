@@ -35,7 +35,7 @@ AREA_EDGE = 1024  # px: a part's traced outline, scaled to each picture
 def edited(edits: dict | None) -> bool:
     e = edits or {}
     return bool(e.get("areas") or e.get("angle") or e.get("crop") or e.get("texts") or e.get("removals")
-                or e.get("logos"))
+                or e.get("logos") or e.get("poster"))
 
 
 def cover_scale(w: int, h: int, angle: float) -> float:
@@ -74,6 +74,9 @@ def geometry(arr: np.ndarray, edits: dict | None) -> np.ndarray:
 
 def final_size(w: int, h: int, edits: dict | None) -> tuple[int, int]:
     x0, y0, x1, y1 = crop_box(edits, w, h)
+    if (edits or {}).get("poster"):
+        from photo_presets import poster
+        return poster.size_for(x1 - x0, y1 - y0, edits["poster"])
     return x1 - x0, y1 - y0
 
 
@@ -279,6 +282,11 @@ def clean(edits: dict | None) -> dict:
                             "strokes": [{"pts": [[float(x), float(y)] for x, y in st.get("pts", [])][:2000],
                                          "r": float(st.get("r", 0.02))} for st in rm.get("strokes", [])][:200]}
                            for rm in e["removals"] if rm.get("points") or rm.get("strokes")][:30]
+    if e.get("poster"):  # a social post layout around the picture (see poster.py)
+        from photo_presets import poster
+        p = poster.clean(e["poster"])
+        if p:
+            out["poster"] = p
     if e.get("logos"):  # from the brand kit, placed like text (see brand.py)
         from photo_presets import brand
         out["logos"] = brand.clean(e["logos"])

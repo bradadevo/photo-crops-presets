@@ -12,8 +12,6 @@ crop and parts), so the same layout comes out in the preview and the export.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -135,7 +133,7 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> np
         m = None
         if matte is not None:
             m, _ = _cover(matte.astype(np.float32), W, H, (fx, fy - 0.05))
-            m = cv2.GaussianBlur(np.clip(m, 0, 1), (0, 0), 0.8)[..., None]
+            m = cv2.GaussianBlur(np.clip((m - 0.35) / 0.4, 0, 1), (0, 0), 0.8)[..., None]
         out = pic.astype(np.float32)
         if t in ("gameday", "mvp"):
             out = out * (1 - _gradient(H, W, 0.0, 0.62, 0.55))
@@ -231,7 +229,8 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
         src[Y0:Y1, X0:X1] = big[Y0 - oy:Y1 - oy, X0 - ox:X1 - ox]
         outside = np.ones((H, W), np.float32)
         outside[cy0:cy1, cx0:cx1] = 0
-        a = (cv2.GaussianBlur(np.clip(full, 0, 1), (0, 0), 0.8) * outside)[..., None]
+        solid = np.clip((full - 0.35) / 0.4, 0, 1)  # the player only, not the cut-out's faint haze
+        a = (cv2.GaussianBlur(solid, (0, 0), 0.8) * outside)[..., None]
         out = out * (1 - a) + src * a
     lay, d = _layer((W, H))
     title = p.get("title", "")

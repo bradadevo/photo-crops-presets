@@ -38,7 +38,8 @@ MATTE_MODEL = "birefnet-general"
 WHOLE_FRAME_PIXELS = 4_000_000
 MATTE_EDGE = 3072  # high enough to keep the hair pass's detail (see refine_heads)
 HEAD_EDGE = 1024  # each head is traced again on its own, at this size
-HEAD_REACH = 1.8  # the head crop, in face radii around it
+HEAD_REACH = 1.8
+HEADS = 2  # heads traced again, the biggest first  # the head crop, in face radii around it
 # Pieces of the traced outline count as the players when this much of them is
 # inside YOLO's outlines of the players in the play
 ATTACHED = 0.5
@@ -206,7 +207,8 @@ def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, f
     W, H = img.size
     mh, mw = matte.shape
     out = matte.copy()
-    for fx, fy, fr in faces:
+    # the two biggest faces (the main players): each tracing is a full run of the model
+    for fx, fy, fr in sorted(faces, key=lambda f: -f[2])[:HEADS]:
         r = fr * W
         if r < 6:
             continue
@@ -217,7 +219,7 @@ def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, f
             continue
         crop = img.crop((x0, y0, x1, y1))
         crop.thumbnail((HEAD_EDGE, HEAD_EDGE))
-        fine = np.asarray(remove(crop, session=_session(), only_mask=True), np.float32) / 255
+        fine = np.asarray(remove(crop, session=_heads_session(), only_mask=True), np.float32) / 255
         X0, Y0 = int(x0 / W * mw), int(y0 / H * mh)
         X1, Y1 = max(X0 + 1, int(x1 / W * mw)), max(Y0 + 1, int(y1 / H * mh))
         fine = cv2.resize(fine, (X1 - X0, Y1 - Y0), interpolation=cv2.INTER_LINEAR)
@@ -323,11 +325,33 @@ def detector() -> Detector:
     return _detector
 
 
+_head_session = None
+
+
+def _heads_session():
+    """BiRefNet Lite for tracing heads again (hair): as fine on a head, three times quicker, and
+    it needs far less memory (the full model can stall for minutes when the Mac is short of it)."""
+    global _head_session
+    if _head_session is None:
+        import onnxruntime as ort
+        from rembg import new_session
+        opts = ort.SessionOptions()
+        opts.enable_cpu_mem_arena = False
+        _head_session = new_session("birefnet-general-lite", sess_opts=opts)
+    return _head_session
+
+
 def _session():
     global _matte_session
     if _matte_session is None:
+        import onnxruntime as ort
         from rembg import new_session
-        _matte_session = new_session(MATTE_MODEL)
+        opts = ort.SessionOptions()
+        # memory handed back after each run: the model needs several GB at once, and holding on
+        # to it pushes the Mac into its swap, where one run can stall for minutes
+        opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False
+        _matte_session = new_session(MATTE_MODEL, sess_opts=opts)
     return _matte_session
 
 
