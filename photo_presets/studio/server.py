@@ -49,11 +49,11 @@ CONFIG = Path("~/.config/photo-crops-presets").expanduser()
 # ALLPROPHOTO_STATE: a folder of its own for the session, settings and added photos (a test copy of the app)
 STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_STATE") else None
 PREFS = (STATE or CONFIG) / "studio.json"
-EXAMPLES = Path("~/.cache/photo-crops-presets/examples").expanduser()  # each look's last picture, for the picker
+EXAMPLES = (STATE / "examples") if STATE else Path("~/.cache/photo-crops-presets/examples").expanduser()  # each look's last picture, for the picker
 WORK = Path(tempfile.mkdtemp(prefix="allprophoto-"))  # songs for reels
 ADDED = (STATE / "added") if STATE else Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted
 EDITED = ADDED.parent / "edited"
-if STATE:  # a test copy: its own presets too (never your real ones)
+if STATE:  # a test copy: its own presets and their pictures too (never your real ones)
     presets.PRESETS_FILE = STATE / "presets.json"  # photos as edited, to make more looks on top of the edits
 SESSION = (STATE or CONFIG) / "studio-session.json"  # the photos you are working on, kept for next time
 # the looks made, with their edits, picks and stars, kept for next time (pictures at preview size)
@@ -479,6 +479,21 @@ def example_file(name: str) -> Path:
     return EXAMPLES / f"{engine.slug(name)}.jpg"
 
 
+_CAMERA: dict[str, bool] = {}
+
+
+def camera_photo(path: Path) -> bool:
+    """Taken with a camera (its EXIF names one): only these become a look's picture in the picker, never
+    a screenshot or a downloaded image (which may show something private)."""
+    key = str(path)
+    if key not in _CAMERA:
+        try:
+            _CAMERA[key] = images.is_raw(path) or bool(Image.open(path).getexif().get(0x010F))
+        except Exception:
+            _CAMERA[key] = False
+    return _CAMERA[key]
+
+
 def keep_example(name: str, img: Image.Image) -> None:
     """The look's latest picture, shown in the picker until a photo previews it."""
     try:
@@ -514,7 +529,7 @@ def _swatch(pid: int, name: str, token: str = "") -> bytes | None:
     small = p.image.copy()
     small.thumbnail((SWATCH, SWATCH))
     img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
-    if not token:
+    if not token and camera_photo(path):
         keep_example(name, img)
     return jpeg(img, quality=84)
 
@@ -592,7 +607,7 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
     elif cutting and not loading:  # how long the cut-out itself took, for the next estimates
         timing.learn("__cut_out__", max(5.0, took - slot.expect - (timing.PHOTO_READY if extra > timing.cut_out() else 0)))
     design = design_of(job.recipe.get("design"))
-    if name in presets.load_all() and not design:
+    if name in presets.load_all() and not design and camera_photo(job.path):
         keep_example(name, r.after)
     future = S.future.get(slot.photo)
     if future:  # removed from every look of this photo, so from this one too

@@ -44,7 +44,6 @@ MEASURED: dict[str, float] = {
     "Smoke Studio": 0.5,
     "Color Smoke": 0.5,
     "Stadium Smoke": 0.5,
-    "Neon Pop Art": 0.6,
     "Neon Pop Art Sharp": 0.8,
     "Neon Pop Art Sharp Black": 0.9,
     "Neon Splash": 0.5,
