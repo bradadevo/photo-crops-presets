@@ -167,8 +167,24 @@ def add(base: Path, img: Image.Image, name: str) -> dict:
 
 
 def remove_logo(base: Path, lid: str) -> None:
+    """Taken out of the kit, kept aside (so Undo can bring it back)."""
+    aside = folder(base) / ".removed"
+    aside.mkdir(exist_ok=True)
     for ext in (".png", ".json"):
-        (folder(base) / f"{lid}{ext}").unlink(missing_ok=True)
+        p = folder(base) / f"{lid}{ext}"
+        if p.exists():
+            p.replace(aside / p.name)
+
+
+def restore_logo(base: Path, lid: str) -> bool:
+    aside = folder(base) / ".removed"
+    back = False
+    for ext in (".png", ".json"):
+        p = aside / f"{lid}{ext}"
+        if p.exists():
+            p.replace(folder(base) / p.name)
+            back = True
+    return back
 
 
 def load(base: Path, lid: str) -> Image.Image | None:

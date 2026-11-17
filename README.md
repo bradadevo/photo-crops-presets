@@ -313,7 +313,10 @@ Exporting a poster in other sizes lays it out again for each size's shape
   photo in it, **Change look…** another look on its photo, its words and
   pieces kept (a new picture; the first is kept too).
 ⌘Z / ⇧⌘Z undo and redo every change, typing included (a run of typing is one
-step), also with the cursor in a box, and keep you in the tool you are in.
+step), also with the cursor in a box, and keep you in the tool you are in. The
+undo list survives quitting and reopening the app; what was being typed when
+the window closed is still saved. **Use on all** is one step to undo; deleting
+a saved poster or a logo from your kit shows **Undo**.
 The tool bar sits below the picture, so all of it can be reached.
 
 **A poster for the whole team**: make a poster on one player's picture

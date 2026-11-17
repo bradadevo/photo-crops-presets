@@ -1380,7 +1380,20 @@ def get_poster(name: str):
 
 @app.delete("/api/posters/{name}")
 def delete_poster(name: str):
-    POSTERS_FILE.write_text(json.dumps([p for p in saved_posters() if p["name"] != name], indent=1))
+    all_ = saved_posters()
+    gone = next((p for p in all_ if p["name"] == name), None)
+    POSTERS_FILE.write_text(json.dumps([p for p in all_ if p["name"] != name], indent=1))
+    return {"ok": True, "poster": gone}
+
+
+@app.post("/api/posters/restore")
+async def restore_poster(req: Request):
+    """{poster}: a deleted saved poster back (Undo)."""
+    p = (await req.json()).get("poster")
+    if not isinstance(p, dict) or not p.get("name"):
+        raise HTTPException(400, "Nothing to bring back")
+    all_ = [x for x in saved_posters() if x["name"] != p["name"]]
+    POSTERS_FILE.write_text(json.dumps([p, *all_], indent=1))
     return {"ok": True}
 
 
@@ -1767,6 +1780,13 @@ async def add_logo(file: UploadFile = File(...)):
 @app.delete("/api/logos/{lid}")
 def delete_logo(lid: str):
     brand.remove_logo(E.brand_dir, lid)
+    return {"ok": True}
+
+
+@app.post("/api/logos/{lid}/restore")
+def restore_logo(lid: str):
+    if not brand.restore_logo(E.brand_dir, lid):
+        raise HTTPException(404, "That logo can no longer be brought back")
     return {"ok": True}
 
 

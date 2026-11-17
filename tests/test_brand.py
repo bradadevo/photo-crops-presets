@@ -101,3 +101,15 @@ def test_a_two_tone_crest_in_white_keeps_its_letters_see_through():
     w = np.asarray(brand.colored(Image.fromarray(a, "RGBA"), "white"))
     assert w[5, 5, 3] == 255 and tuple(w[5, 5, :3]) == (255, 255, 255)  # the dark part: white
     assert w[50, 50, 3] == 0  # the letters: see-through, not a blank disc
+
+
+def test_a_removed_logo_can_be_brought_back(tmp_path):
+    from PIL import Image
+    from photo_presets import brand
+    d = brand.folder(tmp_path)
+    Image.new("RGBA", (8, 8), (255, 0, 0, 255)).save(d / "abc.png")
+    (d / "abc.json").write_text("{}")
+    brand.remove_logo(tmp_path, "abc")
+    assert brand.load(tmp_path, "abc") is None
+    assert brand.restore_logo(tmp_path, "abc") and brand.load(tmp_path, "abc") is not None
+    assert not brand.restore_logo(tmp_path, "nope")

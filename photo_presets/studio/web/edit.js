@@ -8,11 +8,17 @@ const hist = { undo: [], redo: [] };
 const clone = (o) => JSON.parse(JSON.stringify(o ?? {}));
 const snapshot = (s) => ({ adjust: { ...s.adjust }, edits: clone(s.edits) });
 
+const HIST_KEY = "allpro.history";
+function keepHist() {
+  try { localStorage.setItem(HIST_KEY, JSON.stringify({ undo: hist.undo.slice(-60), redo: hist.redo.slice(-60) })); } catch { /* full or blocked: kept for this session only */ }
+}
+try { const h = JSON.parse(localStorage.getItem(HIST_KEY) || "null"); if (h) { hist.undo = h.undo || []; hist.redo = h.redo || []; } } catch { /* none */ }
 function pushHist(entry) {
   if (entry.type === "slot" && JSON.stringify(entry.before) === JSON.stringify(entry.after)) return;  // (nothing changed)
   hist.undo.push(entry);
   if (hist.undo.length > 100) hist.undo.shift();
   hist.redo = [];
+  keepHist();
   editSig = "";
   if (st.tab === "edit") {
     if (typingInPanel()) paintUndoButtons(); else renderTabs();  // (never redrawn under your typing)
@@ -27,17 +33,21 @@ function paintUndoButtons() {
 async function undo() { await closeBursts(); await travel(hist.undo, hist.redo, "before"); }
 async function redo() { await closeBursts(); await travel(hist.redo, hist.undo, "after"); }
 async function travel(from, to, side) {
-  const e = from.pop();
-  if (!e) return;
+  let e = from.pop();
+  while (e && !(e.type === "multi" ? e.items.some((it) => slotById(it.sid)) : slotById(e.sid))) e = from.pop();  // (a picture since removed: skipped)
+  if (!e) { keepHist(); toast(side === "before" ? "Nothing more to undo" : "Nothing to redo"); return; }
   to.push(e);
-  if (e.type === "multi") {  // a removal on every look of a photo
-    for (const it of e.items) updateSlot(await api(`/api/slots/${it.sid}/edit`, it[side]));
+  keepHist();
+  if (e.type === "multi") {  // a change on several pictures at once (a removal on every look, Use on all…)
+    for (const it of e.items) if (slotById(it.sid)) { await flushEdits(it.sid); updateSlot(await api(`/api/slots/${it.sid}/edit`, it[side])); }
     if (e.pid != null) await api(`/api/photos/${e.pid}/future_removals`, { removals: e[side === "before" ? "futureBefore" : "futureAfter"] });
   } else {
+    if (e.sid !== st.current) select(e.sid, true);  // (you see what is undone)
     await flushEdits(e.sid);  // (a save on its way first, so it cannot bring back what is undone)
     const s = await api(`/api/slots/${e.sid}/edit`, e[side]);
     updateSlot(s);
   }
+  toast(side === "before" ? "Undone" : "Redone", { small: hist.undo.length ? `${plural(hist.undo.length, "more step")} to undo` : "" });
   editSig = "";
   renderTabs();
 }
@@ -263,8 +273,12 @@ function bindEditPane(cur, pane) {
     st.areaSel = null; st.textSel = null; updateSlot(s);
   };
   $("#e-all", pane)?.addEventListener("click", async () => {
+    const same = st.slots.filter((x) => x.state === "done" && x.look === cur.look);
+    const before = new Map(same.map((x) => [x.id, snapshot(x)]));
     const r = await api(`/api/slots/${cur.id}/adjust_look`, vals);
-    toast(`Used on all ${r.count} “${cur.look}” pictures`); refresh();
+    await refresh();
+    pushHist({ type: "multi", pid: null, items: same.filter((x) => slotById(x.id)).map((x) => ({ sid: x.id, before: before.get(x.id), after: snapshot(slotById(x.id)) })) });
+    toast(`Used on all ${r.count} “${cur.look}” pictures`, { small: "⌘Z undoes it on all of them" });
   });
   $("#e-useall", pane)?.addEventListener("click", async () => {
     const r = await api(`/api/slots/${cur.id}/use_on_all`, {});
@@ -743,9 +757,12 @@ function bindPosterSection(cur, pane) {
     toast(`This picture is in “${q.name}” now`, { small: "Change its words here: the saved poster stays as it is" });
   });
   pane.querySelectorAll("[data-del-poster]").forEach((b) => b.onclick = async () => {
-    await fetch(`/api/posters/${enc(b.dataset.delPoster)}`, { method: "DELETE" });
+    const r0 = await api(`/api/posters/${enc(b.dataset.delPoster)}`, undefined, { method: "DELETE" });
     await loadPosters(); editSig = ""; renderTabs();
-    toast(`Deleted the saved poster “${b.dataset.delPoster}”`);
+    if (r0.poster) toast(`Deleted the poster “${r0.poster.name}”`, { action: { label: "Undo", run: async (ev) => {
+      ev.target.closest(".toast")?.remove();
+      await api("/api/posters/restore", { poster: r0.poster }); await loadPosters(); editSig = ""; renderTabs();
+    } } });
   });
   pane.querySelectorAll("[data-color-pk]").forEach((b) => b.onclick = () => {  // its palette opens under it
     st.colorPk = st.colorPk === b.dataset.colorPk ? null : b.dataset.colorPk; editSig = ""; renderTabs();
@@ -828,8 +845,13 @@ function bindLogoSection(cur, pane) {
   });
   pane.querySelectorAll("[data-kit-del]").forEach((b) => b.onclick = async (ev) => {
     ev.stopPropagation();
-    await api(`/api/logos/${b.dataset.kitDel}`, undefined, { method: "DELETE" });
+    const lid = b.dataset.kitDel, name = st.kit?.find((k) => k.id === lid)?.name || "Logo";
+    await api(`/api/logos/${lid}`, undefined, { method: "DELETE" });
     await loadKit();
+    toast(`${name} taken out of your logos`, { action: { label: "Undo", run: async (ev) => {
+      ev.target.closest(".toast")?.remove();
+      await api(`/api/logos/${enc(lid)}/restore`, {}); await loadKit(); editSig = ""; renderTabs();
+    } } });
   });
   $("#kit-file", pane)?.addEventListener("change", (ev) => { const f = ev.target.files[0]; if (f) addLogo(f); });
   pane.querySelectorAll("[data-pick-logo]").forEach((b) => b.onclick = () => {
@@ -1152,3 +1174,22 @@ function bindPhotoDrag(cur) {
     }, 350);
   };
 }
+
+/* The window closing (or the app quitting) with a change not yet saved: it is sent on the way out. */
+function sendUnsaved() {
+  for (const [sid, p] of saving) {
+    if (!p.timer && !p.burst) continue;
+    const s = slotById(sid);
+    if (!s) continue;
+    clearTimeout(p.timer); p.timer = null;
+    if (p.burst) {  // (its step to undo, kept with the rest)
+      clearTimeout(p.burstTimer);
+      if (JSON.stringify(p.burst) !== JSON.stringify(snapshot(s))) { hist.undo.push({ type: "slot", sid, before: p.burst, after: snapshot(s) }); hist.redo = []; }
+      p.burst = null;
+    }
+    try { navigator.sendBeacon(`/api/slots/${sid}/edit`, new Blob([JSON.stringify({ edits: s.edits })], { type: "application/json" })); } catch { /* (closing anyway) */ }
+  }
+  keepHist();
+}
+window.addEventListener("pagehide", sendUnsaved);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendUnsaved(); });
