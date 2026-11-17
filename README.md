@@ -298,6 +298,24 @@ width), and **Words and banners size** makes them all smaller or bigger.
 Exporting a poster in other sizes lays it out again for each size's shape
 (nothing is cropped off), and export has a **Wide 16:9** size too.
 
+**Edit anything on a poster, at any time** (Poster tool):
+- every word: click it to type, drag it to move it, its corner to resize it,
+  Delete to take it off (**Words back to their places** undoes the moving);
+- the logo: drag it, its corner resizes it, Delete takes it off;
+- **Add to this poster** on every layout: text, a number, a score banner, a
+  panel, a line, a logo and **stripes** (ready sets such as red · white ·
+  blue, navy · gold or your team color, any 2 to 6 colors of your own, across
+  or up and down), each dragged and resized freely;
+- drag a logo from your kit, or drop a logo file (SVG, PDF, PNG…), onto the
+  picture where you want it; a photo dropped on a poster asks once whether it
+  is the poster's new photo or a graphic on it;
+- **In this poster** (top of the Poster panel): **Change photo…** puts another
+  photo in it, **Change look…** another look on its photo, its words and
+  pieces kept (a new picture; the first is kept too).
+⌘Z / ⇧⌘Z undo and redo every change, typing included (a run of typing is one
+step), also with the cursor in a box, and keep you in the tool you are in.
+The tool bar sits below the picture, so all of it can be reached.
+
 **A poster for the whole team**: make a poster on one player's picture
 (Spotlight, Name Stack, Goal, a custom one…), then press **Make this poster
 for the team** and pick the other players' photos. Each gets the same design

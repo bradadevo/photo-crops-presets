@@ -21,7 +21,7 @@ import re
 import numpy as np
 from PIL import Image, ImageDraw
 
-TYPES = ("text", "badge", "box", "rule", "logo", "card")
+TYPES = ("text", "badge", "box", "rule", "logo", "card", "stripes")
 TEXT_STYLES = ("heavy", "bold", "clean", "spaced", "outline", "banner")
 LIMIT = 30  # pieces on one poster
 
@@ -60,6 +60,11 @@ def clean(elements) -> list[dict]:
                      color=_hex(e.get("color"), "#d4af37"))
         elif t == "logo":
             c.update(logo=str(e.get("logo") or "")[:20], size=_num(e.get("size"), 0.03, 0.8, 0.13))
+        elif t == "stripes":  # bands of color side by side (red, white and blue; the team's colors…)
+            cols = [_hex(c, "") for c in (e.get("colors") or [])][:6]
+            cols = [c for c in cols if c] or ["#c8102e", "#ffffff", "#0b3d91"]
+            c.update(colors=cols, dir="v" if e.get("dir") == "v" else "h", w=_num(e.get("w"), 0.01, 1.2, 1.1),
+                     h=_num(e.get("h"), 0.005, 1.2, 0.06), opacity=_num(e.get("opacity"), 0.05, 1.0, 1.0))
         elif t == "card":  # the photo in a white-edged card, the players breaking out of its top
             c.update(w=_num(e.get("w"), 0.1, 1.0, 0.82), h=_num(e.get("h"), 0.1, 1.0, 0.6), border=bool(e.get("border", True)))
         out.append(c)
@@ -159,6 +164,18 @@ def _piece(lay: Image.Image, e: dict, W: int, H: int, u: float, team: tuple, log
         col = tuple(int(e["color"][i:i + 2], 16) for i in (1, 3, 5)) + (235,)
         d.rectangle((cx - w / 2, cy - th / 2, cx + w / 2, cy + th / 2), fill=col)
         boxes.append((key, (cx - w / 2, cy - max(th, u * 0.012) / 2, cx + w / 2, cy + max(th, u * 0.012) / 2)))
+    elif t == "stripes":
+        w, h = e["w"] * W, e["h"] * u
+        x0, y0 = cx - w / 2, cy - h / 2
+        n = len(e["colors"])
+        a = int(255 * e["opacity"])
+        for i, col in enumerate(e["colors"]):
+            rgb = tuple(int(col[j:j + 2], 16) for j in (1, 3, 5))
+            if e["dir"] == "h":  # bands one above the other, running across
+                d.rectangle((x0, y0 + h * i / n, x0 + w, y0 + h * (i + 1) / n), fill=rgb + (a,))
+            else:  # bands side by side, running up and down
+                d.rectangle((x0 + w * i / n, y0, x0 + w * (i + 1) / n, y0 + h), fill=rgb + (a,))
+        boxes.append((key, (x0, y0, x0 + w, y0 + h)))
     elif t == "logo":
         art = logos(e["logo"]) if logos else None
         lw = max(4, int(e["size"] * W))

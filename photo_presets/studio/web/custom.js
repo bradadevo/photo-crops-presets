@@ -4,7 +4,14 @@
    them. The app draws the poster (what you see is what is exported); the page draws only the
    outlines you drag. Loaded after edit.js, whose helpers it uses. */
 
-const PIECE_NAMES = { text: "Text", badge: "Number", box: "Panel", rule: "Line", logo: "Logo", card: "Photo card" };
+/* A custom poster's pieces are its elements; on a ready-made layout, the pieces you add are its extras. */
+const PK = (p) => (p?.template === "custom" ? "elements" : "extras");
+const PIECE_NAMES = { text: "Text", badge: "Number", box: "Panel", rule: "Line", logo: "Logo", card: "Photo card", stripes: "Stripes" };
+/* Ready stripe sets (the team color is the poster's) */
+const STRIPE_SETS = [["Red · Blue", ["#c8102e", "#0b3d91"]], ["Red · White · Blue", ["#c8102e", "#ffffff", "#0b3d91"]],
+  ["Navy · Gold", ["#1f2a44", "#d4af37"]], ["Navy · White · Red", ["#1f2a44", "#ffffff", "#c8102e"]], ["Green · White", ["#0f5f3a", "#ffffff"]],
+  ["Black · Gold", ["#111111", "#d4af37"]], ["Orange · Black", ["#d97706", "#111111"]], ["Purple · Gold", ["#5b2a86", "#d4af37"]],
+  ["Sky · White · Navy", ["#7dd3fc", "#ffffff", "#1f2a44"]], ["Team · White", ["team", "#ffffff"]], ["Team · Gold", ["team", "#d4af37"]]];
 const PIECE_STYLES = [["heavy", "Heavy"], ["bold", "Bold"], ["clean", "Clean"], ["spaced", "Spaced"], ["outline", "Outline"], ["banner", "Banner"]];
 const newId = () => "p" + Math.random().toString(36).slice(2, 8);
 
@@ -26,20 +33,22 @@ function piecesToAdd(kind, p) {
     case "line": return [{ type: "rule", w: 0.3, thick: 0.004, x: 0.5, y: 0.9, color: "#ffffff" }];
     case "logo": return [{ type: "logo", logo: st.kit?.[0]?.id || "", size: 0.13, x: 0.88, y: 0.9 }];
     case "card": return [{ type: "card", w: 0.82, h: 0.6, x: 0.5, y: 0.5 }];
+    case "stripes": return [{ type: "stripes", colors: ["#c8102e", "#ffffff", "#0b3d91"], dir: "h", w: 1.1, h: 0.06, x: 0.5, y: 0.035 }];
   }
   return [];
 }
 const ADD_KINDS = [["title", "Title"], ["text", "Text"], ["badge", "Number"], ["score", "Score banner"], ["band", "Color band"],
-  ["panel", "Panel"], ["line", "Line"], ["logo", "Logo"], ["card", "Photo card"]];
+  ["panel", "Panel"], ["line", "Line"], ["logo", "Logo"], ["stripes", "Stripes"], ["card", "Photo card"]];
 
 function pieceLabel(el) {
   if (el.type === "text" || el.type === "badge") return (el.text || "").trim() || PIECE_NAMES[el.type];
   if (el.type === "logo") return st.kit?.find((k) => k.id === el.logo)?.name || "Logo";
+  if (el.type === "stripes") return `<span class="mini-stripes">${el.colors.map((c) => `<i style="background:${c}"></i>`).join("")}</span>`;
   return PIECE_NAMES[el.type];
 }
 
 function customSection(p) {
-  const els = p.elements || [];
+  const els = p[PK(p)] || [];
   const sel = els.find((x) => x.id === st.pieceSel);
   const sl = (prop, label, min, max, step, v, unit = "") => `<div class="slider"><label>${label}</label><output>${unit === "%" ? Math.round(v * 100) + "%" : (+v).toFixed(2)}</output>
     <input type="range" data-prop="${prop}" data-unit="${unit}" min="${min}" max="${max}" step="${step}" value="${v}"></div>`;
@@ -60,22 +69,29 @@ function customSection(p) {
       ${t === "rule" ? `${sl("w", "Length", 0.03, 1.1, 0.01, sel.w)}${sl("thick", "Thickness", 0.001, 0.03, 0.001, sel.thick)}${colors("color", sel.color)}` : ""}
       ${t === "logo" ? `${(st.kit || []).length ? `<div class="kit-grid small" data-prop-logo>${st.kit.map((k) => `<button class="kit-logo${sel.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>`
         : `<p class="notes">Add a logo with the Logo tool first (SVG, PDF, PNG…).</p>`}${sl("size", "Size", 0.03, 0.6, 0.01, sel.size)}` : ""}
+      ${t === "stripes" ? `<div class="stripe-colors">${sel.colors.map((c, i) => `<span class="sc"><button class="color-dot" data-stripe-i="${i}" style="background:${c}" title="Change this color"></button>${sel.colors.length > 2 ? `<button class="x" data-stripe-x="${i}" title="Take this color off">×</button>` : ""}</span>`).join("")}
+          ${sel.colors.length < 6 ? `<button class="chip-btn" data-stripe-add title="Another color">${icon("plus")}</button>` : ""}</div>
+        ${st.stripeI != null && sel.colors[st.stripeI] ? colors("stripe", sel.colors[st.stripeI]) : ""}
+        <div class="seg full small" data-prop-dir><button data-v="h" class="${sel.dir === "h" ? "on" : ""}">Across</button><button data-v="v" class="${sel.dir === "v" ? "on" : ""}">Up and down</button></div>
+        ${sl("w", "Width", 0.01, 1.2, 0.01, sel.w)}${sl("h", "Height", 0.005, 1.2, 0.005, sel.h)}${sl("opacity", "Strength", 0.05, 1, 0.05, sel.opacity, "%")}` : ""}
       ${t === "card" ? `${sl("w", "Width", 0.2, 1, 0.01, sel.w)}${sl("h", "Height", 0.2, 1, 0.01, sel.h)}${toggle("border", "White edge")}
         <p class="notes">The photo sits in the card, the player breaking out of its top. Drag the photo in it to move it; Photo zoom is above.</p>` : ""}
-      ${t === "card" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
+      ${t === "card" || p.template !== "custom" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
       <div class="inline piece-acts"><button class="btn" data-piece-dup>${icon("copy")} Duplicate</button><button class="btn ghost" data-piece-del>${icon("trash")} Delete</button></div>
       </div></div>`;
   }
+  const custom = p.template === "custom";
   return `<div class="custom-poster">
-    <div class="fld"><label>Add</label><div class="add-pieces">${ADD_KINDS.map(([k, l]) => `<button class="chip-btn" data-add-piece="${k}">${icon("plus")} ${l}</button>`).join("")}</div></div>
+    <div class="fld"><label>${custom ? "Add" : "Add to this poster"}</label><div class="add-pieces">${ADD_KINDS.filter(([k]) => custom || k !== "card").map(([k, l]) => `<button class="chip-btn" data-add-piece="${k}">${icon("plus")} ${l}</button>`).join("")}</div></div>
+    <div class="fld"><label>Stripes <small class="faint">· across the top; drag them anywhere</small></label><div class="stripe-sets">${STRIPE_SETS.map(([l, cs], i) => `<button data-stripe-set="${i}" title="${esc(l)}">${cs.map((c) => `<i style="background:${c === "team" ? p.color || "#1f2a44" : c}"></i>`).join("")}</button>`).join("")}</div></div>
     ${els.length ? `<div class="pieces">${els.map((el, i) => `<div class="piece-row${el.id === st.pieceSel ? " on" : ""}" data-piece="${el.id}">
-      <button class="pick" data-pick-piece="${el.id}"><span class="kind">${esc(PIECE_NAMES[el.type])}</span>${el.type === "text" || el.type === "badge" ? `<span class="what">${esc(pieceLabel(el))}</span>` : ""}${el.behind ? `<span class="behind" title="Behind the players">behind</span>` : ""}</button>
+      <button class="pick" data-pick-piece="${el.id}"><span class="kind">${esc(PIECE_NAMES[el.type])}</span>${el.type === "text" || el.type === "badge" ? `<span class="what">${esc(pieceLabel(el))}</span>` : el.type === "stripes" ? pieceLabel(el) : ""}${el.behind ? `<span class="behind" title="Behind the players">behind</span>` : ""}</button>
       <button class="icon-btn" data-piece-up="${el.id}" title="Bring forward" ${off(i === els.length - 1, "It's already in front of the others.")}>▲</button>
       <button class="icon-btn" data-piece-down="${el.id}" title="Send back" ${off(i === 0, "It's already behind the others.")}>▼</button>
       <button class="icon-btn" data-piece-x="${el.id}" title="Delete">${icon("x")}</button></div>`).join("")}</div>` : `<p class="notes">Nothing on it yet: add a title, a score banner, your logo…</p>`}
     ${props}
-    ${sl("fade_top", "Dark fade at the top", 0, 0.9, 0.05, p.fade_top ?? 0.35, "%").replace('data-prop="fade_top"', 'data-fade="fade_top"')}
-    ${sl("fade_bottom", "Dark fade at the bottom", 0, 0.9, 0.05, p.fade_bottom ?? 0.55, "%").replace('data-prop="fade_bottom"', 'data-fade="fade_bottom"')}
+    ${custom ? "" : "<!--"}${sl("fade_top", "Dark fade at the top", 0, 0.9, 0.05, p.fade_top ?? 0.35, "%").replace('data-prop="fade_top"', 'data-fade="fade_top"')}
+    ${sl("fade_bottom", "Dark fade at the bottom", 0, 0.9, 0.05, p.fade_bottom ?? 0.55, "%").replace('data-prop="fade_bottom"', 'data-fade="fade_bottom"')}${custom ? "" : "-->"}
   </div>`;
 }
 
@@ -83,10 +99,10 @@ function bindCustom(cur, pane, set) {
   const box = pane.querySelector(".custom-poster");
   if (!box) return;
   const s0 = () => slotById(cur.id);
-  const piece = (fn) => set((p) => { const el = (p.elements || []).find((x) => x.id === st.pieceSel); if (el) fn(el, p); });
+  const piece = (fn) => set((p) => { const el = (p[PK(p)] || []).find((x) => x.id === st.pieceSel); if (el) fn(el, p); });
   const pieceSoon = (fn, delay = 350) => {  // typing and sliding: shown at once, saved a moment later
     const e2 = clone(s0().edits);
-    const el = (e2.poster?.elements || []).find((x) => x.id === st.pieceSel);
+    const el = (e2.poster?.[PK(e2.poster)] || []).find((x) => x.id === st.pieceSel);
     if (!el) return;
     fn(el);
     saveSoon(cur.id, e2, delay);
@@ -96,34 +112,48 @@ function bindCustom(cur, pane, set) {
     if (!added.length) return;
     if (b.dataset.addPiece === "logo" && !st.kit?.length) toast("Add a logo with the Logo tool first", { small: "Then pick it here" });
     st.pieceSel = added[added.length - 1].id;
-    set((p) => { p.elements = [...(p.elements || []), ...added]; });
+    set((p) => { p[PK(p)] = [...(p[PK(p)] || []), ...added]; });
   });
   box.querySelectorAll("[data-pick-piece]").forEach((b) => b.onclick = () => {
     st.pieceSel = st.pieceSel === b.dataset.pickPiece ? null : b.dataset.pickPiece; editSig = ""; renderTabs(); paintWords(s0());
   });
   const move = (id, by) => set((p) => {
-    const i = p.elements.findIndex((x) => x.id === id), j = i + by;
-    if (i < 0 || j < 0 || j >= p.elements.length) return;
-    [p.elements[i], p.elements[j]] = [p.elements[j], p.elements[i]];
+    const i = p[PK(p)].findIndex((x) => x.id === id), j = i + by;
+    if (i < 0 || j < 0 || j >= p[PK(p)].length) return;
+    [p[PK(p)][i], p[PK(p)][j]] = [p[PK(p)][j], p[PK(p)][i]];
   });
   box.querySelectorAll("[data-piece-up]").forEach((b) => b.onclick = () => move(b.dataset.pieceUp, 1));
   box.querySelectorAll("[data-piece-down]").forEach((b) => b.onclick = () => move(b.dataset.pieceDown, -1));
   box.querySelectorAll("[data-piece-x]").forEach((b) => b.onclick = () => {
     if (st.pieceSel === b.dataset.pieceX) st.pieceSel = null;
-    set((p) => { p.elements = p.elements.filter((x) => x.id !== b.dataset.pieceX); });
+    set((p) => { p[PK(p)] = p[PK(p)].filter((x) => x.id !== b.dataset.pieceX); });
   });
   box.querySelector("[data-piece-del]")?.addEventListener("click", () => {
     const id = st.pieceSel; st.pieceSel = null;
-    set((p) => { p.elements = p.elements.filter((x) => x.id !== id); });
+    set((p) => { p[PK(p)] = p[PK(p)].filter((x) => x.id !== id); });
   });
   box.querySelector("[data-piece-dup]")?.addEventListener("click", () => {
     const id = newId();
     set((p) => {
-      const el = p.elements.find((x) => x.id === st.pieceSel);
-      if (el) p.elements.push({ ...clone(el), id, x: Math.min(0.95, el.x + 0.04), y: Math.min(0.95, el.y + 0.04) });
+      const el = p[PK(p)].find((x) => x.id === st.pieceSel);
+      if (el) p[PK(p)].push({ ...clone(el), id, x: Math.min(0.95, el.x + 0.04), y: Math.min(0.95, el.y + 0.04) });
     });
     st.pieceSel = id;
   });
+  box.querySelectorAll("[data-stripe-set]").forEach((b) => b.onclick = () => {
+    const [, cs] = STRIPE_SETS[+b.dataset.stripeSet], team = s0().edits.poster.color || "#1f2a44";
+    const id = newId();
+    st.pieceSel = id;
+    set((p) => { p[PK(p)] = [...(p[PK(p)] || []), { id, type: "stripes", colors: cs.map((c) => (c === "team" ? team : c)), dir: "h", w: 1.1, h: 0.06, x: 0.5, y: 0.035 }]; });
+  });
+  box.querySelectorAll("[data-stripe-i]").forEach((b) => b.onclick = () => { st.stripeI = st.stripeI === +b.dataset.stripeI ? null : +b.dataset.stripeI; editSig = ""; renderTabs(); });
+  box.querySelectorAll("[data-stripe-x]").forEach((b) => b.onclick = () => piece((el) => { el.colors.splice(+b.dataset.stripeX, 1); st.stripeI = null; }));
+  box.querySelector("[data-stripe-add]")?.addEventListener("click", () => piece((el) => { el.colors.push("#ffffff"); st.stripeI = el.colors.length - 1; }));
+  box.querySelectorAll("[data-prop-dir] button").forEach((b) => b.onclick = () => piece((el) => {
+    if (el.dir === b.dataset.v) return;
+    el.dir = b.dataset.v;
+    if (el.dir === "v") { el.w = 0.08; el.h = 1.2; el.x = 0.06; el.y = 0.5; } else { el.w = 1.1; el.h = 0.06; el.x = 0.5; el.y = 0.035; }
+  }));
   const ta = box.querySelector("[data-prop-text]");
   if (ta) {
     ta.oninput = () => pieceSoon((el) => { el.text = ta.value; }, 450);
@@ -140,18 +170,24 @@ function bindCustom(cur, pane, set) {
     r.oninput = () => { out.textContent = Math.round(r.value * 100) + "%"; };
     r.onchange = () => set((p) => { p[r.dataset.fade] = +r.value; });
   });
-  box.querySelectorAll("[data-prop-color] button").forEach((b) => b.onclick = () => piece((el) => { el[b.parentElement.dataset.propColor] = b.dataset.v; }));
-  box.querySelectorAll("[data-prop-own]").forEach((inp) => inp.onchange = () => piece((el) => { el[inp.dataset.propOwn] = inp.value; }));
+  const setColor = (el, prop, v) => { if (prop === "stripe") { if (v && st.stripeI != null) el.colors[st.stripeI] = v; } else el[prop] = v; };
+  box.querySelectorAll("[data-prop-color] button").forEach((b) => b.onclick = () => piece((el) => setColor(el, b.parentElement.dataset.propColor, b.dataset.v)));
+  box.querySelectorAll("[data-prop-own]").forEach((inp) => inp.onchange = () => piece((el) => setColor(el, inp.dataset.propOwn, inp.value)));
   box.querySelectorAll("[data-prop-check]").forEach((c) => c.onchange = () => piece((el) => { el[c.dataset.propCheck] = c.checked; }));
   box.querySelectorAll("[data-prop-logo] button").forEach((b) => b.onclick = () => piece((el) => { el.logo = b.dataset.v; }));
 }
 
 /* Dragging something on the poster: moved (snapping to the middle) or, by its corner, resized. When let
    go, done(dx, dy, resized, kx, ky, frame box) in screen pixels; nothing if it was only a click. */
-function dragPiece(el, f, cur, done) {
+function dragPiece(el, f, cur, done, clicked) {
   el.onpointerdown = (e) => {
     e.preventDefault(); e.stopPropagation();
-    if (st.tool !== "poster") { openPart(cur, "poster"); return; }
+    if (st.tool !== "poster") { if (el.dataset.pc) st.pieceSel = el.dataset.pc; if (clicked) clicked(); else openPart(cur, "poster"); return; }
+    if (el.dataset.pc && st.pieceSel !== el.dataset.pc) {  // chosen: Delete takes it off, the panel shows it
+      st.pieceSel = el.dataset.pc;
+      f.querySelectorAll(".pc").forEach((x) => x.classList.toggle("sel", x === el));
+      if (!el.querySelector(".pc-h")) el.insertAdjacentHTML("beforeend", `<span class="pc-h"></span>`);
+    }
     const resize = !!e.target.closest(".pc-h");
     const r = f.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
     let moved = false, dx = 0, dy = 0;
@@ -168,6 +204,7 @@ function dragPiece(el, f, cur, done) {
     el.onpointerup = () => {
       el.onpointermove = el.onpointerup = null; f.classList.remove("snap-x");
       if (moved) done(dx, dy, resize, Math.max(0.1, (start.w + dx) / start.w), Math.max(0.1, (start.h + dy) / start.h), r);
+      else if (clicked) clicked();
     };
   };
 }
@@ -208,33 +245,61 @@ function paintPieces(cur, f, boxes) {
       if (!moved) return;
       const kx = Math.max(0.1, (start.w + dx) / start.w), ky = Math.max(0.1, (start.h + dy) / start.h);
       changeEdits(slotById(cur.id), (ed) => {
-        const it = (ed.poster?.elements || []).find((x) => x.id === id);
+        const it = (ed.poster?.[PK(ed.poster)] || []).find((x) => x.id === id);
         if (!it) return;
         if (!resize) { it.x += dx / r.width; it.y += dy / r.height; return; }
         const k = Math.max(kx, ky);
-        if (it.type === "box" || it.type === "card") { it.w *= kx; it.h *= ky; } else if (it.type === "rule") { it.w *= kx; } else { it.size *= k; }
+        if (it.type === "box" || it.type === "card" || it.type === "stripes") { it.w *= kx; it.h *= ky; } else if (it.type === "rule") { it.w *= kx; } else { it.size *= k; }
       }, { keepPane: false });
     };
   });
 }
 
-/* Arrow keys nudge the chosen piece; Delete takes it off (not while typing). */
+/* Arrow keys nudge the chosen piece; Delete takes it off (not while typing): a custom poster's piece,
+   a poster's logo, or a text or logo put on the picture. */
 document.addEventListener("keydown", (e) => {
-  if (st.tool !== "poster" || !st.pieceSel || e.target.closest?.("input, textarea, [contenteditable]")) return;
+  if (e.target.closest?.("input, textarea, [contenteditable]") || e.metaKey || e.ctrlKey) return;
   const cur = slotById(st.current);
-  if (!cur?.edits?.poster?.elements) return;
-  const step = e.shiftKey ? 0.02 : 0.004;
-  const by = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
-  if (by) {
-    e.preventDefault();
-    const e2 = clone(cur.edits), it = e2.poster.elements.find((x) => x.id === st.pieceSel);
-    if (it) { it.x += by[0]; it.y += by[1]; saveSoon(cur.id, e2, 250); }
-  } else if (e.key === "Delete" || e.key === "Backspace") {
-    e.preventDefault();
-    const id = st.pieceSel; st.pieceSel = null;
-    changeEdits(cur, (ed) => { ed.poster.elements = ed.poster.elements.filter((x) => x.id !== id); });
+  if (!cur?.edits || cur.state !== "done") return;
+  const del = e.key === "Delete" || e.key === "Backspace";
+  if (st.tool === "poster" && st.pieceSel?.startsWith("w:") && cur.edits.poster && del) {
+    e.preventDefault(); e.stopPropagation();
+    const k = st.pieceSel.slice(2); st.pieceSel = null;
+    changeEdits(cur, (ed) => { ed.poster[k] = ""; });
+    toast("Taken off the poster", { small: "Type in its box to put it back, or ⌘Z" });
+    return;
   }
-});
+  if (st.tool === "poster" && st.pieceSel === "logo" && cur.edits.poster && cur.edits.poster.template !== "custom") {
+    if (!del) return;
+    e.preventDefault(); e.stopPropagation(); st.pieceSel = null;
+    changeEdits(cur, (ed) => { ed.poster.logo = ""; delete ed.poster.logo_at; });
+    toast("Logo taken off the poster", { small: "⌘Z puts it back · pick one again in the Poster panel" });
+    return;
+  }
+  if (st.tool === "poster" && st.pieceSel && cur.edits.poster?.[PK(cur.edits.poster)]) {
+    const step = e.shiftKey ? 0.02 : 0.004;
+    const by = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (by) {
+      e.preventDefault(); e.stopPropagation();
+      const e2 = clone(cur.edits), it = e2.poster[PK(e2.poster)].find((x) => x.id === st.pieceSel);
+      if (it) { it.x += by[0]; it.y += by[1]; saveSoon(cur.id, e2, 250); }
+    } else if (del) {
+      e.preventDefault(); e.stopPropagation();
+      const id = st.pieceSel; st.pieceSel = null;
+      changeEdits(cur, (ed) => { ed.poster[PK(ed.poster)] = ed.poster[PK(ed.poster)].filter((x) => x.id !== id); });
+    }
+    return;
+  }
+  if (del && st.tool === "text" && st.textSel != null && cur.edits.texts?.[st.textSel]) {
+    e.preventDefault(); e.stopPropagation();
+    const i = st.textSel; st.textSel = null;
+    changeEdits(cur, (ed) => { ed.texts.splice(i, 1); });
+  } else if (del && st.tool === "logo" && st.logoSel != null && cur.edits.logos?.[st.logoSel]) {
+    e.preventDefault(); e.stopPropagation();
+    const i = st.logoSel; st.logoSel = null;
+    changeEdits(cur, (ed) => { ed.logos.splice(i, 1); });
+  }
+}, true);
 
 /* A team's posters: the same design for each player, only their picture, name and number changed. */
 const NAME_KEY = { spotlight: "title", name: "title", teamcolor: "title", goal: "name", mvp: "line" };
@@ -343,4 +408,102 @@ function openTeamPicker(cur) {
     toast(`Making ${plural(chosen.size, "poster")} for the team…`, { small: "Type each player's name in the Poster panel as they come in" });
   };
   paint();
+}
+
+/* "In this poster": its photo and its look, each changed in one click (the words, logo and pieces stay). */
+function inThisPoster(cur) {
+  const photo = st.photos.find((x) => x.id === cur.photo);
+  return `<div class="in-poster"><img src="/img/photo/${cur.photo}/thumb.jpg" alt="">
+    <div class="ip-text"><b>${esc(photo?.name || "Photo")}</b><small>Look: ${esc(cur.look === "Original" || cur.look === "Poster" ? "the photo as it is" : cur.look)}</small></div>
+    <div class="ip-acts"><button class="btn" id="ip-photo" title="Put another photo in this poster: its words, logo and pieces stay">${icon("image")} Change photo…</button>
+      <button class="btn" id="ip-look" title="This poster with another look on the photo">${icon("sun")} Change look…</button></div></div>`;
+}
+function bindInThisPoster(cur, pane) {
+  $("#ip-photo", pane)?.addEventListener("click", () => pickPhotoForPoster(cur));
+  $("#ip-look", pane)?.addEventListener("click", () => pickLookForPoster(cur));
+}
+async function swapInto(cur, body, what) {
+  const r = await api(`/api/slots/${cur.id}/swap`, body);
+  await refresh();
+  select(r.slot); st.tab = "edit"; st.editWhenReady = r.slot; st.toolWhenReady = "poster";
+  render();
+  toast(`The poster with ${what}`, { small: "Your first one is kept too (it's next to it in the strip)" });
+}
+function pickPhotoForPoster(cur) {
+  const others = st.photos.filter((x) => x.id !== cur.photo);
+  const m = modal(`<header><h2>Put another photo in this poster</h2><p class="notes" style="margin:4px 0 0">Its words, logo and pieces stay; the photo is framed on its player (drag it to adjust).</p></header>
+    <div class="body">${others.length ? `<div class="team-pick">${others.map((x) => `<button class="tp" data-swap-photo="${x.id}"><img src="/img/photo/${x.id}/thumb.jpg" alt=""><small>${esc(x.name)}</small></button>`).join("")}</div>`
+      : `<p class="notes">No other photos yet.</p>`}</div>
+    <footer><button class="btn" id="ip-add">${icon("plus")} Add photos…</button><span style="flex:1"></span><button class="btn ghost" data-close>Cancel</button></footer>`);
+  m.querySelectorAll("[data-swap-photo]").forEach((b) => b.onclick = () => { closeModal(); swapInto(cur, { photo: +b.dataset.swapPhoto }, "the new photo"); });
+  $("#ip-add", m).onclick = async () => {
+    closeModal();
+    const added = await addPhotos("files");
+    if (added?.length) { await refresh(); swapInto(cur, { photo: added[0] }, "the new photo"); }
+  };
+}
+function pickLookForPoster(cur) {
+  const looks = st.looks.filter((l) => !l.design);
+  const m = modal(`<header><h2>This poster with another look</h2><p class="notes" style="margin:4px 0 0">The same photo and poster; the look you pick on the photo.</p></header>
+    <div class="body"><div class="team-pick">
+      <button class="tp" data-swap-look="Original"><img src="/img/photo/${cur.photo}/thumb.jpg" alt=""><small>The photo as it is</small></button>
+      ${looks.map((l) => `<button class="tp" data-swap-look="${esc(l.name)}"><img src="/img/example/${enc(l.name)}.jpg?v=${pageStamp}" alt="" onerror="this.style.visibility='hidden'"><small>${esc(l.name)}${l.ai ? " · AI" : ""}</small></button>`).join("")}
+    </div></div><footer><button class="btn ghost" data-close>Cancel</button></footer>`);
+  m.querySelectorAll("[data-swap-look]").forEach((b) => b.onclick = () => { closeModal(); swapInto(cur, { look: b.dataset.swapLook }, b.dataset.swapLook === "Original" ? "the photo as it is" : b.dataset.swapLook); });
+}
+
+/* Dropped on the picture: your logos (dragged from the kit) and logo files go on it where they land;
+   a photo dropped on a poster asks once: the poster's new photo, or a graphic on it. */
+document.addEventListener("dragstart", (e) => {
+  const k = e.target.closest?.(".kit-logo[data-kit]");
+  if (k) { e.dataTransfer.setData("application/x-allpro-logo", k.dataset.kit); e.dataTransfer.effectAllowed = "copy"; }
+});
+async function droppedOnPicture(e) {
+  const cur = slotById(st.current), f = $("#frame");
+  if (!cur || cur.state !== "done" || !f || st.mode !== "edit") return false;
+  const r = f.getBoundingClientRect();
+  const at = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  const kitId = e.dataTransfer?.getData("application/x-allpro-logo");
+  if (kitId) { placeGraphic(cur, kitId, at); return true; }
+  const files = [...(e.dataTransfer?.files || [])].filter((x) => x.type.startsWith("image/") || /\.(svgz?|pdf|ai|heic|png|jpe?g|webp)$/i.test(x.name));
+  if (!files.length) return false;
+  const file = files[0];
+  const drawn = /\.(svgz?|pdf|ai)$/i.test(file.name) || file.type === "image/svg+xml";
+  let as = "graphic";
+  if (!drawn) as = await askDrop(cur, file);
+  if (!as) return true;
+  if (as === "photo") {
+    const added = await upload([file]);
+    if (added?.length) { await refresh(); if (cur.edits?.poster) swapInto(cur, { photo: added[0] }, "the new photo"); }
+    return true;
+  }
+  const meta = await addLogo(file, true);
+  if (meta?.id) placeGraphic(cur, meta.id, at);
+  return true;
+}
+function askDrop(cur, file) {
+  return new Promise((resolve) => {
+    const poster = !!cur.edits?.poster;
+    const m = modal(`<header><h2>${esc(file.name)}</h2></header><div class="body"><p>What should it be?</p></div>
+      <footer><button class="btn ghost" data-close>Cancel</button><span style="flex:1"></span>
+        <button class="btn" id="dz-graphic">${icon("badge")} A logo or graphic on the picture</button>
+        <button class="btn primary" id="dz-photo">${icon("image")} ${poster ? "The photo in this poster" : "A new photo"}</button></footer>`);
+    $("#dz-graphic", m).onclick = () => { closeModal(); resolve("graphic"); };
+    $("#dz-photo", m).onclick = () => { closeModal(); resolve("photo"); };
+    m.querySelector("[data-close]").addEventListener("click", () => resolve(null));
+  });
+}
+function placeGraphic(cur, id, at) {
+  const art = (st.kit || []).find((k) => k.id === id);
+  const size = 0.18;
+  changeEdits(slotById(cur.id), (ed) => {
+    if (ed.poster) {  // on a poster: one of its pieces (drag it, its corner resizes it, Delete takes it off)
+      const k = PK(ed.poster);
+      ed.poster[k] = [...(ed.poster[k] || []), { id: newId(), type: "logo", logo: id, size, x: at.x, y: at.y }];
+      if (st.tool !== "poster") st.toolWhenReady = "poster";
+    } else {
+      ed.logos = [...(ed.logos || []), { id, x: at.x, y: at.y, size, color: art?.flat ? "auto" : "original", opacity: 1 }];
+    }
+  });
+  toast(`${art?.name || "Logo"} placed`, { small: "Drag it to move it, its corner to resize it · Delete takes it off" });
 }

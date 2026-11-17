@@ -74,6 +74,18 @@ def clean(p: dict | None) -> dict | None:
             for t, w in (p.get("kept") or {}).items() if t in TEMPLATES and isinstance(w, dict)}
     if kept:
         out["kept"] = kept  # the words typed for the other layouts: back when you switch back
+    moves = {}
+    for k, m in (p.get("moves") or {}).items():
+        if k in FIELD_KEYS and isinstance(m, dict):
+            try:
+                mv = {"x": round(float(np.clip(float(m.get("x", 0)), -1, 1)), 4), "y": round(float(np.clip(float(m.get("y", 0)), -1, 1)), 4),
+                      "s": round(float(np.clip(float(m.get("s", 1)), 0.3, 4)), 3)}
+            except (TypeError, ValueError):
+                continue
+            if mv != {"x": 0, "y": 0, "s": 1}:
+                moves[k] = mv
+    if moves:
+        out["moves"] = moves  # words moved or resized by you on the picture
     if p.get("family"):  # one of a team's posters: the same design, each player's own picture, name and number
         out["family"] = str(p["family"])[:12]
     pic = p.get("pic") or {}
@@ -91,6 +103,11 @@ def clean(p: dict | None) -> dict | None:
                               "size": round(float(np.clip(float(at.get("size", 0.13)), 0.03, 0.8)), 4)}  # the logo where you put it
     except (TypeError, ValueError, KeyError, AttributeError):
         pass
+    if p["template"] != "custom" and p.get("extras"):  # pieces you added on top of the layout (stripes, text…)
+        from photo_presets import custom_poster
+        extras = custom_poster.clean(p["extras"])
+        if extras:
+            out["extras"] = extras
     if p["template"] == "custom":  # your own layout: its pieces and its fades
         from photo_presets import custom_poster
         out["elements"] = custom_poster.clean(p.get("elements"))
@@ -196,6 +213,14 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
     """Draws one of the poster's words (nothing when it was cleared), noting where (for words())."""
     if not text:
         return
+    move = (getattr(_NOTE, "moves", None) or {}).get(key)
+    if move:  # moved or resized by you on the picture (shares of the poster; its size times s)
+        W, H = d.im.size
+        xy = (xy[0] + move.get("x", 0) * W, xy[1] + move.get("y", 0) * H)
+        if move.get("s", 1) != 1:
+            font = font.font_variant(size=max(6, int(font.size * move["s"])))
+            if "stroke_width" in kw:
+                kw["stroke_width"] = max(1, int(kw["stroke_width"] * move["s"]))
     own = (getattr(_NOTE, "colors", None) or {}).get(key)
     if own:  # its own color: the letters (or, for outlined words, their outline), the same see-through
         rgb = tuple(int(own[i:i + 2], 16) for i in (1, 3, 5))
@@ -232,11 +257,13 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos
     _NOTE.colors = p.get("colors")
     _NOTE.logos = logos
     _NOTE.pic = p.get("pic")
+    _NOTE.moves = p.get("moves")
     try:
         return _compose(arr, matte, p, logo)
     finally:
         _NOTE.colors = None
         _NOTE.pic = None
+        _NOTE.moves = None
 
 
 def word_color(key: str, default: tuple) -> tuple:
@@ -322,6 +349,15 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
             nf = _fit_font(p.get("away", ""), DEMI, W * 0.24, u * 0.03)
             _say(d, "away", (W * 0.76, mid), p.get("away", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
             out = _over(out, lay)
+    if t != "custom" and p.get("extras"):  # your pieces on top of the layout
+        from photo_presets import custom_poster
+        lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        boxes = getattr(_NOTE, "boxes", None)
+        team = tuple(int(c * 255) for c in color)
+        for e in p["extras"]:
+            custom_poster._piece(lay, e, W, H, u, team, getattr(_NOTE, "logos", None), _say, _font,
+                                 boxes if boxes is not None else [])
+        out = _over(out, _shadowed(lay, u * 0.008, 0.3))
     if logo is not None and t == "custom":
         pass  # (its logo is one of its pieces)
     elif logo is not None and p.get("logo_at"):
@@ -426,10 +462,15 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
         lay, d = _layer((W, H))
         r = u * 0.076
         cx, cy = cx0 + r * 0.55, cy0 + r * 0.55
+        mv = (p.get("moves") or {}).get("number")
+        if mv:  # (the badge goes where its number was dragged, as big as it was made)
+            cx, cy, r = cx + mv.get("x", 0) * W, cy + mv.get("y", 0) * H, r * mv.get("s", 1)
         ring = max(3, int(u * 0.0064))
         d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_c255(color), outline=(255, 255, 255, 255), width=ring)
         f = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
+        _NOTE.moves = {k: v for k, v in (p.get("moves") or {}).items() if k != "number"}  # (placed with its badge)
         _say(d, "number", (cx, cy + r * 0.04), num, font=f, fill=(255, 255, 255, 255), anchor="mm")
+        _NOTE.moves = p.get("moves")
         out = _over(out, _shadowed(lay, W * 0.012, 0.5))
     return out
 

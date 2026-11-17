@@ -9,15 +9,23 @@ const clone = (o) => JSON.parse(JSON.stringify(o ?? {}));
 const snapshot = (s) => ({ adjust: { ...s.adjust }, edits: clone(s.edits) });
 
 function pushHist(entry) {
+  if (entry.type === "slot" && JSON.stringify(entry.before) === JSON.stringify(entry.after)) return;  // (nothing changed)
   hist.undo.push(entry);
   if (hist.undo.length > 100) hist.undo.shift();
   hist.redo = [];
   editSig = "";
-  if (st.tab === "edit") renderTabs();
+  if (st.tab === "edit") {
+    if (typingInPanel()) paintUndoButtons(); else renderTabs();  // (never redrawn under your typing)
+  }
 }
 
-async function undo() { await travel(hist.undo, hist.redo, "before"); }
-async function redo() { await travel(hist.redo, hist.undo, "after"); }
+const typingInPanel = () => !!document.activeElement?.closest?.("#pane-edit input, #pane-edit textarea");
+function paintUndoButtons() {
+  setOff($("#e-undo"), !hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.");
+  setOff($("#e-redo"), !hist.redo.length, "Nothing to redo: after an undo, this puts it back.");
+}
+async function undo() { await closeBursts(); await travel(hist.undo, hist.redo, "before"); }
+async function redo() { await closeBursts(); await travel(hist.redo, hist.undo, "after"); }
 async function travel(from, to, side) {
   const e = from.pop();
   if (!e) return;
@@ -65,12 +73,30 @@ function pendingOf(sid) {
 function saveSoon(sid, edits, delay = 300) {
   const s = slotById(sid);
   if (!s) return;
-  s.edits = edits;
   const p = pendingOf(sid);
+  if (!p.burst) p.burst = snapshot(s);  // a run of typing or sliding: one step to undo
+  clearTimeout(p.burstTimer);
+  p.burstTimer = setTimeout(() => closeBurst(sid), 1200);
+  s.edits = edits;
   p.ver++;
   clearTimeout(p.timer);
   p.timer = setTimeout(() => flushEdits(sid), delay);
 }
+/* The run of quick changes ends: it becomes one step in the undo list. */
+async function closeBurst(sid) {
+  const p = pendingOf(sid);
+  clearTimeout(p.burstTimer);
+  if (p.closing) return p.closing;  // (already closing: wait for it, so undo finds the step)
+  if (!p.burst) return;
+  const before = p.burst; p.burst = null;
+  p.closing = (async () => {
+    await flushEdits(sid);
+    const s = slotById(sid);
+    if (s) pushHist({ type: "slot", sid, before, after: snapshot(s) });
+  })();
+  try { await p.closing; } finally { p.closing = null; }
+}
+async function closeBursts() { for (const sid of saving.keys()) await closeBurst(sid); }
 function flushEdits(sid) {
   const p = pendingOf(sid);
   clearTimeout(p.timer); p.timer = null;
@@ -87,7 +113,7 @@ function flushEdits(sid) {
   return p.chain;
 }
 async function changeEdits(cur, mutate, opts) {
-  await flushEdits(cur.id);  // what was just typed first
+  await closeBurst(cur.id);  // what was just typed first (its own step to undo)
   const p = pendingOf(cur.id);
   const run = p.chain.then(async () => {
     const live = slotById(cur.id) || cur;  // (never an older copy of the picture)
@@ -283,11 +309,7 @@ function bindEditPane(cur, pane) {
       clearTimeout(areaTimer);
       saveSoon(cur.id, e, 120);
     };
-    r.onchange = () => setTimeout(() => {
-      if (!areaSnap) return;
-      const before = areaSnap; areaSnap = null;
-      pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) });
-    }, 400);
+    r.onchange = () => { areaSnap = null; };
   });
   bindLogoSection(cur, pane);
   bindPosterSection(cur, pane);
@@ -306,10 +328,7 @@ function bindEditPane(cur, pane) {
       clearTimeout(timer);
       saveSoon(cur.id, e, 300);
     };
-    ta.onblur = () => setTimeout(() => {
-      if (snap && JSON.stringify(snap.edits) !== JSON.stringify(slotById(cur.id).edits)) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(slotById(cur.id)) });
-      snap = null;
-    }, 450);
+    ta.onblur = () => { snap = null; closeBurst(cur.id); };
   });
   pane.querySelectorAll("[data-del-text]").forEach((b) => b.onclick = () => {
     const i = +b.dataset.delText; st.textSel = null;
@@ -335,10 +354,7 @@ function bindEditPane(cur, pane) {
       clearTimeout(timer);
       saveSoon(cur.id, e, 200);
     };
-    r.onchange = () => setTimeout(() => {
-      if (snap) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(slotById(cur.id)) });
-      snap = null;
-    }, 400);
+    r.onchange = () => { snap = null; };
   });
 }
 
@@ -410,7 +426,7 @@ function renderTool(v, cur) {
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
       ${t === "text" || t === "logo" ? `<div class="texts" id="texts"></div>` : ""}</div>
-    <div class="fixbar toolbar">${bar}</div>`;
+    <div class="fixbar toolbar below">${bar}</div>`;
   paintIcons(v);
   if (base) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
@@ -508,10 +524,30 @@ async function paintWords(cur) {
   const label = (k) => (POSTER_FIELDS[p.template] || []).find(([x]) => x === k)?.[1] || "Text";
   const place = (w) => `left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%`;
   box.classList.add("pieces-layer");
+  const live = st.tool === "poster";
   box.innerHTML = wordsList.map((w) => w.key === "logo"
-    ? `<div class="pc pc-logo${st.tool === "poster" ? " sel" : ""}" data-pc="logo" title="Drag the logo anywhere · its corner resizes it" style="${place(w)}">${st.tool === "poster" ? `<span class="pc-h"></span>` : ""}</div>`
-    : `<button class="pw" data-pk="${w.key}" aria-label="Edit ${esc(label(w.key))}" style="${place(w)}"></button>`).join("");
+    ? `<div class="pc pc-logo${st.pieceSel === "logo" ? " sel" : ""}" data-pc="logo" title="Drag the logo anywhere · its corner resizes it · Delete takes it off" style="${place(w)}">${live ? `<span class="pc-h"></span>` : ""}</div>`
+    : `<div class="pc pc-word${st.pieceSel === "w:" + w.key ? " sel" : ""}" data-pc="w:${w.key}" data-pk="${w.key}" role="button" aria-label="${esc(label(w.key))}: click to type, drag to move" style="${place(w)}">${live && st.pieceSel === "w:" + w.key ? `<span class="pc-h"></span>` : ""}</div>`).join("");
   f.appendChild(box);
+  // a word: click to type it, drag to move it, its corner to make it bigger or smaller
+  box.querySelectorAll(".pc-word").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
+    const k = el.dataset.pk;
+    changeEdits(slotById(cur.id), (ed) => {
+      const m = { x: 0, y: 0, s: 1, ...((ed.poster.moves || {})[k] || {}) };
+      if (resize) {  // grown from its top left corner: its middle moves by half the growth
+        const w = wordsList.find((x) => x.key === k), sc = Math.max(kx, ky);
+        m.s *= sc;
+        if (w) { m.x += (w.x1 - w.x0) * (sc - 1) / 2; m.y += (w.y1 - w.y0) * (sc - 1) / 2; }
+      } else { m.x += dx / r.width; m.y += dy / r.height; }
+      ed.poster.moves = { ...(ed.poster.moves || {}), [k]: m };
+    });
+  }, () => {  // only a click: its box in the panel, ready to type
+    const k = el.dataset.pk;
+    st.focusField = { k, until: Date.now() + 2500 };
+    if (st.tool !== "poster") openPart(cur, "poster");
+    focusPosterField(k);
+  }));
+  paintPieces(cur, f, wordsList);  // (pieces added on top of the layout: stripes, text…)
   box.querySelectorAll(".pc-logo").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
     const w = wordsList.find((x) => x.key === "logo");
     if (!w) return;
@@ -619,6 +655,7 @@ function posterSection(e) {
   const p = e.poster;
   const cur = slotById(st.current);
   return `<div class="section"><h3>Poster</h3>
+    ${p && cur ? inThisPoster(cur) : ""}
     ${p && cur ? teamSection(cur, p) : ""}
     ${(st.posters || []).length ? `<h4 class="sub">Your posters <small>click one to put this picture in it</small></h4><div class="my-posters">${st.posters.map((q) => `<span class="chip-x"><button data-my-poster="${esc(q.name)}" title="${esc(q.about)}">${esc(q.name)}</button><button class="x" data-del-poster="${esc(q.name)}" title="Delete this saved poster">${icon("x")}</button></span>`).join("")}</div>` : ""}
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
@@ -626,7 +663,8 @@ function posterSection(e) {
       <div class="slider"><label title="Drag the photo on the poster to move it; pinch on the trackpad to zoom too">Photo zoom</label><output>${Math.round((p.pic?.zoom || 1) * 100)}%</output><input type="range" id="pp-zoom" min="1" max="4" step="0.05" value="${p.pic?.zoom || 1}"></div>
       ${p.pic ? `<button class="btn ghost small-btn" id="pp-pic-reset" title="The photo placed as the layout had it">${icon("undo")} Photo back to its place</button>` : `<p class="notes">Drag the photo on the poster to move it in its frame.</p>`}
       <div class="slider"><label title="Make every word and banner smaller or bigger (they already fit the shape you pick)">Words and banners size</label><output>${Math.round((p.size || 1) * 100)}%</output><input type="range" id="pp-size" min="0.6" max="1.5" step="0.05" value="${p.size || 1}"></div>
-      ${p.template === "custom" ? customSection(p) : `<button class="btn wide" id="pp-customize" title="Make this layout your own: every word, panel and band becomes a piece you can move, resize and restyle">${icon("layout")} Customize this layout</button>`}
+      ${p.moves ? `<button class="btn ghost small-btn" id="pp-moves-reset" title="Every word moved or resized on the picture goes back to where the layout puts it">${icon("undo")} Words back to their places</button>` : ""}
+      ${p.template === "custom" ? customSection(p) : `${customSection(p)}<button class="btn wide" id="pp-customize" title="Make this layout your own: every word, panel and band becomes a piece you can move, resize and restyle">${icon("layout")} Customize this layout</button>`}
       ${p.template === "spotlight" ? `<div class="fld"><label>Number</label><div class="seg full small" id="pp-numstyle">
         <button data-v="badge" class="${(p.number_style || "badge") === "badge" ? "on" : ""}" title="A solid badge on the card's corner, in front">Badge</button>
         <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
@@ -654,8 +692,24 @@ function bindPosterSection(cur, pane) {
     await changeEdits(s0(), (ed) => { ed.poster = r.poster; });
     toast("Your own layout now", { small: "Drag any piece on the picture; its corner resizes it. Add more above." });
   };
-  $("#pp-customize", pane)?.addEventListener("click", customize);
+  $("#pp-customize", pane)?.addEventListener("click", async () => {
+    if (!store.get("seen.customize", false)) {  // said once: what it does, and that it's rarely needed
+      const ok = await new Promise((resolve) => {
+        const m = modal(`<header><h2>Customize this layout?</h2></header><div class="body">
+          <p>Every word, panel and band becomes a free piece: move, resize, restyle or delete any of them. Its word boxes (name, number…) become those pieces.</p>
+          <p class="notes">You can already drag any word and add stripes, text or logos to this layout without it. ⌘Z undoes it.</p></div>
+          <footer><button class="btn ghost" id="cz-no">Keep this layout</button><button class="btn primary" id="cz-yes">Customize</button></footer>`);
+        $("#cz-yes", m).onclick = () => { closeModal(); resolve(true); };
+        $("#cz-no", m).onclick = () => { closeModal(); resolve(false); };
+      });
+      store.set("seen.customize", true);
+      if (!ok) return;
+    }
+    customize();
+  });
+  $("#pp-moves-reset", pane)?.addEventListener("click", () => set((p) => { delete p.moves; }));
   bindTeam(cur, pane);
+  bindInThisPoster(cur, pane);
   bindCustom(cur, pane, set);
   pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => {
     if (s0().edits?.poster?.template === b.dataset.poster) return;  // the layout you are on: its words stay
@@ -732,8 +786,7 @@ function bindPosterSection(cur, pane) {
       saveSoon(cur.id, e2, 450);
     };
     inp.onblur = () => setTimeout(() => {
-      if (snap && JSON.stringify(snap.edits) !== JSON.stringify(s0().edits)) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(s0()) });
-      snap = null;
+      snap = null; closeBurst(cur.id);
     }, 600);
   });
 }
@@ -755,7 +808,7 @@ function logoSection(e) {
         <div class="slider"><label>Strength</label><output>${Math.round(l.opacity * 100)}%</output><input type="range" data-logo-k="opacity" min="0.1" max="1" step="0.05" value="${l.opacity}"></div>` : ""}
       </div>`; }).join("")}
     <div class="kit kit-drop" id="kit"><span class="kit-title">Your logos <small>· click one to put it on</small></span>
-      <div class="kit-grid">${kit.map((k) => `<button class="kit-logo" data-kit="${k.id}" title="${esc(k.name)}: put it on this picture"><img src="/img/logo/${enc(k.id)}/original.png" alt="${esc(k.name)}">
+      <div class="kit-grid">${kit.map((k) => `<button class="kit-logo" data-kit="${k.id}" draggable="true" title="${esc(k.name)}: click to put it on, or drag it onto the picture"><img src="/img/logo/${enc(k.id)}/original.png" alt="${esc(k.name)}">
         <span class="kit-x" data-kit-del="${k.id}" title="Delete it from your logos">${icon("x")}</span></button>`).join("")}
         <label class="kit-add" title="Add a logo: SVG, PDF, Illustrator (.ai), PNG, a JPG on white, or a screenshot of it">${icon("plus")}<span>Add a logo</span><input type="file" id="kit-file" accept="image/*,.svg,.svgz,.pdf,.ai,image/svg+xml,application/pdf" hidden></label></div>
       <small class="notes">Drop a logo here. Any background is taken away: a JPG on white or a screenshot works.</small></div>
@@ -808,7 +861,7 @@ function bindLogoSection(cur, pane) {
       clearTimeout(timer);
       saveSoon(cur.id, e2, 200);
     };
-    r.onchange = () => setTimeout(() => { if (snap) pushHist({ type: "slot", sid: cur.id, before: snap, after: snapshot(s0()) }); snap = null; }, 400);
+    r.onchange = () => { snap = null; };
   });
 }
 /* Where a logo's middle goes to sit in a corner with a margin (as brand.corner_place). */
@@ -823,11 +876,13 @@ async function loadKit() {
   editSig = "";
   if (st.tab === "edit") renderTabs();
 }
-async function addLogo(file) {
+async function addLogo(file, quiet) {
   const fd = new FormData(); fd.append("file", file, file.name);
   const t = toast("Adding your logo…", { sticky: true, spin: true, small: "Taking its background away" });
-  try { await api("/api/logos", fd); t.done("Logo added", "Click it to put it on the picture"); } catch { t.close(); }
+  let meta = null;
+  try { meta = await api("/api/logos", fd); if (quiet) t.close(); else t.done("Logo added", "Click it to put it on the picture"); } catch { t.close(); }
   await loadKit();
+  return meta;
 }
 
 // Crop and straighten ---------------------------------------------------------------------------

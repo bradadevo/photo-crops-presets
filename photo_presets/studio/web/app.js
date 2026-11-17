@@ -1177,6 +1177,10 @@ function renderTabs() {
   const cur = slotById(st.current);
   const can = cur && cur.state === "done";
   if (can && st.editWhenReady === cur.id) { st.tab = "edit"; st.editWhenReady = null; }
+  if (can && st.toolWhenReady && !st.editWhenReady) {  // (a picture just made for a poster: its Poster tool opens)
+    const t = st.toolWhenReady; st.toolWhenReady = null;
+    if (st.tool !== t) setTimeout(() => { if (st.tool !== t) setTool(t); });
+  }
   if (cur && st.editWhenReady && st.editWhenReady !== cur.id) st.editWhenReady = null;  // (you moved on)
   if (!can && st.tab === "edit") st.tab = "looks";
   $$(".tabs button").forEach((b) => {
@@ -1287,6 +1291,7 @@ function reelFit(n, sec, max) {
 async function addPhotos(kind) {
   const r = await api(kind === "folder" ? "/api/photos/folder" : "/api/photos/choose", {});
   afterAdd(r.added);
+  return r.added || [];
 }
 async function upload(files) {
   const PHOTO = /\.(jpe?g|png|heic|heif|webp|tiff?|arw|dng|cr2|cr3|nef|raf|orf|rw2)$/i;
@@ -1313,6 +1318,7 @@ async function upload(files) {
     }
     t.close(); afterAdd(added);
   } catch { t.close(); if (added.length) afterAdd(added); }
+  return added;
 }
 async function afterAdd(added) {
   if (!added?.length) return;
@@ -1333,6 +1339,8 @@ window.addEventListener("drop", async (e) => {
   e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
   if (e.target.closest?.("#r-order")) return;
   if (e.target.closest?.(".kit-drop")) { for (const f of e.dataTransfer?.files || []) await addLogo(f); return; }
+  const fr = $("#frame")?.getBoundingClientRect();  // (by where it was let go: the window's drop layer is over the picture)
+  if (fr && e.clientX >= fr.left && e.clientX <= fr.right && e.clientY >= fr.top && e.clientY <= fr.bottom && await droppedOnPicture(e)) return;
   const files = await droppedFiles(e.dataTransfer);
   const drawn = files.filter((f) => DRAWN.test(f.name));  // an SVG, PDF or Illustrator file is a logo, never a photo
   for (const f of drawn) await addLogo(f);
@@ -1388,8 +1396,12 @@ function showHelp() {
 }
 
 document.addEventListener("keydown", (e) => {
+  const undoKey = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z";
+  // ⌘Z in the edit panel's boxes undoes the picture's last change (the box shows it), not just letters
+  const ownBox = e.target.closest?.("#pane-edit input:not(#e-name):not(#pp-name), #pane-edit textarea");
+  if (undoKey && ownBox && st.mode === "edit") { e.preventDefault(); ownBox.blur(); (e.shiftKey ? redo : undo)(); return; }
   if (e.target.closest?.("input, textarea, select")) return;
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { e.preventDefault(); (e.shiftKey ? redo : undo)(); return; }
+  if (undoKey) { e.preventDefault(); (e.shiftKey ? redo : undo)(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !String(window.getSelection())) {
     const cur = slotById(st.current);
     if (cur?.state === "done" && st.mode === "edit") { e.preventDefault(); copyPicture(cur); }
@@ -1566,3 +1578,13 @@ function watchPicture(cur) {
     $("#ready-retry")?.addEventListener("click", () => { img.src = img.src.split("?")[0] + "?r=" + Date.now(); watchPicture(cur); });
   }, { once: true });
 }
+
+document.addEventListener("dragover", (e) => {
+  const f = $("#frame");
+  if (!f) return;
+  const r = f.getBoundingClientRect(), inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  f.classList.toggle("drop-here", inside && [...(e.dataTransfer?.types || [])].some((t) => t === "application/x-allpro-logo" || t === "Files"));
+  if (inside) e.preventDefault();
+});
+document.addEventListener("dragend", () => $("#frame")?.classList.remove("drop-here"));
+document.addEventListener("drop", () => $("#frame")?.classList.remove("drop-here"), true);

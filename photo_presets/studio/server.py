@@ -1416,6 +1416,35 @@ def _jersey_number(path: Path, crop: str) -> str:
         return ""
 
 
+@app.post("/api/slots/{sid}/swap")
+async def swap_poster(sid: int, req: Request):
+    """{photo} or {look}: this poster (its words, logo, pieces, everything) with another photo in it, or
+    with another look on its photo. A new picture, opened for you; the first stays as it was."""
+    s = S.slot(sid)
+    body = await req.json()
+    design = design_of(s.result.edits)
+    if not design.get("poster"):
+        raise HTTPException(400, "Make a poster on this picture first")
+    if body.get("look"):
+        saved = presets.load_all()
+        name = body["look"]
+        if name not in saved and name != "Original":
+            raise HTTPException(404, "That look is no longer here")
+        base = dict(saved[name]) if name in saved else dict(ORIGINAL)
+        base.pop("design", None)
+        recipe = {**base, "name": name if name != "Original" else "Poster", "design": design}
+        pid, path = s.photo, Path(s.source) if s.source else S.photo(s.photo).path
+    else:
+        pid = int(body.get("photo", -1))
+        if pid not in S.photos:
+            raise HTTPException(404, "That photo is no longer here")
+        first = {k: v for k, v in design["poster"].items() if k != "pic"}  # (the new photo framed on its player)
+        recipe = {k: v for k, v in s.result.recipe.items() if k not in ("match", "design", "team_number")}
+        recipe.update(name=s.look if s.look != "Original" else "Poster", design={**design, "poster": first})
+        path = S.photo(pid).path
+    return {"slot": start_run([(pid, Job(path, recipe, 0))], s.crop)[0]}
+
+
 @app.post("/api/slots/{sid}/team")
 async def team_posters(sid: int, req: Request):
     """{photos: [ids]}: this picture's poster (and look) made for each of these photos: one family, each
