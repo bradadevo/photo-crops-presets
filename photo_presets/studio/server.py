@@ -16,6 +16,7 @@ import io
 import itertools
 import os
 import json
+import uuid
 import re
 import shutil
 import subprocess
@@ -51,7 +52,9 @@ PREFS = (STATE or CONFIG) / "studio.json"
 EXAMPLES = Path("~/.cache/photo-crops-presets/examples").expanduser()  # each look's last picture, for the picker
 WORK = Path(tempfile.mkdtemp(prefix="allprophoto-"))  # songs for reels
 ADDED = (STATE / "added") if STATE else Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted
-EDITED = ADDED.parent / "edited"  # photos as edited, to make more looks on top of the edits
+EDITED = ADDED.parent / "edited"
+if STATE:  # a test copy: its own presets too (never your real ones)
+    presets.PRESETS_FILE = STATE / "presets.json"  # photos as edited, to make more looks on top of the edits
 SESSION = (STATE or CONFIG) / "studio-session.json"  # the photos you are working on, kept for next time
 # the looks made, with their edits, picks and stars, kept for next time (pictures at preview size)
 LOOKS = (STATE / "looks") if STATE else Path("~/.cache/photo-crops-presets/session-looks").expanduser()
@@ -598,6 +601,8 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
         if placed:
             r = dataclasses.replace(r, edits=edits.clean({"removals": placed}))
     if design:  # the preset's poster, text and logos, on this photo
+        if job.recipe.get("team_number") and design.get("poster"):  # one of a team's: this player's number, read off their shirt
+            design = {**design, "poster": poster.with_player(design["poster"], number=_jersey_number(job.path, crop))}
         r = dataclasses.replace(r, edits=edits.clean({**(r.edits or {}), **design}))
     slot.result, slot.secs, slot.state = r, took, "done"
 
@@ -870,6 +875,7 @@ async def run(req: Request):
     if not pids:
         raise HTTPException(400, "Add a photo first")
     crop = body.get("crop", "none") if body.get("crop") in CROPS else "none"
+    run_tag = uuid.uuid4().hex[:6]
     source = {p: S.photo(p).path for p in pids}
     if body.get("from_edits"):  # on top of the photo as edited (where it has been)
         for p in pids:
@@ -886,7 +892,7 @@ async def run(req: Request):
         names = [n for n in body.get("looks", []) if n in saved]
         if not names:
             raise HTTPException(400, "Choose at least one look")
-        jobs = [(p, Job(source[p], dict(saved[n], name=n), 0)) for n in names for p in pids]
+        jobs = [(p, Job(source[p], _for_team(dict(saved[n], name=n), n, run_tag), 0)) for n in names for p in pids]
         save_prefs({"crop": crop})
         return {"slots": start_run(jobs, crop, by_photo=pids)}
     save_prefs({"crop": crop})
@@ -1315,7 +1321,9 @@ def saved_posters() -> list[dict]:
 async def poster_words(req: Request):
     """{poster, logo}: where each of its words sits (shares), for clicking one on the picture."""
     body = await req.json()
-    return {"words": await asyncio.to_thread(poster.words, body.get("poster") or {}, bool(body.get("logo")))}
+    p = body.get("poster") or {}
+    art = brand.load(E.brand_dir, p.get("logo") or "") if p.get("logo") else None
+    return {"words": await asyncio.to_thread(poster.words, p, bool(body.get("logo")), art)}
 
 
 @app.post("/api/poster/customize")
@@ -1362,6 +1370,61 @@ def delete_poster(name: str):
 
 
 DESIGN = ("poster", "texts", "logos")  # the parts of a picture's edits that fit any photo
+
+
+def _for_team(recipe: dict, name: str, tag: str) -> dict:
+    """A saved preset with a poster, made on photos: one team family per look and run (so the team list
+    shows them together), each player's name left to type and number read off their shirt."""
+    d = recipe.get("design") or {}
+    if not d.get("poster"):
+        return recipe
+    first = {k: v for k, v in d["poster"].items() if k != "pic"}
+    family = (tag + uuid.uuid5(uuid.NAMESPACE_DNS, name).hex)[:12]
+    return {**recipe, "design": {**d, "poster": poster.with_player({**first, "family": family}, name="NAME", number="")},
+            "team_number": True}
+
+
+def _jersey_number(path: Path, crop: str) -> str:
+    """The number on the main player's shirt in this photo (read by the Mac), or "" when it can't be read."""
+    try:
+        sc = players.scan(path)
+        p = E.prepared(path, crop)
+        fx, fy = engine.focus(p.scene)
+        if p.box is not None:  # (a cropped photo: back to the whole photo's shares)
+            x0, y0, x1, y1 = p.box
+            fx, fy = x0 + fx * (x1 - x0), y0 + fy * (y1 - y0)
+        who = players.at(sc, fx, fy)
+        if who is None and sc.people:
+            who = min(sc.people, key=lambda s: ((s.box[0] + s.box[2]) / 2 - fx) ** 2 + ((s.box[1] + s.box[3]) / 2 - fy) ** 2)
+        return (who.number or "") if who else ""
+    except Exception:
+        return ""
+
+
+@app.post("/api/slots/{sid}/team")
+async def team_posters(sid: int, req: Request):
+    """{photos: [ids]}: this picture's poster (and look) made for each of these photos: one family, each
+    with the player's number read off their shirt and the name left for you to type."""
+    s = S.slot(sid)
+    design = design_of(s.result.edits)
+    if not design.get("poster"):
+        raise HTTPException(400, "Make a poster on this picture first")
+    pids = [int(p) for p in (await req.json()).get("photos", []) if int(p) in S.photos and int(p) != s.photo]
+    if not pids:
+        raise HTTPException(400, "Choose the other players' photos")
+    family = design["poster"].get("family") or uuid.uuid4().hex[:8]
+    if not design["poster"].get("family"):  # this picture is the first of the family
+        async with s.edit_lock:
+            e = dict(s.result.edits or {})
+            e["poster"] = {**e["poster"], "family": family}
+            with S.lock:
+                s.result, s.ver = dataclasses.replace(s.result, edits=edits.clean(e)), s.ver + 1
+    first = {k: v for k, v in design["poster"].items() if k != "pic"}  # (each photo starts framed on its own player)
+    d = {**design, "poster": poster.with_player({**first, "family": family}, name="NAME", number="")}
+    recipe = {k: v for k, v in s.result.recipe.items() if k not in ("match", "design", "team_number")}
+    recipe.update(name=s.look if s.look != "Original" else "Poster", design=d, team_number=True)
+    jobs = [(p, Job(S.photo(p).path, dict(recipe), 0)) for p in pids]
+    return {"slots": start_run(jobs, s.crop, by_photo=pids), "family": family}
 
 
 def design_of(e: dict | None) -> dict:

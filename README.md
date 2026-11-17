@@ -298,6 +298,21 @@ width), and **Words and banners size** makes them all smaller or bigger.
 Exporting a poster in other sizes lays it out again for each size's shape
 (nothing is cropped off), and export has a **Wide 16:9** size too.
 
+**A poster for the whole team**: make a poster on one player's picture
+(Spotlight, Name Stack, Goal, a custom one…), then press **Make this poster
+for the team** and pick the other players' photos. Each gets the same design
+and look; each player's number is read off their shirt when it can be seen,
+and the names are left for you. **This poster for the team** (top of the
+Poster panel) lists them all: type each name and number (Return goes to the
+next), click a picture to open it and drag its photo to place that player.
+Making a saved poster preset on several photos lists them the same way.
+
+**Moving things on a poster**: in the Poster tool, drag the photo to move it in
+the poster (or in Spotlight's card), pinch or use **Photo zoom** to zoom, and
+**Photo back to its place** undoes it. Drag the logo anywhere on any layout,
+its corner to resize it. On a poster, Crop opens the Poster tool (what you see
+is what is exported).
+
 **Custom posters**: **Custom ✦** (or **Customize this layout**) turns the
 layout you are on into your own: every word, panel and band becomes a piece.
 **Add** a title, text, number badge, score banner, color band, panel, line or

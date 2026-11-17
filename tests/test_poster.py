@@ -112,3 +112,27 @@ def test_words_typed_for_another_layout_are_kept_for_coming_back():
     from photo_presets import poster
     p = poster.clean({"template": "gameday", "kept": {"final": {"home_score": "5", "away_score": "2", "bogus": "x"}, "nope": {"title": "x"}}})
     assert p["kept"] == {"final": {"home_score": "5", "away_score": "2"}}
+
+
+def test_each_players_name_and_number_go_where_the_layout_has_them():
+    from photo_presets import poster
+    p = poster.with_player(poster.clean({"template": "spotlight"}), name="AIDEN", number="11")
+    assert p["title"] == "AIDEN" and p["number"] == "11"
+    c = poster.customized({"template": "spotlight"})
+    c2 = poster.with_player(c, name="MATEO", number="9")
+    texts = {e.get("text") for e in c2["elements"]}
+    assert "MATEO" in texts and "9" in texts and "LINCOLN" not in texts
+    assert poster.clean({"template": "spotlight", "family": "abc"})["family"] == "abc"
+
+
+def test_the_photo_and_the_logo_can_be_placed_by_hand():
+    import numpy as np
+    from photo_presets import poster
+    from PIL import Image
+    logo = Image.new("RGBA", (40, 40), (255, 0, 0, 255))
+    p = poster.clean({"template": "gameday", "logo_at": {"x": 0.25, "y": 0.5, "size": 0.2}, "pic": {"x": 0.1, "zoom": 2}})
+    out = poster.compose(np.full((500, 400, 3), 0.3, np.float32), None, p, logo)
+    h, w = out.shape[:2]
+    assert out[h // 2, w // 4, 0] > 0.9 and out[h // 2, w // 4, 1] < 0.1  # the logo where it was put
+    box = next(b for b in poster.words(p, True, logo) if b["key"] == "logo")
+    assert abs((box["x0"] + box["x1"]) / 2 - 0.25) < 0.01

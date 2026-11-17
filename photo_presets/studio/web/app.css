@@ -762,3 +762,27 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .frame.waiting img.after { opacity: 0; }
 .frame .tag.ready-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; display: inline-flex; gap: 8px; align-items: center; }
 .ready-note .link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+/* the photo in a poster: drag it to place it */
+.frame.photo-drag { cursor: grab; }
+.frame.photo-drag.dragging-photo { cursor: grabbing; }
+.frame.dragging-photo .pwords { opacity: .35; }
+.small-btn { padding: 4px 10px; font-size: 12px; margin: -4px 0 8px; }
+/* a team's posters */
+.team-cta { margin: 6px 0 12px; justify-content: center; gap: 8px; }
+.team-box { margin: 4px 0 14px; padding: 10px; border: 1px solid var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.team-box h4.sub { margin-top: 0; }
+.team-list { display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
+.team-row { display: flex; gap: 6px; align-items: center; }
+.team-row.on .team-pic { outline: 2px solid var(--accent); }
+.team-pic { width: 40px; height: 50px; flex: none; border-radius: 6px; overflow: hidden; border: 0; padding: 0; background: var(--panel-3); cursor: pointer; display: grid; place-items: center; }
+.team-pic img { width: 100%; height: 100%; object-fit: cover; }
+.team-row .field { flex: 1; min-width: 0; }
+.team-row .field.num { flex: 0 0 52px; text-align: center; }
+.team-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; max-height: 52vh; overflow-y: auto; }
+.tp { position: relative; border: 2px solid transparent; border-radius: 10px; padding: 0; background: var(--panel-2); cursor: pointer; overflow: hidden; text-align: left; }
+.tp img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; opacity: .5; }
+.tp.on { border-color: var(--accent); }
+.tp.on img { opacity: 1; }
+.tp small { display: block; padding: 4px 6px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp .check { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.35); }
+.tp.on .check { background: var(--accent); }

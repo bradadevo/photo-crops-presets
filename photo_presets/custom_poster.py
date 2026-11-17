@@ -21,7 +21,7 @@ import re
 import numpy as np
 from PIL import Image, ImageDraw
 
-TYPES = ("text", "badge", "box", "rule", "logo")
+TYPES = ("text", "badge", "box", "rule", "logo", "card")
 TEXT_STYLES = ("heavy", "bold", "clean", "spaced", "outline", "banner")
 LIMIT = 30  # pieces on one poster
 
@@ -60,20 +60,39 @@ def clean(elements) -> list[dict]:
                      color=_hex(e.get("color"), "#d4af37"))
         elif t == "logo":
             c.update(logo=str(e.get("logo") or "")[:20], size=_num(e.get("size"), 0.03, 0.8, 0.13))
+        elif t == "card":  # the photo in a white-edged card, the players breaking out of its top
+            c.update(w=_num(e.get("w"), 0.1, 1.0, 0.82), h=_num(e.get("h"), 0.1, 1.0, 0.6), border=bool(e.get("border", True)))
         out.append(c)
     return out[:LIMIT]
 
 
-def draw(pic: np.ndarray, m, p: dict, W: int, H: int, u: float, color, logos, over, shadowed, say, font, boxes) -> np.ndarray:
-    """The custom poster (floats 0-1): pic is the picture filling the poster, m its players (or None)."""
+def draw(pic: np.ndarray, m, p: dict, W: int, H: int, u: float, color, logos, over, shadowed, say, font, boxes,
+         card=None) -> np.ndarray:
+    """The custom poster (floats 0-1): pic is the picture filling the poster, m its players (or None);
+    card(el) draws a photo card (the picture in it, the players breaking out) on the poster."""
+    cards = [e for e in (p.get("elements") or []) if e["type"] == "card"]
+    if p.get("background") == "team" or cards:  # a team-color background (the photo is in its card)
+        y0 = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
+        c = np.array(color, np.float32)
+        out = np.broadcast_to(c * 0.35 * (1 - y0) * 0.6 + c * 0.55 * (1 - y0) + 0.04, (H, W, 3)).astype(np.float32).copy()
+        for e in cards:
+            out = card(out, e) if card else out
+            if boxes is not None:
+                w, h = e["w"] * W, e["h"] * H
+                boxes.append((f"el:{e['id']}", (e["x"] * W - w / 2, e["y"] * H - h / 2, e["x"] * W + w / 2, e["y"] * H + h / 2)))
+        return _pieces(out, out.copy(), None, [e for e in p.get("elements") or [] if e["type"] != "card"], W, H, u, color, logos,
+                       over, shadowed, say, font, boxes)
     out = pic.astype(np.float32)
     y = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
     top, bottom = float(p.get("fade_top", 0.35)), float(p.get("fade_bottom", 0.55))
     if top or bottom:  # a dark fade at the top and the bottom, for the words to read
         shade = top * np.clip(1 - y / 0.35, 0, 1) ** 1.6 + bottom * np.clip((y - 0.55) / 0.45, 0, 1) ** 1.3
         out = out * (1 - np.clip(shade, 0, 0.92))
+    return _pieces(out, pic, m, p.get("elements") or [], W, H, u, color, logos, over, shadowed, say, font, boxes)
+
+
+def _pieces(out, pic, m, els, W, H, u, color, logos, over, shadowed, say, font, boxes) -> np.ndarray:
     team = tuple(int(c * 255) for c in color)
-    els = p.get("elements") or []
     for behind in (True, False):
         group = [e for e in els if e["behind"] == behind]
         if group:
@@ -168,6 +187,9 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
         n += 1
         els.append({"id": f"e{n}", "behind": False, **kw})
 
+    if t == "spotlight":  # its card, as a piece: the photo in it, the player breaking out of its top
+        cy0, cy1 = max(u * 0.2, H * 0.14), H - u * 0.2
+        add(type="card", x=0.5, y=(cy0 + cy1) / 2 / H, w=0.82, h=(cy1 - cy0) / H)
     if t == "final":
         add(type="box", x=0.5, y=(H - u * 0.18) / H, w=0.86, h=0.2, color="#0a0c10", opacity=0.66, accent=True)
     if t == "matchday":
@@ -175,6 +197,8 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
     seen = set()
     for w in words:
         k = w["key"]
+        if k == "logo":  # (the logo is placed below, as its own piece)
+            continue
         if k in seen and t == "name":
             continue
         seen.add(k)

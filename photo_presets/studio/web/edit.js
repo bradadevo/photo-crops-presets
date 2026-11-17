@@ -124,7 +124,7 @@ const TEXT_COLORS = ["#ffffff", "#111111", "#f5c443", "#1f2a44", "#e63946", "#86
 const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
 
 let editSig = "";
-const paneSignature = (cur) => `${cur.id}:${cur.ver}:${st.photos.find((p) => p.id === cur.photo)?.edited}:${st.photos.length}:${st.areaSel}:${st.textSel}:${hist.undo.length}:${hist.redo.length}:${st.tool}`;
+const paneSignature = (cur) => `${cur.id}:${cur.ver}:${familyOf(cur.edits?.poster) ? familySlots(familyOf(cur.edits.poster)).map((s) => s.id + s.state).join(",") : ""}:${st.photos.find((p) => p.id === cur.photo)?.edited}:${st.photos.length}:${st.areaSel}:${st.textSel}:${hist.undo.length}:${hist.redo.length}:${st.tool}`;
 
 function renderEdit(cur) {
   const sig = paneSignature(cur);
@@ -189,7 +189,7 @@ function renderEdit(cur) {
       <button class="btn" id="e-match">${icon("sun")} Match every photo's light to this one</button>` : ""}
       ${anyMatched ? `<button class="btn ghost" id="e-unmatch">${icon("undo")} Undo matching</button>` : ""}
     </div></div>
-    <div class="section"><h3>Save as a preset</h3><div class="inline"><input class="field" id="e-name" placeholder="Preset name">
+    <div class="section"><h3>Save as a preset</h3><div class="inline"><input class="field" id="e-name" placeholder="Name it, then Save" value="${esc(st.presetName || "")}">
       <button class="btn" id="e-save">${icon("save")} Save</button></div>
       ${e.poster || texts.length || (e.logos || []).length ? `<label class="check-row"><input type="checkbox" id="e-design" checked>
         <span>Keep the ${[e.poster && "poster", texts.length && "text", (e.logos || []).length && "logo"].filter(Boolean).join(", ")} in it<small>Make it on any photo: the same design, with that photo in it</small></span></label>` : ""}</div>
@@ -250,12 +250,18 @@ function bindEditPane(cur, pane) {
     editSig = ""; refresh();
   });
   $("#e-unmatch", pane)?.addEventListener("click", async () => { await api("/api/match/clear", {}); toast("Matching undone"); editSig = ""; refresh(); });
+  const nameBox = $("#e-name", pane);
+  nameBox.oninput = () => { st.presetName = nameBox.value; };  // (kept while the panel is drawn again)
+  nameBox.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); $("#e-save", pane).click(); } };
   $("#e-save", pane).onclick = async () => {
-    const name = $("#e-name", pane).value.trim();
-    if (!name) { $("#e-name", pane).focus(); return; }
+    const name = nameBox.value.trim();
+    if (!name) { nameBox.focus(); toast("Type a name for the preset first", { small: "Then press Save (or Return)" }); return; }
     const design = !!$("#e-design", pane)?.checked;
     await api(`/api/slots/${cur.id}/save_preset`, { name, design });
-    toast(`Saved “${name}” under Mine`, { small: design ? "Pick it in Looks and Make: any photo gets the same design" : "" }); loadLooks();
+    st.presetName = "";
+    await loadLooks();
+    st.filter = "Mine"; store.set("filter", "Mine"); renderLooks(true);  // (the Looks tab opens on your presets)
+    toast(`Saved the preset “${name}”`, { small: `It's in Looks › Mine${design ? ", with its poster: pick it and Make on any photo" : ""}` });
   };
   // parts
   pane.querySelectorAll("[data-pick-area]").forEach((b) => b.onclick = () => {
@@ -356,6 +362,11 @@ async function sendAdjust(id, vals) {
 function setTool(tool) {
   const cur = slotById(st.current);
   if (!cur || cur.state !== "done") return;
+  if (tool === "crop" && cur.edits?.poster && st.tool !== "crop") {  // on a poster: move the photo in it, as you see it
+    toast("On a poster, drag the photo to move it", { small: "Photo zoom is in the Poster panel. Crop works on pictures without a poster." });
+    tool = "poster";
+    if (st.tool === "poster") return;
+  }
   if (tool === "cutout") { st.fixing = !st.fixing; st.tool = null; }
   else { st.tool = st.tool === tool ? null : tool; st.fixing = false; }
   st.compare = false; st.zoom.on = false; st.view = "single"; st.cropDraft = null; st.openGroups = {};
@@ -403,7 +414,7 @@ function renderTool(v, cur) {
   paintIcons(v);
   if (base) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
-  if (t === "poster") paintWords(cur);
+  if (t === "poster") { paintWords(cur); bindPhotoDrag(cur); }
   watchPicture(cur);
   $("[data-done]", v).onclick = () => setTool(t);
   $("[data-add-text]", v)?.addEventListener("click", () => addText(slotById(cur.id)));
@@ -495,9 +506,21 @@ async function paintWords(cur) {
   const box = document.createElement("div");
   box.className = "pwords" + (st.tool === "poster" ? " live" : "");
   const label = (k) => (POSTER_FIELDS[p.template] || []).find(([x]) => x === k)?.[1] || "Text";
-  box.innerHTML = wordsList.map((w) => `<button class="pw" data-pk="${w.key}" aria-label="Edit ${esc(label(w.key))}"
-    style="left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%"></button>`).join("");
+  const place = (w) => `left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%`;
+  box.classList.add("pieces-layer");
+  box.innerHTML = wordsList.map((w) => w.key === "logo"
+    ? `<div class="pc pc-logo${st.tool === "poster" ? " sel" : ""}" data-pc="logo" title="Drag the logo anywhere · its corner resizes it" style="${place(w)}">${st.tool === "poster" ? `<span class="pc-h"></span>` : ""}</div>`
+    : `<button class="pw" data-pk="${w.key}" aria-label="Edit ${esc(label(w.key))}" style="${place(w)}"></button>`).join("");
   f.appendChild(box);
+  box.querySelectorAll(".pc-logo").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
+    const w = wordsList.find((x) => x.key === "logo");
+    if (!w) return;
+    changeEdits(slotById(cur.id), (ed) => {  // the logo where you put it (its size by its width)
+      const cx = (w.x0 + w.x1) / 2 + dx / r.width, cy = (w.y0 + w.y1) / 2 + dy / r.height;
+      const size = (w.x1 - w.x0) * (resize ? Math.max(kx, ky) : 1);
+      ed.poster.logo_at = { x: resize ? w.x0 + size / 2 : cx, y: resize ? w.y0 + (w.y1 - w.y0) * Math.max(kx, ky) / 2 : cy, size };
+    }, { keepPane: false });
+  }));
   box.querySelectorAll(".pw").forEach((b) => b.onpointerdown = (e) => {  // (on press: the layer may be drawn again before release)
     e.preventDefault(); e.stopPropagation();
     const k = b.dataset.pk;
@@ -594,9 +617,14 @@ const WORD_COLORS = ["#ffffff", "#111111", "#d4af37", "#c8102e", "#0b3d91", "#1f
 const TEAM_COLORS = ["#1f2a44", "#0b3d91", "#b3121a", "#0f5f3a", "#5b2a86", "#d97706", "#111111"];
 function posterSection(e) {
   const p = e.poster;
+  const cur = slotById(st.current);
   return `<div class="section"><h3>Poster</h3>
+    ${p && cur ? teamSection(cur, p) : ""}
+    ${(st.posters || []).length ? `<h4 class="sub">Your posters <small>click one to put this picture in it</small></h4><div class="my-posters">${st.posters.map((q) => `<span class="chip-x"><button data-my-poster="${esc(q.name)}" title="${esc(q.about)}">${esc(q.name)}</button><button class="x" data-del-poster="${esc(q.name)}" title="Delete this saved poster">${icon("x")}</button></span>`).join("")}</div>` : ""}
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
     ${p ? `<div class="fld"><label>Shape <small class="faint">· what you see is what's exported</small></label><div class="shape-picks" id="pp-shape">${POSTER_SHAPES.map(([v, l, sub, w, h]) => `<button data-v="${v}" class="${p.shape === v ? "on" : ""}" title="${esc(sub)}"><i style="aspect-ratio:${w}/${h}"></i><b>${l}</b><small>${esc(sub)}</small></button>`).join("")}</div></div>
+      <div class="slider"><label title="Drag the photo on the poster to move it; pinch on the trackpad to zoom too">Photo zoom</label><output>${Math.round((p.pic?.zoom || 1) * 100)}%</output><input type="range" id="pp-zoom" min="1" max="4" step="0.05" value="${p.pic?.zoom || 1}"></div>
+      ${p.pic ? `<button class="btn ghost small-btn" id="pp-pic-reset" title="The photo placed as the layout had it">${icon("undo")} Photo back to its place</button>` : `<p class="notes">Drag the photo on the poster to move it in its frame.</p>`}
       <div class="slider"><label title="Make every word and banner smaller or bigger (they already fit the shape you pick)">Words and banners size</label><output>${Math.round((p.size || 1) * 100)}%</output><input type="range" id="pp-size" min="0.6" max="1.5" step="0.05" value="${p.size || 1}"></div>
       ${p.template === "custom" ? customSection(p) : `<button class="btn wide" id="pp-customize" title="Make this layout your own: every word, panel and band becomes a piece you can move, resize and restyle">${icon("layout")} Customize this layout</button>`}
       ${p.template === "spotlight" ? `<div class="fld"><label>Number</label><div class="seg full small" id="pp-numstyle">
@@ -613,7 +641,6 @@ function posterSection(e) {
       <div class="inline save-poster"><input class="field" id="pp-name" placeholder="Name this poster">
         <button class="btn" id="pp-save" title="Save this poster (layout, words, text, logo) to put any picture into it">${icon("save")} Save poster</button></div>
       <button class="btn ghost" id="pp-off">${icon("trash")} No poster</button>` : ""}
-    ${(st.posters || []).length ? `<h4 class="sub">Your posters <small>click one to put this picture in it</small></h4><div class="my-posters">${st.posters.map((q) => `<span class="chip-x"><button data-my-poster="${esc(q.name)}" title="${esc(q.about)}">${esc(q.name)}</button><button class="x" data-del-poster="${esc(q.name)}" title="Delete this saved poster">${icon("x")}</button></span>`).join("")}</div>` : ""}
   </div>`;
 }
 function bindPosterSection(cur, pane) {
@@ -628,6 +655,7 @@ function bindPosterSection(cur, pane) {
     toast("Your own layout now", { small: "Drag any piece on the picture; its corner resizes it. Add more above." });
   };
   $("#pp-customize", pane)?.addEventListener("click", customize);
+  bindTeam(cur, pane);
   bindCustom(cur, pane, set);
   pane.querySelectorAll("[data-poster]").forEach((b) => b.onclick = () => {
     if (s0().edits?.poster?.template === b.dataset.poster) return;  // the layout you are on: its words stay
@@ -636,17 +664,24 @@ function bindPosterSection(cur, pane) {
       const words = Object.fromEntries((POSTER_FIELDS[p.template] || []).map(([k]) => [k, p[k] ?? ""]));
       const kept = { ...(p.kept || {}), [p.template]: words };  // what you typed, for coming back to this layout
       const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || ""), ...(p.colors ? { colors: p.colors } : {}),
-        ...(p.size ? { size: p.size } : {}), kept };
+        ...(p.size ? { size: p.size } : {}), ...(p.family ? { family: p.family } : {}), kept };
       for (const k of Object.keys(p)) delete p[k];
       Object.assign(p, keep, { template: b.dataset.poster }, kept[b.dataset.poster] || {});
     });
   });
+  const ppName = $("#pp-name", pane);
+  if (ppName) {
+    ppName.value = st.posterName || "";
+    ppName.oninput = () => { st.posterName = ppName.value; };
+    ppName.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); $("#pp-save", pane).click(); } };
+  }
   $("#pp-save", pane)?.addEventListener("click", async () => {
-    const name = $("#pp-name", pane).value.trim();
-    if (!name) { $("#pp-name", pane).focus(); toast("Give the poster a name first"); return; }
+    const name = ppName.value.trim();
+    if (!name) { ppName.focus(); toast("Type a name for the poster first", { small: "Then press Save poster (or Return)" }); return; }
     await api("/api/posters", { name, slot: cur.id });
+    st.posterName = "";
     await loadPosters(); editSig = ""; renderTabs();
-    toast(`Saved the poster “${name}”`, { small: "Open any picture, then Poster: it's under Your posters" });
+    toast(`Saved the poster “${name}”`, { small: "It's under Your posters, at the top of the Poster panel on any picture" });
   });
   pane.querySelectorAll("[data-my-poster]").forEach((b) => b.onclick = async () => {
     const q = await api(`/api/posters/${enc(b.dataset.myPoster)}`);
@@ -671,6 +706,12 @@ function bindPosterSection(cur, pane) {
     toast("Taken off the poster", { small: "Type in its box to put it back, or ⌘Z" });
   });
   pane.querySelectorAll("#pp-shape button").forEach((b) => b.onclick = () => set((p) => { p.shape = b.dataset.v; }));
+  const zoom = $("#pp-zoom", pane);
+  if (zoom) {
+    zoom.oninput = () => { zoom.previousElementSibling.textContent = `${Math.round(zoom.value * 100)}%`; };
+    zoom.onchange = () => set((p) => { p.pic = { ...(p.pic || { x: 0, y: 0 }), zoom: +zoom.value }; });
+  }
+  $("#pp-pic-reset", pane)?.addEventListener("click", () => set((p) => { delete p.pic; }));
   const size = $("#pp-size", pane);
   if (size) {
     size.oninput = () => { size.previousElementSibling.textContent = `${Math.round(size.value * 100)}%`; };
@@ -1019,3 +1060,40 @@ async function loadPosters() {
   try { st.posters = (await fetch("/api/posters").then((r) => r.json())).posters; } catch { st.posters = []; }
 }
 document.addEventListener("DOMContentLoaded", loadPosters);
+
+/* In the Poster tool, the photo itself moves: drag it (anywhere but on a word, the logo or a piece) to
+   place it in the poster's frame; pinch on the trackpad to zoom. What you see is what is exported. */
+function bindPhotoDrag(cur) {
+  const f = $("#frame"), img = f?.querySelector("img.after");
+  if (!f || !img) return;
+  f.classList.add("photo-drag");
+  f.onpointerdown = (e) => {
+    if (e.button !== 0 || e.target.closest(".pw, .pc, .tag, button, .fixbar")) return;
+    e.preventDefault();
+    const r = f.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+    let dx = 0, dy = 0;
+    f.setPointerCapture(e.pointerId); f.classList.add("dragging-photo");
+    f.onpointermove = (m) => { dx = m.clientX - x0; dy = m.clientY - y0; img.style.transform = `translate(${dx}px, ${dy}px)`; };
+    f.onpointerup = () => {
+      f.onpointermove = f.onpointerup = null; f.classList.remove("dragging-photo");
+      if (Math.abs(dx) + Math.abs(dy) < 3) { img.style.transform = ""; return; }
+      changeEdits(slotById(cur.id), (ed) => {
+        const pic = ed.poster.pic || { x: 0, y: 0, zoom: 1 };
+        ed.poster.pic = { ...pic, x: (pic.x || 0) + dx / r.width, y: (pic.y || 0) + dy / r.height };
+      });
+    };
+  };
+  let wheelTimer = null, pending = null;
+  f.onwheel = (e) => {  // a pinch on the trackpad (or ⌘ + scroll): zoom the photo
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const now = slotById(cur.id).edits.poster.pic?.zoom || 1;
+    pending = Math.max(1, Math.min(4, (pending ?? now) * Math.exp(-e.deltaY * 0.01)));
+    img.style.transform = `scale(${pending / now})`;
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      const z = pending; pending = null;
+      changeEdits(slotById(cur.id), (ed) => { ed.poster.pic = { ...(ed.poster.pic || { x: 0, y: 0 }), zoom: +z.toFixed(3) }; });
+    }, 350);
+  };
+}

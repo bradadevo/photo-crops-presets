@@ -74,6 +74,23 @@ def clean(p: dict | None) -> dict | None:
             for t, w in (p.get("kept") or {}).items() if t in TEMPLATES and isinstance(w, dict)}
     if kept:
         out["kept"] = kept  # the words typed for the other layouts: back when you switch back
+    if p.get("family"):  # one of a team's posters: the same design, each player's own picture, name and number
+        out["family"] = str(p["family"])[:12]
+    pic = p.get("pic") or {}
+    try:
+        placed = {"x": round(float(np.clip(float(pic.get("x", 0)), -2, 2)), 4), "y": round(float(np.clip(float(pic.get("y", 0)), -2, 2)), 4),
+                  "zoom": round(float(np.clip(float(pic.get("zoom", 1)), 1, 4)), 3)}
+        if placed != {"x": 0, "y": 0, "zoom": 1}:
+            out["pic"] = placed  # the photo moved and zoomed in the poster, as you placed it
+    except (TypeError, ValueError, AttributeError):
+        pass
+    at = p.get("logo_at") or {}
+    try:
+        if at:
+            out["logo_at"] = {"x": round(float(np.clip(float(at["x"]), -0.2, 1.2)), 4), "y": round(float(np.clip(float(at["y"]), -0.2, 1.2)), 4),
+                              "size": round(float(np.clip(float(at.get("size", 0.13)), 0.03, 0.8)), 4)}  # the logo where you put it
+    except (TypeError, ValueError, KeyError, AttributeError):
+        pass
     if p["template"] == "custom":  # your own layout: its pieces and its fades
         from photo_presets import custom_poster
         out["elements"] = custom_poster.clean(p.get("elements"))
@@ -121,12 +138,16 @@ def _fit_font(text: str, index: int, width: float, max_px: float) -> ImageFont.F
 
 
 def _cover(arr: np.ndarray, w: int, h: int, focus: tuple[float, float]) -> tuple[np.ndarray, tuple[float, float, float]]:
-    """The picture scaled to fill w x h, cut around focus (shares). Returns it and (scale, x0, y0) of the cut."""
+    """The picture scaled to fill w x h, cut around focus (shares), then moved and zoomed as you placed
+    it (the poster's "pic"). Returns it and (scale, x0, y0) of the cut."""
     ih, iw = arr.shape[:2]
-    s = max(w / iw, h / ih)
+    pic = getattr(_NOTE, "pic", None) or {}
+    zoom = float(pic.get("zoom", 1.0))
+    s = max(w / iw, h / ih) * zoom
     big = cv2.resize(arr, (max(w, round(iw * s)), max(h, round(ih * s))), interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC)
-    x0 = int(np.clip(focus[0] * big.shape[1] - w / 2, 0, big.shape[1] - w))
-    y0 = int(np.clip(focus[1] * big.shape[0] - h / 2, 0, big.shape[0] - h))
+    # moved by you: in poster widths and heights (dragging the photo right shows more of its left)
+    x0 = int(np.clip(focus[0] * big.shape[1] - w / 2 - float(pic.get("x", 0)) * w, 0, big.shape[1] - w))
+    y0 = int(np.clip(focus[1] * big.shape[0] - h / 2 - float(pic.get("y", 0)) * h, 0, big.shape[0] - h))
     return big[y0:y0 + h, x0:x0 + w], (s, x0, y0)
 
 
@@ -189,14 +210,14 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
         boxes.append((key, d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))))
 
 
-def words(p: dict, has_logo: bool = False) -> list[dict]:
+def words(p: dict, has_logo: bool = False, logo_img: Image.Image | None = None) -> list[dict]:
     """Where each of the poster's words sits ({"key", "x0", "y0", "x1", "y1"}, shares of the poster):
     for clicking a word on the picture to edit it. The layout does not depend on the picture."""
     p = clean(p)
     if p is None:
         return []
     W, H = size_for(800, 1000, p)
-    logo = Image.new("RGBA", (10, 10), (255, 255, 255, 255)) if has_logo else None
+    logo = logo_img if logo_img is not None else (Image.new("RGBA", (10, 10), (255, 255, 255, 255)) if has_logo else None)
     _NOTE.boxes = found = []
     try:
         compose(np.zeros((H, W, 3), np.float32), None, p, logo)
@@ -210,10 +231,12 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos
     logo: an RGBA logo (or None); logos: a logo by its id (for a custom poster's logo pieces)."""
     _NOTE.colors = p.get("colors")
     _NOTE.logos = logos
+    _NOTE.pic = p.get("pic")
     try:
         return _compose(arr, matte, p, logo)
     finally:
         _NOTE.colors = None
+        _NOTE.pic = None
 
 
 def word_color(key: str, default: tuple) -> tuple:
@@ -246,7 +269,8 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
             m = cv2.GaussianBlur(np.clip((m - 0.35) / 0.4, 0, 1), (0, 0), 0.8)[..., None]
         boxes = getattr(_NOTE, "boxes", None)
         out = custom_poster.draw(pic.astype(np.float32), m, p, W, H, u, color, getattr(_NOTE, "logos", None),
-                                 _over, _shadowed, _say, _font, boxes if boxes is not None else [])
+                                 _over, _shadowed, _say, _font, boxes if boxes is not None else [],
+                                 card=lambda base, e: _card(base, arr, matte, W, H, e, box))
     elif t in MORE:
         pic, _ = _cover(arr, W, H, (fx, fy - 0.05))
         m = None
@@ -300,11 +324,74 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
             out = _over(out, lay)
     if logo is not None and t == "custom":
         pass  # (its logo is one of its pieces)
+    elif logo is not None and p.get("logo_at"):
+        out = _logo_placed(out, logo, W, H, p["logo_at"])
     elif logo is not None and t in MORE:
         out = _logo_at(out, logo, W, H, LOGO_AT[t])
     elif logo is not None:
         out = _logo_at(out, logo, W, H, "br" if t in ("gameday", "mvp") else "tl")
     return np.clip(out, 0, 1).astype(np.float32)
+
+
+def _card(out: np.ndarray, arr: np.ndarray, matte, W: int, H: int, e: dict, box) -> np.ndarray:
+    """A photo card on the poster (a custom poster's piece): the picture in it, cut so the player's head
+    sits at its top edge, a white edge and shadow, the player breaking out of its top and sides."""
+    cw, ch = max(8, int(e["w"] * W)), max(8, int(e["h"] * H))
+    cx0, cy0 = int(e["x"] * W - cw / 2), int(e["y"] * H - ch / 2)
+    return _framed(out, arr, matte, W, H, (cx0, cx0 + cw, cy0, cy0 + ch), box, e.get("border", True))
+
+
+def _framed(out, arr, matte, W: int, H: int, rect, box, border: bool = True) -> np.ndarray:
+    """The picture in a card (rect: x0, x1, y0, y1 on the poster), cut so the player's head sits at
+    its top edge (moved and zoomed as you placed it), a white edge and shadow, the player breaking
+    out of its top and sides."""
+    cx0, cx1, cy0, cy1 = rect
+    cx0, cy0 = max(0, cx0), max(0, cy0)
+    cx1, cy1 = min(W, cx1), min(H, cy1)
+    cw, ch = cx1 - cx0, cy1 - cy0
+    ih, iw = arr.shape[:2]
+    if box is not None:
+        bx0, by0, bx1, by1 = box
+        ph = (by1 - by0) * ih
+        s = max(cw / iw, ch / ih, (ch * 0.95) / max(ph, 1))  # the player about the card's height
+        s = min(s, max(cw / iw, ch / ih) * 3)
+        top = by0 * ih * s + ph * s * 0.16  # the card starts a little below the top of their head
+        left = (bx0 + bx1) / 2 * iw * s - cw / 2
+    else:
+        s, top, left = max(cw / iw, ch / ih), 0, 0
+    pic = getattr(_NOTE, "pic", None) or {}  # moved and zoomed by you, in the card
+    z = float(pic.get("zoom", 1.0))
+    s, top, left = s * z, top * z + (z - 1) * ch / 2, left * z + (z - 1) * cw / 2
+    left -= float(pic.get("x", 0)) * W
+    top -= float(pic.get("y", 0)) * H
+    big = cv2.resize(arr, (max(1, int(iw * s)), max(1, int(ih * s))), interpolation=cv2.INTER_CUBIC)
+    bm = cv2.resize(matte.astype(np.float32), (big.shape[1], big.shape[0]), interpolation=cv2.INTER_LINEAR) if matte is not None else None
+    left = int(np.clip(left, 0, max(0, big.shape[1] - cw)))
+    top = int(np.clip(top, 0, max(0, big.shape[0] - ch)))
+    card = np.zeros((ch, cw, 3), np.float32)
+    part = big[top:top + ch, left:left + cw]
+    card[:part.shape[0], :part.shape[1]] = part
+    # a white border and shadow around the card
+    lay, d = _layer((W, H))
+    b = max(3, int(W * 0.01)) if border else 0
+    d.rounded_rectangle((cx0 - b, cy0 - b, cx1 + b, cy1 + b), radius=int(W * 0.02), fill=(255, 255, 255, 255))
+    out = _over(out, _shadowed(lay, W * 0.025, 0.55))
+    out[cy0:cy1, cx0:cx1] = card
+    if bm is not None:  # the player again, over the card's edge: they break out of it
+        full = np.zeros((H, W), np.float32)
+        src = np.zeros((H, W, 3), np.float32)
+        oy, ox = cy0 - top, cx0 - left
+        Y0, X0 = max(0, oy), max(0, ox)
+        Y1, X1 = min(H, oy + big.shape[0]), min(W, ox + big.shape[1])
+        full[Y0:Y1, X0:X1] = bm[Y0 - oy:Y1 - oy, X0 - ox:X1 - ox]
+        src[Y0:Y1, X0:X1] = big[Y0 - oy:Y1 - oy, X0 - ox:X1 - ox]
+        outside = np.ones((H, W), np.float32)
+        outside[cy0:cy1, cx0:cx1] = 0
+        outside[cy1:, :] = 0  # out of the top and the sides only: never over the name below
+        solid = np.clip((full - 0.35) / 0.4, 0, 1)  # the player only, not the cut-out's faint haze
+        a = (cv2.GaussianBlur(solid, (0, 0), 0.8) * outside)[..., None]
+        out = out * (1 - a) + src * a
+    return out
 
 
 def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
@@ -324,44 +411,7 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
     # the card: the picture, cut so the player's head sits at the card's top edge
     u = _NOTE.u
     cx0, cx1, cy0, cy1 = int(W * 0.09), int(W * 0.91), int(max(u * 0.2, H * 0.14)), int(H - u * 0.2)
-    cw, ch = cx1 - cx0, cy1 - cy0
-    ih, iw = arr.shape[:2]
-    if box is not None:
-        bx0, by0, bx1, by1 = box
-        ph = (by1 - by0) * ih
-        s = max(cw / iw, ch / ih, (ch * 0.95) / max(ph, 1))  # the player about the card's height
-        s = min(s, max(cw / iw, ch / ih) * 3)
-        top = by0 * ih * s + ph * s * 0.16  # the card starts a little below the top of their head
-        left = (bx0 + bx1) / 2 * iw * s - cw / 2
-    else:
-        s, top, left = max(cw / iw, ch / ih), 0, 0
-    big = cv2.resize(arr, (max(1, int(iw * s)), max(1, int(ih * s))), interpolation=cv2.INTER_CUBIC)
-    bm = cv2.resize(matte.astype(np.float32), (big.shape[1], big.shape[0]), interpolation=cv2.INTER_LINEAR) if matte is not None else None
-    left = int(np.clip(left, 0, max(0, big.shape[1] - cw)))
-    top = int(np.clip(top, 0, max(0, big.shape[0] - ch)))
-    card = np.zeros((ch, cw, 3), np.float32)
-    part = big[top:top + ch, left:left + cw]
-    card[:part.shape[0], :part.shape[1]] = part
-    # a white border and shadow around the card
-    lay, d = _layer((W, H))
-    b = max(3, int(W * 0.01))
-    d.rounded_rectangle((cx0 - b, cy0 - b, cx1 + b, cy1 + b), radius=int(W * 0.02), fill=(255, 255, 255, 255))
-    out = _over(out, _shadowed(lay, W * 0.025, 0.55))
-    out[cy0:cy1, cx0:cx1] = card
-    if bm is not None:  # the player again, over the card's edge: they break out of it
-        full = np.zeros((H, W), np.float32)
-        src = np.zeros((H, W, 3), np.float32)
-        oy, ox = cy0 - top, cx0 - left
-        Y0, X0 = max(0, oy), max(0, ox)
-        Y1, X1 = min(H, oy + big.shape[0]), min(W, ox + big.shape[1])
-        full[Y0:Y1, X0:X1] = bm[Y0 - oy:Y1 - oy, X0 - ox:X1 - ox]
-        src[Y0:Y1, X0:X1] = big[Y0 - oy:Y1 - oy, X0 - ox:X1 - ox]
-        outside = np.ones((H, W), np.float32)
-        outside[cy0:cy1, cx0:cx1] = 0
-        outside[cy1:, :] = 0  # out of the top and the sides only: never over the name below
-        solid = np.clip((full - 0.35) / 0.4, 0, 1)  # the player only, not the cut-out's faint haze
-        a = (cv2.GaussianBlur(solid, (0, 0), 0.8) * outside)[..., None]
-        out = out * (1 - a) + src * a
+    out = _framed(out, arr, matte, W, H, (cx0, cx1, cy0, cy1), box)
     lay, d = _layer((W, H))
     title = p.get("title", "")
     f = _fit_font(title, HEAVY, W * 0.84, u * 0.075)
@@ -524,6 +574,23 @@ MORE = {"name": _name_stack, "goal": _goal, "teamcolor": _team_color, "matchday"
 LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "champions": "bc"}
 
 
+def _logo_placed(out: np.ndarray, logo: Image.Image, W: int, H: int, at: dict) -> np.ndarray:
+    """The logo with its middle where you dragged it, its width a share of the poster's."""
+    lw = max(4, int(at["size"] * W))
+    lh = max(1, int(lw * logo.height / logo.width))
+    x, y = at["x"] * W - lw / 2, at["y"] * H - lh / 2
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    lay.alpha_composite(logo.resize((lw, lh), Image.LANCZOS), (int(x), int(y)))
+    _note_box("logo", (x, y, x + lw, y + lh))
+    return _over(out, lay)
+
+
+def _note_box(key: str, box) -> None:
+    boxes = getattr(_NOTE, "boxes", None)
+    if boxes is not None:
+        boxes.append((key, box))
+
+
 def _logo_at(out: np.ndarray, logo: Image.Image, W: int, H: int, where: str) -> np.ndarray:
     u = _NOTE.u
     lw = int(u * (0.088 if where == "bc" else 0.104))
@@ -538,6 +605,7 @@ def _logo_at(out: np.ndarray, logo: Image.Image, W: int, H: int, where: str) -> 
             "bc": (W / 2 - lw / 2, H - u * 0.045 - lh)}[where]
     lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     lay.alpha_composite(art, (int(x), int(y)))
+    _note_box("logo", (x, y, x + lw, y + lh))
     return _over(out, lay)
 
 
@@ -556,3 +624,48 @@ def customized(p: dict, has_logo: bool = False) -> dict:
     return clean({**keep, "template": "custom", "elements": els,
                   "fade_top": 0.3 if p["template"] in ("final", "spotlight") else 0.1,
                   "fade_bottom": 0.62 if p["template"] != "spotlight" else 0.3})
+
+
+# A team's posters: where each player's name and number go -------------------------------------
+NAME_KEY = {"spotlight": "title", "name": "title", "teamcolor": "title", "goal": "name", "mvp": "line"}
+NUMBER_KEY = {"spotlight": "number"}
+
+
+def player_fields(p: dict) -> dict:
+    """{"name": (where, value), "number": (where, value)} on this poster: a word's key, or a custom
+    poster's piece ("el:<id>": its biggest heavy text for the name, its first badge for the number)."""
+    out = {}
+    t = p.get("template")
+    if t == "custom":
+        els = p.get("elements") or []
+        texts = [e for e in els if e["type"] == "text" and e.get("style") in ("heavy", "outline")] or [e for e in els if e["type"] == "text"]
+        if texts:
+            big = max(texts, key=lambda e: e.get("size", 0))
+            out["name"] = (f"el:{big['id']}", big.get("text", ""))
+        badge = next((e for e in els if e["type"] == "badge"), None)
+        if badge:
+            out["number"] = (f"el:{badge['id']}", badge.get("text", ""))
+        return out
+    if t in NAME_KEY:
+        out["name"] = (NAME_KEY[t], p.get(NAME_KEY[t], ""))
+    if t in NUMBER_KEY:
+        out["number"] = (NUMBER_KEY[t], p.get(NUMBER_KEY[t], ""))
+    return out
+
+
+def with_player(p: dict, name: str | None = None, number: str | None = None) -> dict:
+    """The poster with this player's name and number put where they go."""
+    p = dict(p)
+    if p.get("template") == "custom":
+        p["elements"] = [dict(e) for e in p.get("elements") or []]
+    for field_name, value in (("name", name), ("number", number)):
+        if value is None or field_name not in player_fields(p):
+            continue
+        where = player_fields(p)[field_name][0]
+        if where.startswith("el:"):
+            for e in p["elements"]:
+                if e["id"] == where[3:]:
+                    e["text"] = value
+        else:
+            p[where] = value
+    return p

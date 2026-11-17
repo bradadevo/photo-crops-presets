@@ -4,7 +4,7 @@
    them. The app draws the poster (what you see is what is exported); the page draws only the
    outlines you drag. Loaded after edit.js, whose helpers it uses. */
 
-const PIECE_NAMES = { text: "Text", badge: "Number", box: "Panel", rule: "Line", logo: "Logo" };
+const PIECE_NAMES = { text: "Text", badge: "Number", box: "Panel", rule: "Line", logo: "Logo", card: "Photo card" };
 const PIECE_STYLES = [["heavy", "Heavy"], ["bold", "Bold"], ["clean", "Clean"], ["spaced", "Spaced"], ["outline", "Outline"], ["banner", "Banner"]];
 const newId = () => "p" + Math.random().toString(36).slice(2, 8);
 
@@ -25,11 +25,12 @@ function piecesToAdd(kind, p) {
     case "panel": return [{ type: "box", w: 0.6, h: 0.14, x: 0.5, y: 0.8, color: "#0a0c10", opacity: 0.66 }];
     case "line": return [{ type: "rule", w: 0.3, thick: 0.004, x: 0.5, y: 0.9, color: "#ffffff" }];
     case "logo": return [{ type: "logo", logo: st.kit?.[0]?.id || "", size: 0.13, x: 0.88, y: 0.9 }];
+    case "card": return [{ type: "card", w: 0.82, h: 0.6, x: 0.5, y: 0.5 }];
   }
   return [];
 }
 const ADD_KINDS = [["title", "Title"], ["text", "Text"], ["badge", "Number"], ["score", "Score banner"], ["band", "Color band"],
-  ["panel", "Panel"], ["line", "Line"], ["logo", "Logo"]];
+  ["panel", "Panel"], ["line", "Line"], ["logo", "Logo"], ["card", "Photo card"]];
 
 function pieceLabel(el) {
   if (el.type === "text" || el.type === "badge") return (el.text || "").trim() || PIECE_NAMES[el.type];
@@ -59,7 +60,9 @@ function customSection(p) {
       ${t === "rule" ? `${sl("w", "Length", 0.03, 1.1, 0.01, sel.w)}${sl("thick", "Thickness", 0.001, 0.03, 0.001, sel.thick)}${colors("color", sel.color)}` : ""}
       ${t === "logo" ? `${(st.kit || []).length ? `<div class="kit-grid small" data-prop-logo>${st.kit.map((k) => `<button class="kit-logo${sel.logo === k.id ? " on" : ""}" data-v="${k.id}" title="${esc(k.name)}"><img src="/img/logo/${enc(k.id)}/original.png" alt=""></button>`).join("")}</div>`
         : `<p class="notes">Add a logo with the Logo tool first (SVG, PDF, PNG…).</p>`}${sl("size", "Size", 0.03, 0.6, 0.01, sel.size)}` : ""}
-      ${toggle("behind", "Behind the players", "They stand in front of it")}
+      ${t === "card" ? `${sl("w", "Width", 0.2, 1, 0.01, sel.w)}${sl("h", "Height", 0.2, 1, 0.01, sel.h)}${toggle("border", "White edge")}
+        <p class="notes">The photo sits in the card, the player breaking out of its top. Drag the photo in it to move it; Photo zoom is above.</p>` : ""}
+      ${t === "card" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
       <div class="inline piece-acts"><button class="btn" data-piece-dup>${icon("copy")} Duplicate</button><button class="btn ghost" data-piece-del>${icon("trash")} Delete</button></div>
       </div></div>`;
   }
@@ -143,6 +146,32 @@ function bindCustom(cur, pane, set) {
   box.querySelectorAll("[data-prop-logo] button").forEach((b) => b.onclick = () => piece((el) => { el.logo = b.dataset.v; }));
 }
 
+/* Dragging something on the poster: moved (snapping to the middle) or, by its corner, resized. When let
+   go, done(dx, dy, resized, kx, ky, frame box) in screen pixels; nothing if it was only a click. */
+function dragPiece(el, f, cur, done) {
+  el.onpointerdown = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (st.tool !== "poster") { openPart(cur, "poster"); return; }
+    const resize = !!e.target.closest(".pc-h");
+    const r = f.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+    let moved = false, dx = 0, dy = 0;
+    el.setPointerCapture(e.pointerId);
+    el.onpointermove = (m) => {
+      dx = m.clientX - start.x; dy = m.clientY - start.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+      if (resize) { el.style.width = Math.max(8, start.w + dx) + "px"; el.style.height = Math.max(6, start.h + dy) + "px"; return; }
+      let cx = (start.l + start.w / 2 + dx) / r.width;
+      if (Math.abs(cx - 0.5) < 0.012) { cx = 0.5; dx = r.width / 2 - start.l - start.w / 2; }
+      f.classList.toggle("snap-x", cx === 0.5);
+      el.style.left = start.l + dx + "px"; el.style.top = start.t + dy + "px";
+    };
+    el.onpointerup = () => {
+      el.onpointermove = el.onpointerup = null; f.classList.remove("snap-x");
+      if (moved) done(dx, dy, resize, Math.max(0.1, (start.w + dx) / start.w), Math.max(0.1, (start.h + dy) / start.h), r);
+    };
+  };
+}
+
 /* The pieces' outlines on the picture: drag to move, the corner to resize, click to choose. */
 function paintPieces(cur, f, boxes) {
   const p = cur.edits?.poster;
@@ -183,7 +212,7 @@ function paintPieces(cur, f, boxes) {
         if (!it) return;
         if (!resize) { it.x += dx / r.width; it.y += dy / r.height; return; }
         const k = Math.max(kx, ky);
-        if (it.type === "box") { it.w *= kx; it.h *= ky; } else if (it.type === "rule") { it.w *= kx; } else { it.size *= k; }
+        if (it.type === "box" || it.type === "card") { it.w *= kx; it.h *= ky; } else if (it.type === "rule") { it.w *= kx; } else { it.size *= k; }
       }, { keepPane: false });
     };
   });
@@ -206,3 +235,112 @@ document.addEventListener("keydown", (e) => {
     changeEdits(cur, (ed) => { ed.poster.elements = ed.poster.elements.filter((x) => x.id !== id); });
   }
 });
+
+/* A team's posters: the same design for each player, only their picture, name and number changed. */
+const NAME_KEY = { spotlight: "title", name: "title", teamcolor: "title", goal: "name", mvp: "line" };
+const NUMBER_KEY = { spotlight: "number" };
+function playerFields(p) {  // (as the app finds them: see poster.player_fields)
+  const out = {};
+  if (!p) return out;
+  if (p.template === "custom") {
+    const els = p.elements || [];
+    let texts = els.filter((e) => e.type === "text" && ["heavy", "outline"].includes(e.style));
+    if (!texts.length) texts = els.filter((e) => e.type === "text");
+    if (texts.length) { const big = texts.reduce((a, b) => (b.size > a.size ? b : a)); out.name = { el: big.id, value: big.text || "" }; }
+    const badge = els.find((e) => e.type === "badge");
+    if (badge) out.number = { el: badge.id, value: badge.text || "" };
+    return out;
+  }
+  if (NAME_KEY[p.template]) out.name = { key: NAME_KEY[p.template], value: p[NAME_KEY[p.template]] || "" };
+  if (NUMBER_KEY[p.template]) out.number = { key: NUMBER_KEY[p.template], value: p[NUMBER_KEY[p.template]] || "" };
+  return out;
+}
+function setPlayerField(p, which, value) {
+  const f = playerFields(p)[which];
+  if (!f) return;
+  if (f.el) { const e = p.elements.find((x) => x.id === f.el); if (e) e.text = value; } else p[f.key] = value;
+}
+const familyOf = (p) => p?.family || null;
+const familySlots = (family) => st.slots.filter((s) => s.state !== "failed" && familyOf(s.edits?.poster) === family);
+
+function teamSection(cur, p) {
+  const others = st.photos.filter((x) => x.id !== cur.photo);
+  const family = familyOf(p);
+  const fields = playerFields(p);
+  let html = "";
+  if (family) {
+    const mates = familySlots(family);
+    html += `<div class="team-box"><h4 class="sub">This poster for the team <small>${mates.length} players · type each name and number</small></h4>
+      <div class="team-list">${mates.map((s) => {
+        const pf = playerFields(s.edits?.poster);
+        const photo = st.photos.find((x) => x.id === s.photo);
+        return `<div class="team-row${s.id === cur.id ? " on" : ""}" data-team-slot="${s.id}">
+          <button class="team-pic" data-open-slot="${s.id}" title="Open this one: drag the photo to place this player">${s.state === "done" ? `<img src="${slotImg(s, "thumb")}" alt="">` : `<span class="spin"></span>`}</button>
+          ${pf.name ? `<input class="field" data-team-name="${s.id}" value="${esc(pf.name.value === "NAME" ? "" : pf.name.value)}" placeholder="Name" aria-label="Name for ${esc(photo?.name || "")}">` : ""}
+          ${pf.number ? `<input class="field num" data-team-number="${s.id}" value="${esc(pf.number.value)}" placeholder="#" maxlength="4" aria-label="Number">` : ""}
+          </div>`;
+      }).join("")}</div>
+      ${others.length > mates.length - 1 ? `<button class="btn wide" id="pp-team">${icon("layers")} Add more players…</button>` : ""}
+      <p class="notes">Numbers are read off each player's shirt (check them). Click a picture to open it and drag the photo to place that player.</p></div>`;
+  } else if (others.length) {
+    html += `<button class="btn primary wide team-cta" id="pp-team" title="The same poster for other players: only their photo, name and number change">${icon("layers")} Make this poster for the team</button>`;
+  }
+  if (!fields.name && !fields.number && family) html += `<p class="notes">This layout has no player name or number: each poster keeps the same words.</p>`;
+  return html;
+}
+
+function bindTeam(cur, pane) {
+  $("#pp-team", pane)?.addEventListener("click", () => openTeamPicker(cur));
+  pane.querySelectorAll("[data-open-slot]").forEach((b) => b.onclick = () => { select(+b.dataset.openSlot); st.tab = "edit"; st.tool = "poster"; viewerSig = ""; editSig = ""; render(); });
+  const typing = new Map();
+  const onType = (inp, which) => {
+    const sid = +(inp.dataset.teamName || inp.dataset.teamNumber);
+    inp.oninput = () => {
+      clearTimeout(typing.get(inp));
+      typing.set(inp, setTimeout(() => {
+        const s = slotById(sid);
+        if (!s?.edits?.poster) return;
+        const e2 = clone(s.edits);
+        setPlayerField(e2.poster, which, inp.value.trim() || (which === "name" ? "NAME" : ""));
+        saveSoon(sid, e2, 10);
+      }, 350));
+    };
+    inp.onkeydown = (ev) => {  // Return: the next player's box
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      const all = [...pane.querySelectorAll(`[data-team-${which}]`)], i = all.indexOf(inp);
+      (all[i + 1] || all[0])?.focus();
+    };
+  };
+  pane.querySelectorAll("[data-team-name]").forEach((i) => onType(i, "name"));
+  pane.querySelectorAll("[data-team-number]").forEach((i) => onType(i, "number"));
+}
+
+function openTeamPicker(cur) {
+  const p = cur.edits?.poster, family = familyOf(p);
+  const have = new Set(family ? familySlots(family).map((s) => s.photo) : [cur.photo]);
+  const choices = st.photos.filter((x) => !have.has(x.id));
+  if (!choices.length) { toast("Every photo already has this poster"); return; }
+  const chosen = new Set(choices.map((x) => x.id));
+  const m = modal(`<header><h2>This poster for the team</h2><p class="notes" style="margin:4px 0 0">The same design (${esc(cur.look)}) on each photo you pick. Each player's number is read off their shirt; you type the names after.</p></header>
+    <div class="body"><div class="team-pick">${choices.map((x) => `<button class="tp on" data-tp="${x.id}"><img src="/img/photo/${x.id}/thumb.jpg" alt=""><span class="check"></span><small>${esc(x.name)}</small></button>`).join("")}</div></div>
+    <footer><button class="btn ghost" id="tp-none">Pick none</button><span style="flex:1"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="tp-go"></button></footer>`);
+  const paint = () => {
+    m.querySelectorAll("[data-tp]").forEach((b) => b.classList.toggle("on", chosen.has(+b.dataset.tp)));
+    const go = $("#tp-go", m);
+    go.textContent = `Make ${plural(chosen.size, "poster")}`;
+    setOff(go, !chosen.size, "Pick at least one photo above.");
+    $("#tp-none", m).textContent = chosen.size ? "Pick none" : "Pick all";
+  };
+  m.querySelectorAll("[data-tp]").forEach((b) => b.onclick = () => { const id = +b.dataset.tp; chosen.has(id) ? chosen.delete(id) : chosen.add(id); paint(); });
+  $("#tp-none", m).onclick = () => { if (chosen.size) chosen.clear(); else choices.forEach((x) => chosen.add(x.id)); paint(); };
+  $("#tp-go", m).onclick = async () => {
+    if (!chosen.size) return;
+    closeModal();
+    await api(`/api/slots/${cur.id}/team`, { photos: [...chosen] });
+    await refresh();
+    editSig = ""; renderTabs();
+    toast(`Making ${plural(chosen.size, "poster")} for the team…`, { small: "Type each player's name in the Poster panel as they come in" });
+  };
+  paint();
+}
