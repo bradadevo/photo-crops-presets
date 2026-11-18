@@ -445,6 +445,33 @@ looks. The classic app on its own: `uv run allprophoto-classic`.
 Every picture keeps the photo's real date and camera details (date taken, camera, lens, exposure), Sony RAW files included, and saved files are dated when the photo was taken. Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
 
+### Culling (keep the best of a game, delete the rest)
+
+The **Culling** tab (also Tools → Culling) works on your folders where they are, and on whole
+tournaments (1,500+ photos stay quick: thumbnails come from the camera's own previews in about a
+minute, and only what is on screen is drawn).
+
+1. **Pass 1, the app.** Add a game's folder (or **Import from the camera card**: new photos only,
+   into a dated folder, culled while they copy). On this Mac and free, the app looks at every photo:
+   is the main player sharp (judged against the rest of the shoot, so a dull day doesn't mark
+   everything soft), are the eyes open (Apple's face quality on each player's face), did the camera's
+   focus point land on a player, is the ball in the play, the light, and which frames are one burst.
+   It marks each one **keep** or **reject**, with the reason in plain words and how sure it is. Choose
+   how many to keep (the best ones, a number or a share), how picky, and best frame per burst.
+2. **Your pass.** Starts with the photos pass 1 was least sure about. `P` keep, `X` reject, `1`–`5`
+   stars, `←` `→` next, `Space` one big photo, `Z` 100% (on the face), `C` compare a burst or your
+   selection side by side, `G` gallery, `⌘Z` undo. Your marks always win over pass 1's (dashed marks are
+   pass 1's, solid ones yours), and teach it your taste for the next game.
+3. **Finish.** **Delete rejects** moves them (JPEG and RAW together) to the Trash, with undo, after an
+   offer to take a second look at the rejects pass 1 liked best. **Keepers**: copy them to a Picks
+   folder, crop and edit them (Instagram 4:5, Story 9:16, YouTube 16:9, original size; versions O crop
+   only, A natural, B wider and softer, C punchy), or send them to Looks / Reel.
+
+Every keeper has a crop on the action in each shape (drag it to move, scroll to resize, `R` to show
+it). Gemini is used only when you ask: **Ask AI to rate** (a score, a reason and its own best crop,
+for the "Best crop" size) and the D version (its suggested adjustments). The cost shows first.
+The timeline across the top is the whole game: tall bars are the big moments.
+
 ### Tools: preset editor, Lightroom presets, assets
 
 **Preset manager**: load a preset to start from, adjust it, preview it on a
