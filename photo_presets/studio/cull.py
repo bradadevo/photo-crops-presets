@@ -81,6 +81,7 @@ class Cull:
         self.taste = taste.Taste(HOME / "cull-taste.json")
         self._pending = False
         self.trashed: dict[str, list] = {}  # undo tokens
+        self.state_file = STATE_FILE
 
     # -- keeping it across restarts
     def load(self):
@@ -89,7 +90,7 @@ class Cull:
                 return
             self.loaded = True
             try:
-                data = json.loads(STATE_FILE.read_text())
+                data = json.loads(self.state_file.read_text())
             except (OSError, ValueError):
                 data = {}
             self.marks = data.get("marks", {})
@@ -117,10 +118,10 @@ class Cull:
             data = {"next": self.next, "marks": self.marks, "ai": self.ai,
                     "shoots": [{"id": s.id, "name": s.name, "folders": s.folders, "settings": s.settings,
                                 "auto": s.auto, "pass1_at": s.pass1_at} for s in self.shoots.values()]}
-            HOME.mkdir(parents=True, exist_ok=True)
-            tmp = STATE_FILE.with_suffix(".tmp")
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(data))
-            tmp.replace(STATE_FILE)
+            tmp.replace(self.state_file)
 
     def shoot(self, sid: int) -> Shoot:
         self.load()
@@ -151,42 +152,50 @@ class Cull:
             sh = self.shoots.get(sid)
             if not sh:
                 continue
-            todo = [p for p in sh.photos if p["state"] == "new"]
+            try:
+                self._shoot_work(sh, pool)
+            except Exception as x:  # (logged; the next shoot still gets looked at)
+                print(f"culling: {sh.name}: {type(x).__name__}: {x}", flush=True)
 
-            def one_thumb(p):
-                try:
-                    p["size"] = measure.thumb(Path(p["path"]), thumb_path(p))
-                    p["state"] = "thumb"
-                except Exception as x:
-                    p["state"], p["error"] = "failed", f"{type(x).__name__}: {x}"[:160]
-                with self.lock:
-                    sh.bump(p)
-            list(pool.map(one_thumb, todo))
-            last = time.time()
-            for p in [p for p in sh.photos if p["state"] == "thumb"]:
-                if sid not in self.shoots:
-                    break
-                try:
-                    p["m"] = measure.measure(Path(p["path"]), CACHE / "m")
-                    p["state"] = "done"
-                except Exception as x:
-                    p["state"], p["error"] = "failed", f"{type(x).__name__}: {x}"[:160]
-                with self.lock:
-                    sh.bump(p)
-                if time.time() - last > 2.0:
-                    self.rerank(sh)
-                    last = time.time()
-            self.rerank(sh)
-            if sh.pass1_at is None and all(p["state"] in ("done", "failed") for p in sh.photos):
-                self.pass1(sh)
-            elif sh.pass1_at is not None:
-                # new photos (from a card still copying, or added to the folder): pass 1 marks just them
-                fresh = [p for p in sh.photos if p["path"] not in sh.auto and p["state"] == "done"]
-                if fresh:
-                    self.pass1(sh, only=[p["path"] for p in fresh])
+    def _shoot_work(self, sh: "Shoot", pool):
+        sid = sh.id
+        todo = [p for p in sh.photos if p["state"] == "new"]
+
+        def one_thumb(p):
+            try:
+                p["size"] = measure.thumb(Path(p["path"]), thumb_path(p))
+                p["state"] = "thumb"
+            except Exception as x:
+                p["state"], p["error"] = "failed", f"{type(x).__name__}: {x}"[:160]
+            with self.lock:
+                sh.bump(p)
+        list(pool.map(one_thumb, todo))
+        last = time.time()
+        for p in [p for p in sh.photos if p["state"] == "thumb"]:
+            if sid not in self.shoots:
+                break
+            try:
+                p["m"] = measure.measure(Path(p["path"]), CACHE / "m")
+                p["state"] = "done"
+            except Exception as x:
+                p["state"], p["error"] = "failed", f"{type(x).__name__}: {x}"[:160]
+            with self.lock:
+                sh.bump(p)
+            if time.time() - last > 2.0:
+                self.rerank(sh)
+                last = time.time()
+        self.rerank(sh)
+        if sh.pass1_at is None and all(p["state"] in ("done", "failed", "gone") for p in sh.photos):
+            self.pass1(sh)
+        elif sh.pass1_at is not None:
+            # new photos (from a card still copying, or added to the folder): pass 1 marks just them
+            fresh = [p for p in sh.photos if p["path"] not in sh.auto and p["state"] == "done"]
+            if fresh:
+                self.pass1(sh, only=[p["path"] for p in fresh])
 
     def rerank(self, sh: Shoot):
-        items = [(p["path"], measure.when(p["m"], Path(p["path"])), p["m"]) for p in sh.photos if p.get("m")]
+        items = [(p["path"], measure.when(p["m"], Path(p["path"])), p["m"]) for p in sh.photos
+                 if p.get("m") and p["state"] != "gone"]
         ranked = rank.rank(items, self.taste if self.taste.ready else None)
         with self.lock:
             for p in sh.photos:
@@ -238,15 +247,16 @@ class Cull:
         }
 
     def summary(self, sh: Shoot) -> dict:
-        total = len(sh.photos)
-        done = sum(1 for p in sh.photos if p["state"] in ("done", "failed"))
-        thumbs = sum(1 for p in sh.photos if p["state"] != "new")
+        here = [p for p in sh.photos if p["state"] != "gone"]  # (deleted ones are in the Trash: not waiting)
+        total = len(here)
+        done = sum(1 for p in here if p["state"] in ("done", "failed"))
+        thumbs = sum(1 for p in here if p["state"] != "new")
         keep = reject = 0
-        for p in sh.photos:
+        for p in here:
             f = self.marks.get(p["path"], {}).get("flag") or (sh.auto.get(p["path"]) or [None])[0]
             keep += f == "keep"
             reject += f == "reject"
-        yours = sum(1 for p in sh.photos if self.marks.get(p["path"], {}).get("flag"))
+        yours = sum(1 for p in here if self.marks.get(p["path"], {}).get("flag"))
         left = (total - done) * 0.45
         return {"id": sh.id, "name": sh.name, "folders": sh.folders, "total": total, "measured": done,
                 "thumbs": thumbs, "keep": keep, "reject": reject, "yours": yours, "settings": sh.settings,

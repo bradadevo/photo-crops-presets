@@ -126,7 +126,7 @@ def test_api_marks_win_and_trash_round_trip(tmp_path, monkeypatch):
     sharp = [1200, 300, 1000, 1100]
     monkeypatch.setattr(cu.measure, "measure", lambda path, cache: m(sharp=sharp[int(Path(path).stem[-1])], t_hash=1 << int(Path(path).stem[-1]) * 9))
     monkeypatch.setattr(cu.files, "to_trash", lambda paths: [(p, p + ".trashed") for p in paths if Path(p).rename(p + ".trashed") or True])
-    monkeypatch.setattr(cu, "C", cu.Cull())
+    monkeypatch.setattr(cu, "C", cu.Cull())  # (made after the paths above: it saves only there)
     c = TestClient(server.app)
     sid = c.post("/api/cull/shoots", json={"folders": [str(shoot)]}).json()["id"]
     import time
