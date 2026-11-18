@@ -963,7 +963,26 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .faint { color: var(--faint); }
 .app.cull-mode { grid-template-columns: 0 minmax(0, 1fr) 0; grid-template-areas: "top top top" "cull cull cull"; }
 .app.cull-mode .rail, .app.cull-mode .stage, .app.cull-mode .inspector { display: none; }
-.cull { grid-area: cull; display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; min-height: 0; }
+.cull { grid-area: cull; position: relative; display: grid; grid-template-columns: var(--cl, 250px) minmax(0, 1fr) var(--cr, 300px); min-height: 0; }
+.cull.guiding .cu-tl, .cull.guiding .cu-keys { display: none; }
+.cull.guiding { grid-template-columns: var(--cl, 250px) minmax(0, 1fr) 0; } .cull.guiding .cu-info, .cull.guiding .cu-drag[data-edge=r] { display: none; }
+.cu-guide { max-width: 940px; margin: 0 auto; padding: 34px 28px 40px; overflow-y: auto; height: 100%; box-sizing: border-box; }
+.cu-guide h1 { margin: 8px 0 4px; font-size: 26px; } .cu-guide .lead { margin: 0 0 22px; color: var(--muted); font-size: 15px; }
+.cu-guide h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 30px 0 8px; }
+.cu-three { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.cu-three-c { position: relative; padding: 18px 18px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.cu-three-c > i { display: inline-flex; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); align-items: center; justify-content: center; }
+.cu-three-c > i svg { width: 22px; height: 22px; stroke-width: 2.4; }
+.cu-bar:empty { display: none; }
+.cu-three-c .n { position: absolute; right: 14px; top: 12px; font-size: 28px; font-weight: 800; color: var(--line-2); }
+.cu-three-c b { display: block; margin: 10px 0 6px; font-size: 16px; } .cu-three-c p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.cu-go { display: flex; gap: 10px; flex-wrap: wrap; margin: 22px 0 8px; }
+.cu-guide .ck-steps kbd { margin: 0 1px; }
+.cu-one .cu-guide { width: 100%; }
+.cu-drag { position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px; cursor: col-resize; z-index: 5; }
+.cu-drag[data-edge=l] { left: var(--cl, 250px); } .cu-drag[data-edge=r] { left: calc(100% - var(--cr, 300px)); }
+.cu-drag::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background .15s; }
+.cu-drag:hover::after, .cu-drag.on::after { background: var(--accent); width: 2px; }
 .cull[hidden] { display: none; }
 .cu-side { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding-bottom: 20px; }
 .cu-side .sub { margin: 16px 14px 6px; }
@@ -1048,7 +1067,12 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .cu-keys kbd { margin-right: 2px; } .cu-adv { margin-left: auto; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
 .cu-sz { display: inline-flex; gap: 6px; align-items: center; } .cu-sz svg { width: 13px; height: 13px; } .cu-sz input { width: 100px; accent-color: var(--accent); }
 .cu-tog.on { background: var(--accent-soft); color: var(--text); }
-.cu-bar { flex-wrap: nowrap; } .cu-steps { flex-shrink: 1; min-width: 0; } .cu-step span:not(.n) { overflow: hidden; text-overflow: ellipsis; }
+.cu-main { container-type: inline-size; }
+.cu-bar { flex-wrap: wrap; row-gap: 8px; } .cu-steps, .cu-bar > * { flex: none; } .cu-bar .grow { flex: 1; }
+.cu-step .x { margin-left: -3px; color: var(--muted); }
+@container (max-width: 960px) { .cu-step .x { display: none; } }
+@container (max-width: 780px) { .cu-step .t { display: none; } .cu-step { padding-right: 6px; } .cu-step svg { display: none; } }
+@container (max-width: 560px) { #cu-del span.lbl { display: none; } }
 
 .cu-one { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .cu-one[hidden] { display: none; }
@@ -1118,4 +1142,4 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .cu-radio { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .cu-radio label { display: flex; gap: 8px; align-items: center; cursor: pointer; } .cu-radio input { accent-color: var(--accent); }
 .cu-helpbody .ck-steps kbd { margin: 0 1px; }
-@media (max-width: 1100px) { .cull { grid-template-columns: 210px minmax(0, 1fr) 260px; } }
+

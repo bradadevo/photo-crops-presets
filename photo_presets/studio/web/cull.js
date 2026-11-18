@@ -125,7 +125,9 @@ function renderCull() {
       <section class="cu-main"><div class="cu-bar" id="cu-bar"></div><div class="cu-tl" id="cu-tl" title="The whole shoot over time: tall bars are bursts of shooting (big moments). Click to jump there."></div>
         <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div></div>
         <div class="cu-keys" id="cu-keys"></div></section>
-      <aside class="cu-info" id="cu-info"></aside>`;
+      <aside class="cu-info" id="cu-info"></aside>
+      <div class="cu-drag" data-edge="l" title="Drag to resize · double-click for the usual size"></div><div class="cu-drag" data-edge="r" title="Drag to resize · double-click for the usual size"></div>`;
+    cuElastic(box);
     $("#cu-grid").addEventListener("scroll", () => requestAnimationFrame(cuPaintGrid), { passive: true });
     new ResizeObserver(() => { cu.gridSig = ""; cuPaintGrid(); if (cu.view !== "grid") cuPaintMain(); }).observe($("#cu-body"));
     $("#cu-grid").addEventListener("click", cuGridClick);
@@ -139,6 +141,42 @@ function renderCull() {
     cuSort(); cuPaintAll(); cuPoll();
   });
 }
+// -- elastic panels: drag either edge; they remember their size and give way on a small window ----------
+const CU_W = { l: [180, 420, 250], r: [220, 520, 300] };  // smallest, largest, usual
+const CU_MID = 420;  // the photos keep at least this much room
+function cuFit(box) {
+  const total = box.clientWidth || window.innerWidth;
+  let l = store.get("cull.wl", CU_W.l[2]), r = store.get("cull.wr", CU_W.r[2]);
+  l = Math.min(CU_W.l[1], Math.max(CU_W.l[0], l)); r = Math.min(CU_W.r[1], Math.max(CU_W.r[0], r));
+  const over = l + r + CU_MID - total;
+  if (over > 0) {  // a small window: both panels give way, down to their smallest
+    const room = (l - CU_W.l[0]) + (r - CU_W.r[0]) || 1;
+    l -= Math.min(l - CU_W.l[0], over * (l - CU_W.l[0]) / room);
+    r -= Math.min(r - CU_W.r[0], over * (r - CU_W.r[0]) / room);
+  }
+  box.style.setProperty("--cl", `${Math.round(l)}px`); box.style.setProperty("--cr", `${Math.round(r)}px`);
+}
+function cuElastic(box) {
+  cuFit(box);
+  new ResizeObserver(() => cuFit(box)).observe(box);
+  box.querySelectorAll(".cu-drag").forEach((h) => {
+    const edge = h.dataset.edge, key = edge === "l" ? "cull.wl" : "cull.wr";
+    h.ondblclick = () => { store.set(key, CU_W[edge][2]); cuFit(box); };
+    h.onpointerdown = (e) => {
+      e.preventDefault(); h.setPointerCapture(e.pointerId); h.classList.add("on");
+      const r = box.getBoundingClientRect();
+      h.onpointermove = (m) => {
+        const want = edge === "l" ? m.clientX - r.left : r.right - m.clientX;
+        const other = parseFloat(getComputedStyle(box).getPropertyValue(edge === "l" ? "--cr" : "--cl")) || 0;
+        const max = Math.min(CU_W[edge][1], r.width - other - CU_MID);
+        store.set(key, Math.round(Math.min(max, Math.max(CU_W[edge][0], want))));
+        cuFit(box);
+      };
+      h.onpointerup = () => { h.onpointermove = null; h.classList.remove("on"); cu.gridSig = ""; cuPaintGrid(); };
+    };
+  });
+}
+
 function cuPaintAll() { cuPaintSide(); cuPaintBar(); cuPaintTimeline(); cuPaintMain(); cuPaintInfo(); }
 
 function cuPaintSide() {
@@ -180,9 +218,10 @@ function cuPaintSide() {
   $("#cu-add").onclick = (e) => { e.stopPropagation(); $("#cu-add-menu").hidden = !$("#cu-add-menu").hidden; };
   side.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => { $("#cu-add-menu").hidden = true; b.dataset.add === "card" ? cuImport() : cuAddFolder(); });
   $("#cu-card")?.addEventListener("click", cuImport);
-  $("#cu-help").onclick = cuHelp;
+  $("#cu-help").onclick = () => { cu.guide = !cu.guide || !cuShoot(); cuPaintAll(); };
   side.querySelectorAll("[data-shoot]").forEach((r) => r.onclick = async (e) => {
     if (e.target.closest("[data-forget]")) return;
+    cu.guide = false;
     cu.sel = +r.dataset.shoot; store.set("cull.sel", cu.sel); cu.shootSig = ""; cu.picked.clear(); cu.open.clear(); cu.hist = []; cu.future = [];
     renderCull();
   });
@@ -204,22 +243,22 @@ function cuRefilter() { cuSort(); cu.gridSig = ""; cuPaintSide(); cuPaintBar(); 
 function cuPaintBar() {
   const bar = $("#cu-bar"); if (!bar) return;
   const sh = cuShoot();
-  if (!sh) { bar.innerHTML = ""; return; }
+  if (!sh || cu.guide) { bar.innerHTML = ""; return; }
   const [c] = cuCounts();
   const n = cu.picked.size;
   const measuring = sh.measured < sh.total;
   bar.innerHTML = `<div class="cu-steps">
       <button class="cu-step${sh.pass1 ? " done" : ""}" id="cu-pass1" title="The app's own first pass: it marks every photo keep or reject. Change how many it keeps and how picky it is, and run it again (your own marks are never changed)">
-        <span class="n">1</span><span>${measuring ? `Pass 1 · ${Math.round(sh.measured / Math.max(1, sh.total) * 100)}%` : sh.pass1 ? `Pass 1: ${c.keep.toLocaleString()} keep` : "Pass 1"}</span>${icon("chev")}</button>
+        <span class="n">1</span><span class="t">Pass 1</span>${measuring ? `<span class="x">· ${Math.round(sh.measured / Math.max(1, sh.total) * 100)}%</span>` : sh.pass1 ? `<span class="x">: ${c.keep.toLocaleString()} keep</span>` : ""}${icon("chev")}</button>
       <button class="cu-step${c.todo === 0 && c.all ? " done" : ""}" id="cu-pass2" title="Your pass: go through what pass 1 decided. Starts with where it was least sure">
-        <span class="n">2</span><span>Your pass${c.unsure ? ` · ${c.unsure.toLocaleString()} unsure` : ""}</span></button>
+        <span class="n">2</span><span class="t">Your pass</span>${c.unsure ? `<span class="x">· ${c.unsure.toLocaleString()} unsure</span>` : ""}</button>
       <button class="cu-step" id="cu-pass3" ${off(!c.reject && !c.keep, "Nothing marked yet")} title="Delete the rejects (to the Trash) and use the keepers">
-        <span class="n">3</span><span>Finish</span></button></div>
+        <span class="n">3</span><span class="t">Finish</span></button></div>
     <div class="seg small" id="cu-views">${[["grid", "grid", "Gallery (G)"], ["one", "single", "One big photo (Space)"], ["compare", "compare", "Side by side (C)"]].map(([k, ic, t]) => `<button class="${cu.view === k ? "on" : ""}" data-view="${k}" title="${t}">${icon(ic)}</button>`).join("")}</div>
     <button class="icon-btn cu-tog${cu.group ? " on" : ""}" id="cu-group" title="${cu.group ? "Bursts are stacked: each shows as its best frame (click to show every frame)" : "Every frame shows (click to stack each burst as its best frame)"}">${icon("stack")}</button>
     <span class="grow"></span>
     ${n > 1 ? `<span class="cu-selinfo">${n} selected</span>` : ""}
-    <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo to the Trash (you can undo, or put them back from the Trash)">${icon("trash")} Delete rejects${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
+    <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo to the Trash (you can undo, or put them back from the Trash)">${icon("trash")}<span class="lbl"> Delete rejects</span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
     <div class="menu-wrap"><button class="btn primary" id="cu-out" ${off(!c.keep, "No keepers yet")}>${icon("export")} Keepers${c.keep ? ` (${c.keep.toLocaleString()})` : ""} ${icon("chev")}</button>
       <div class="menu" id="cu-out-menu" role="menu" hidden>
         <button role="menuitem" data-out="copy">Copy keepers to a folder…<small>The files as they are (JPEG and RAW), in a Picks folder</small></button>
@@ -338,12 +377,40 @@ function cuGridClick(e) {
 // -- one big photo, and side by side ------------------------------------------------------------------
 function cuSetView(v) {
   if (v === "compare" && cuCompareIds().length < 2) { toast("Nothing to compare", { small: "Select 2 to 4 photos (⌘-click), or stand on a burst" }); return; }
-  cu.view = v; cu.zoom = null;
+  cu.view = v; cu.zoom = null; cu.guide = false;
   $("#cu-grid").hidden = v !== "grid"; $("#cu-one").hidden = v === "grid";
   cu.gridSig = ""; cuPaintBar(); cuPaintMain(); cuPaintInfo();
   if (v === "grid") cuScrollTo(cu.cur);
 }
+// -- the start page: the three things culling does, and how ------------------------------------------
+const CU_THREE = [
+  ["keep", "Find the keepers in minutes", "The app goes through the whole game for you and marks the best frame of every moment: sharp on the player, eyes open, the ball in play. Each mark says why."],
+  ["trash", "Clear out the rest, safely", "You check its picks fast (the ones it's unsure about first), then delete the rejects in one go. They go to the Trash, with undo: nothing is lost by accident."],
+  ["export", "Get the best ready to post", "Each keeper is cropped on the action for Instagram, Story or YouTube with a clean edit, copied to a Picks folder, or sent to Looks and Reel."],
+];
+function cuGuide(one, back) {
+  const card = cu.cards[0];
+  one.innerHTML = `<div class="cu-guide">
+    ${back ? `<button class="btn ghost" id="cu-guide-back">${icon("left")} Back to ${esc(cuShoot()?.name || "the photos")}</button>` : ""}
+    <h1>Culling</h1><p class="lead">From a full memory card to the photos worth sharing.</p>
+    <div class="cu-three">${CU_THREE.map(([ic, t, s], i) => `<div class="cu-three-c"><span class="n">${i + 1}</span>${icon(ic)}<b>${t}</b><p>${s}</p></div>`).join("")}</div>
+    ${back ? "" : `<div class="cu-go"><button class="btn primary big" data-go="folder">${icon("plus")} Add a game's folder…</button>
+      <button class="btn big" data-go="card">${icon("card")} ${card ? `Import from ${esc(card.name)} (${card.photos.toLocaleString()} photos)` : "Import from the camera card…"}</button></div>
+      <p class="faint">Your photos stay where they are. Nothing leaves your Mac unless you ask the AI to rate (it shows the cost first).</p>`}
+    <h2>How it goes</h2>
+    <ol class="ck-steps">
+      <li><span class="n">1</span><div><b>Pass 1: the app</b><p>Marks every photo keep or reject, with the reason and how sure it is. Bursts become one stack with the best frame on top. A thousand photos take about 8 minutes, and you can start looking straight away.</p></div></li>
+      <li><span class="n">2</span><div><b>Your pass</b><p>Press <b>Your pass</b>: unsure photos first. <kbd>P</kbd> keep, <kbd>X</kbd> reject, <kbd>→</kbd> next, <kbd>Space</kbd> big, <kbd>Z</kbd> 100% on the face, <kbd>C</kbd> compare a burst. Your mark always wins, and teaches the app your taste.</p></div></li>
+      <li><span class="n">3</span><div><b>Finish</b><p><b>Delete rejects</b>, then <b>Keepers</b>: crop and edit, copy, or send to Looks and Reel.</p></div></li></ol></div>`;
+  paintIcons(one);
+  one.querySelectorAll("[data-go]").forEach((b) => b.onclick = () => b.dataset.go === "card" ? cuImport() : cuAddFolder());
+  $("#cu-guide-back", one)?.addEventListener("click", () => { cu.guide = false; cuPaintAll(); });
+}
+
 function cuPaintMain() {
+  const showGuide = cu.guide || !cuShoot();
+  $("#cull").classList.toggle("guiding", showGuide);
+  if (showGuide) { $("#cu-grid").hidden = true; const one = $("#cu-one"); one.hidden = false; cuGuide(one, !!cuShoot()); return; }
   if (cu.view === "grid") { $("#cu-grid").hidden = false; $("#cu-one").hidden = true; cuPaintGrid(); return; }
   if (cu.view === "compare") return cuPaintCompare();
   const one = $("#cu-one"), p = cuP(cu.cur);
@@ -446,7 +513,7 @@ function cuPaintCompare() {
 function cuPaintInfo() {
   const box = $("#cu-info"); if (!box) return;
   const p = cuP(cu.cur), sh = cuShoot();
-  if (!p || !sh) { box.innerHTML = sh ? "" : `<div class="cu-hello">${icon("grid")}<h3>Culling</h3><p>Add a game's folder or import the camera card. Pass 1 marks every photo; then you go through it.</p></div>`; paintIcons(box); return; }
+  if (!p || !sh || cu.guide) { box.innerHTML = ""; return; }
   const f = flagOf(p), c = p.cam || {};
   const frames = p.bsize > 1 ? [...cu.photos.values()].filter((q) => alive(q) && q.burst === p.burst) : [];
   const shutter = c.shutter ? (c.shutter >= 1 ? `${c.shutter} s` : `1/${Math.round(1 / c.shutter)}`) : null;
@@ -652,6 +719,7 @@ function cuJobWatch() {
 async function cuAddFolder() {
   const r = await api("/api/cull/shoots", {});
   if (!r.id) return;
+  cu.guide = false;
   cu.sel = r.id; store.set("cull.sel", r.id); cu.shootSig = ""; cu.hist = []; cu.future = [];
   renderCull();
   toast(`Pass 1 is looking at ${plural(r.total, "photo")}`, { small: `${say(r.total * 0.45)}. The gallery is ready in moments: start looking while it works` });
@@ -671,6 +739,7 @@ async function cuImport() {
     closeModal();
     const r = await api("/api/cull/import", body);
     if (!r.id) return;
+    cu.guide = false;
     cu.sel = r.id; store.set("cull.sel", r.id); cu.shootSig = ""; renderCull(); cuJobStart("Importing from the card");
   };
 }
@@ -715,6 +784,7 @@ function cullKey(e) {
   else if (k === "r") { cu.cropShow = !cu.cropShow; store.set("cull.crop", cu.cropShow); if (cu.view === "grid") cuSetView("one"); else cuPaintMain(); cuPaintInfo(); }
   else if (k === "m") { cu.marks = !cu.marks; store.set("cull.marks", cu.marks); cu.gridSig = ""; cuPaintMain(); }
   else if (e.key === "?") cuHelp();
+  else if (k === "escape" && cu.guide) { cu.guide = false; cuPaintAll(); }
   else return false;
   return true;
 }
