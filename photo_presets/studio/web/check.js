@@ -5,7 +5,7 @@
 
 const ck = { files: [], sel: store.get("check.sel", null), detail: null, picked: new Set(), view: "file",
   t: 0, moment: null, split: 50, after: true, marks: false, cmp: null, onlyDiff: store.get("check.onlyDiff", false),
-  timer: null, sideSig: "", mainSig: "" };
+  timer: null, sideSig: "", mainSig: "", guide: !store.get("check.seenGuide", false) };
 const KIND_ICON = { video: "film", photo: "image" };
 const MOMENT_COLOR = { soft_pan: "#f5a623", shaky: "#ff5d5d", jump: "#b38cff", dark: "#4f8bff", bright: "#f5c443" };
 
@@ -48,6 +48,7 @@ function renderCheck() {
   if (!box.dataset.built) {
     box.dataset.built = "1";
     box.innerHTML = `<aside class="ck-files"><div class="ck-head"><h2>Check <span class="count" id="ck-count"></span></h2>
+        <button class="icon-btn" id="ck-help" title="What this is for, and the steps">${icon("info")}</button>
         <div class="menu-wrap"><button class="icon-btn" id="ck-add" title="Add clips or photos to check" aria-haspopup="menu">${icon("plus")}</button>
           <div class="menu" id="ck-add-menu" role="menu" hidden><button role="menuitem" data-ck-add="files">Add clips or photos…<small>Videos, JPG, HEIC or RAW</small></button>
             <button role="menuitem" data-ck-add="folder">Add a folder…<small>Every clip and photo in it</small></button></div></div></div>
@@ -56,6 +57,10 @@ function renderCheck() {
       <section class="ck-main" id="ck-main"></section>
       <aside class="ck-side" id="ck-side"></aside>`;
     paintIcons(box);
+    $("#ck-help").onclick = () => {
+      ck.guide = !ck.guide || ck.view !== "file"; ck.view = "file"; box.classList.remove("comparing");
+      ck.mainSig = ""; renderCkFiles(); renderCkMain(); renderCkSide();
+    };
     $("#ck-add").onclick = (e) => { e.stopPropagation(); $("#ck-add-menu").hidden = !$("#ck-add-menu").hidden; };
     box.querySelectorAll("[data-ck-add]").forEach((b) => b.onclick = () => { $("#ck-add-menu").hidden = true; ckChoose(b.dataset.ckAdd); });
     document.addEventListener("click", (e) => { if (!e.target.closest("#ck-add, #ck-add-menu")) $("#ck-add-menu") && ($("#ck-add-menu").hidden = true); });
@@ -78,12 +83,52 @@ async function ckUpload(files) {
 async function ckAdded(ids) {
   if (!ids?.length) return;
   await ckRefresh();
-  ck.view = "file";
+  ck.view = "file"; ck.guide = false;
   $("#check").classList.remove("comparing");
   await ckLoad(ids[0]);
   ckPoll();
   const left = ck.files.filter((f) => ids.includes(f.id)).reduce((a, f) => a + (f.left || 0), 0);
   toast(`Checking ${plural(ids.length, "file")}`, { small: left > 8 ? `About ${say(left)}` : "" });
+}
+
+// The start page: what it's for and the steps ----------------------------------------------------
+const CK_USES = [
+  ["info", "A clip or photo came out wrong", "Blurry, dark, shaky, grainy or washed out, and you want to know why."],
+  ["wand", "Fix something you already shot", "Brighter, steadier, cleaner or sharper. It makes a new copy; your original is never touched."],
+  ["target", "Shoot better next game", "The exact camera settings to change, and why, based on what this file shows."],
+  ["compare", "Compare cameras, settings or games", "Two or more files side by side, best and weakest marked on every line."],
+  ["export", "Keep or share the notes", "A Word report (opens in Google Drive too) and a spreadsheet."],
+];
+const CK_STEPS = [
+  ["Add", "Click <b>+</b> at the top left, or drop clips and photos anywhere on this window. Checking takes about a third of a video's length, a second or two per photo."],
+  ["See what's holding it back", "Click a file on the left. On a video, the colored marks on the timeline are the problem moments: click one to see it, or play it."],
+  ["Fix the file <span class=\"faint\">(optional)</span>", "On the right, turn fixes on and drag the line across the picture to compare before and after. Then <b>Make a fixed copy</b>: it goes in a <i>Clip Analysis/Fixed</i> folder next to the original."],
+  ["Next time you shoot", "Below the picture: the settings to change and the habits that help."],
+  ["Compare or export <span class=\"faint\">(optional)</span>", "Tick the boxes beside two or more files, then <b>Compare</b> or <b>Export</b> at the bottom left."],
+];
+function ckGuideHtml(back) {
+  return `<div class="ck-guide">
+    ${back ? `<button class="btn ghost ck-back" id="ck-guide-back">${icon("left")} Back to ${esc(ck.detail?.name || "the file")}</button>` : ""}
+    <div class="ck-intro">${icon("target")}<div><h1>Shot check</h1><p>Tells you how a clip or photo was shot, what's holding it back, fixes the file, and what to change next time. No AI and nothing leaves your Mac: it reads your camera's own settings from the file and measures the picture.</p></div></div>
+    ${back ? "" : `<div class="ck-guide-go"><button class="btn primary" data-ck-go="files">${icon("plus")} Add clips or photos…</button><button class="btn ghost" data-ck-go="folder">Add a folder…</button><span class="faint">or drop them on this window</span></div>`}
+    <h2>Use it when you want to…</h2>
+    <div class="ck-uses">${CK_USES.map(([ic, t, s]) => `<div class="ck-use">${icon(ic)}<b>${t}</b><span>${s}</span></div>`).join("")}</div>
+    <h2>How it works</h2>
+    <ol class="ck-steps">${CK_STEPS.map(([t, s], i) => `<li><span class="n">${i + 1}</span><div><b>${t}</b><p>${s}</p></div></li>`).join("")}</ol>
+    <h2>Good to know</h2>
+    <ul class="ck-know">
+      <li>Fixes help a file; they can't rescue missed focus or a too-slow shutter. The notes on each fix say what it can't do.</li>
+      <li>Steadying smooths camera shake. When players fill the frame it may not help: the app checks its own result and tells you.</li>
+      <li>Sharpness and grain numbers compare best between files from the same camera.</li>
+      <li>Taking a file out of the list never deletes it.</li>
+    </ul></div>`;
+}
+function ckShowGuide(main, back) {
+  store.set("check.seenGuide", true);
+  main.innerHTML = ckGuideHtml(back);
+  paintIcons(main);
+  main.querySelectorAll("[data-ck-go]").forEach((b) => b.onclick = () => ckChoose(b.dataset.ckGo));
+  $("#ck-guide-back")?.addEventListener("click", () => { ck.guide = false; ck.mainSig = ""; renderCkMain(); renderCkSide(); });
 }
 
 // The list of files --------------------------------------------------------------------------------
@@ -102,13 +147,13 @@ function renderCkFiles() {
       <label class="ck-tick" title="Tick files to compare or export them together"><input type="checkbox" data-ck-pick="${f.id}" ${ck.picked.has(f.id) ? "checked" : ""}></label>
       <div class="ck-thumb">${f.state === "done" || f.state === "failed" ? `<img src="/img/check/${f.id}/thumb.jpg" alt="" loading="lazy" onerror="this.remove()">` : ""}<span class="kind">${icon(KIND_ICON[f.kind] || "image")}</span></div>
       <div class="ck-txt"><b>${esc(f.name)}</b><small>${ckStatus(f)}</small></div></div>`).join("")
-    : `<div class="ck-empty"><p><b>Check a clip or photo</b></p><p>How it was shot, what's holding it back, how to fix the file, and what to change next time. No AI: your camera's own settings and measurements of the picture.</p>
+    : `<div class="ck-empty"><p><b>Nothing added yet</b></p><p>Start with step 1: add a clip or photo.</p>
        <button class="btn primary" data-ck-add2="files">${icon("plus")} Add clips or photos…</button><button class="btn ghost" data-ck-add2="folder">Add a folder…</button><p class="faint">or drop them here</p></div>`;
   paintIcons(list);
   list.querySelectorAll("[data-ck-add2]").forEach((b) => b.onclick = () => ckChoose(b.dataset.ckAdd2));
   list.querySelectorAll("[data-ck]").forEach((row) => row.onclick = (e) => {
     if (e.target.closest(".ck-tick")) return;
-    ck.view = "file"; $("#check").classList.remove("comparing");
+    ck.view = "file"; ck.guide = false; $("#check").classList.remove("comparing");
     ckLoad(+row.dataset.ck);
   });
   list.querySelectorAll("[data-ck-pick]").forEach((c) => c.onchange = () => {
@@ -135,7 +180,7 @@ function renderCkFoot() {
   paintIcons(foot);
   $("#ck-compare")?.addEventListener("click", () => {
     if (picked.length < 2) return;
-    ck.view = ck.view === "compare" ? "file" : "compare";
+    ck.view = ck.view === "compare" ? "file" : "compare"; ck.guide = false;
     $("#check").classList.toggle("comparing", ck.view === "compare");
     if (ck.view === "compare") renderCompare(); else { ck.mainSig = ""; renderCkMain(); renderCkSide(); }
     renderCkFiles();
@@ -166,7 +211,8 @@ function renderCkMain() {
   const main = $("#ck-main");
   if (!main || ck.view !== "file") return;
   const d = ck.detail;
-  if (!d) { main.innerHTML = ck.files.length ? "" : `<div class="ck-hello">${icon("target")}<h1>Shot check</h1><p>Add a clip or photo on the left: you'll see how it was shot, what's holding it back, a fix for the file itself and what to change next time.</p></div>`; paintIcons(main); return; }
+  $("#check").classList.toggle("guiding", !d || ck.guide);
+  if (!d || ck.guide) { ckShowGuide(main, !!d && ck.guide); return; }
   if (d.state !== "done") {
     main.innerHTML = `<div class="ck-hello">${d.state === "failed" ? `${icon("info")}<h1>${esc(d.name)}</h1><p>Couldn't read this file: ${esc(d.error || "")}</p>`
       : `<div class="spin" style="width:28px;height:28px"></div><h1>${esc(d.name)}</h1><p>Checking it · about ${say(d.left || 5)}</p><p class="faint">Videos take about a third of their length; photos a second or two.</p>`}</div>`;
@@ -182,10 +228,10 @@ function renderCkMain() {
     <div class="ck-viewer" id="ck-viewer"></div>
     ${isVid ? `<div class="ck-timeline" id="ck-timeline" title="Click anywhere to see that moment">${d.moments.map((m, i) => `<span class="mo" data-mo="${i}" style="left:${m.start / d.duration * 100}%;width:${Math.max(0.6, (m.end - m.start) / d.duration * 100)}%;background:${MOMENT_COLOR[m.kind]}" title="${esc(m.clock)} · ${esc(m.label)}"></span>`).join("")}<span class="head" id="ck-head" style="left:${ck.t / d.duration * 100}%"></span></div>
       <div class="ck-legend">${[...new Set(d.moments.map((m) => m.kind))].map((k) => `<span><i style="background:${MOMENT_COLOR[k]}"></i>${esc(d.moments.find((m) => m.kind === k).label)}</span>`).join("")}${d.moments.length ? "" : `<span class="faint">No problem moments found</span>`}</div>` : ""}
-    <section class="ck-card"><h3>${problems.length ? "What's holding it back" : "How it looks"}</h3>
+    <section class="ck-card"><h3><span class="n">2</span>${problems.length ? "What's holding it back" : "How it looks"}</h3>
       <ul class="ck-find">${problems.map((x) => `<li class="warn">${esc(x)}</li>`).join("")}${(problems.length || info.some((x) => x.startsWith("No problems")) ? [] : ["No problems found."]).map((x) => `<li class="ok">${esc(x)}</li>`).join("")}${info.map((x) => `<li class="${x.startsWith("No problems") ? "ok" : "info"}">${esc(x)}</li>`).join("")}</ul>
       ${isVid && d.moments.length ? `<h4>When it happens <small class="faint">click one to see it</small></h4><div class="ck-moments">${d.moments.map((m, i) => `<button class="ck-mo${ck.moment === i ? " on" : ""}" data-mo="${i}"><i style="background:${MOMENT_COLOR[m.kind]}"></i><b>${esc(m.clock)}</b><span><b>${esc(m.label)}</b> ${esc(m.detail)}</span></button>`).join("")}</div>` : ""}</section>
-    <section class="ck-card"><h3>Next time you shoot</h3>
+    <section class="ck-card"><h3><span class="n">4</span>Next time you shoot</h3>
       ${d.advice.length ? `<table class="ck-table"><thead><tr><th>Setting</th><th>Change to</th><th>Why</th></tr></thead><tbody>${d.advice.map(([a, b, c]) => `<tr><td><b>${esc(a)}</b></td><td>${esc(b)}</td><td class="muted">${esc(c)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Your settings were right for this; nothing to change.</p>`}
       ${d.habits.length ? `<h4>Habits that help</h4><ol class="ck-habits">${d.habits.map((h) => `<li>${esc(h)}</li>`).join("")}</ol>` : ""}</section>
     <section class="ck-card"><h3>How it was shot</h3><div class="ck-grid2">
@@ -259,9 +305,9 @@ const moClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, 
 function renderCkSide() {
   const side = $("#ck-side"), d = ck.detail;
   if (!side) return;
-  if (ck.view !== "file" || !d || d.state !== "done") { side.innerHTML = ""; return; }
+  if (ck.view !== "file" || !d || d.state !== "done" || ck.guide) { side.innerHTML = ""; return; }
   const isVid = d.kind === "video";
-  side.innerHTML = `<h3>Fix this file</h3><p class="faint">Makes a new, fixed copy next to it; the original is never changed.</p>
+  side.innerHTML = `<h3><span class="n">3</span>Fix this file <small class="faint">optional</small></h3><p class="faint">Turn on what you want, drag the line on the picture to compare, then make the copy. It goes next to the original, which is never changed.</p>
     <div class="ck-fixes">${d.fixes.map((f) => `<div class="ck-fix${f.on ? " on" : ""}" data-fx="${f.id}">
       <div class="top"><label class="switch"><input type="checkbox" data-fx-on ${f.on ? "checked" : ""}><span></span></label><b>${esc(f.label)}</b><output>${fxValue(f)}</output></div>
       <input type="range" min="${f.lo}" max="${f.hi}" step="${f.step}" value="${f.value}" data-fx-v ${f.on ? "" : 'class="dim"'}>
