@@ -24,7 +24,7 @@ SIZES = {
     "instagram": OutputSize("instagram", "Instagram post (4:5)", 4 / 5, (1080, 1350)),
     "story": OutputSize("story", "Instagram Reel / Story (9:16)", 9 / 16, (1080, 1920)),
     "youtube": OutputSize("youtube", "YouTube / full size (16:9)", 16 / 9, None),
-    "original": OutputSize("original", "Original size (cropped and zoomed, same dimensions)", None, None,
+    "original": OutputSize("original", "Original size (the crop enlarged to the photo's full size)", None, None,
                            match_source=True),
     "ai": OutputSize("ai", "Best crop (AI decides shape and framing)", None, None, ai_framing=True),
 }

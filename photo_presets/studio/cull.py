@@ -230,7 +230,7 @@ class Cull:
             "score": round(r.score) if r else None, "issues": r.issues if r else [], "good": r.good if r else [],
             "burst": r.burst if r else None, "bsize": r.burst_size if r else 1, "best": r.burst_best if r else True,
             "auto": auto, "flag": mine.get("flag"), "stars": mine.get("stars", 0), "crop": mine.get("crop"),
-            "crops": m.get("crops") or {}, "faces": [f for f in m.get("faces", []) if f.get("box")],
+            "crops": m.get("crops") or {}, "full": m.get("full"), "faces": [f for f in m.get("faces", []) if f.get("box")],
             "focus": m.get("focus_point"), "subject": m.get("group") or m.get("subject"),
             "cam": {k: m.get(k) for k in ("iso", "shutter", "aperture", "focal", "camera")} if m else {},
             "rel": round(r.parts.get("rel", 0), 2) if r else None, "taste": round(r.parts["taste"], 2) if r and "taste" in r.parts else None,
@@ -285,7 +285,7 @@ def state():
     k, r = C.taste.counts()
     return {"shoots": [C.summary(s) for s in sorted(C.shoots.values(), key=lambda s: -s.id)],
             "cards": files.cards(), "taste": {"kept": k, "rejected": r, "ready": C.taste.ready, "need": taste.MIN_EACH},
-            "ai": ai.key_ready(), "sizes": {k: v.label for k, v in export.SIZES.items()},
+            "ai": ai.key_ready(), "sizes": {k: v.label for k, v in export.SIZES.items()}, "fits": export.FITS,
             "versions": export.VERSIONS}
 
 
@@ -426,6 +426,7 @@ async def export_keepers(sid: int, req: Request):
     what = body.get("what", "copy")
     size = body.get("size") or sh.settings.get("size", "instagram")
     versions = "".join(v for v in (body.get("versions") or "A") if v in "OABCD")
+    fit = body.get("fit") if body.get("fit") in export.FITS else "widen"
     if what == "edit":
         sh.settings["size"] = size
     folder = _out_folder(sh, body.get("folder") or ("Picks" if what == "copy" else f"Culled - {export.FOLDER_NAMES[size]}"))
@@ -442,7 +443,7 @@ async def export_keepers(sid: int, req: Request):
                     adjust_fn = (lambda img: ai.adjustments(img)) if "D" in versions else None
                     export.edit_one(Path(p["path"]), p.get("m") or {}, size, versions, folder,
                                     C.marks.get(p["path"], {}).get("crop") if size not in ("ai",) else None,
-                                    ai_crop, adjust_fn)
+                                    ai_crop, adjust_fn, fit)
                 sh.job["done"] = i
             sh.job["state"] = "done"
         except Exception as x:

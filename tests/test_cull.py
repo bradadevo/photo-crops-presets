@@ -147,3 +147,25 @@ def test_api_marks_win_and_trash_round_trip(tmp_path, monkeypatch):
     assert gone["moved"] == 1 and not (shoot / "IMG3.jpg").exists()
     c.post(f"/api/cull/shoots/{sid}/untrash", json={"token": gone["token"]})
     assert (shoot / "IMG3.jpg").exists()
+
+
+def test_a_crop_too_small_for_its_size_is_widened_kept_native_or_enlarged_as_chosen(tmp_path):
+    img = Image.new("RGB", (3000, 2000), (90, 140, 70))
+    src = tmp_path / "shot.jpg"
+    img.save(src)
+    small = (0.5, 0.4, 0.6, 0.6)  # 300 x 400 px: Instagram needs 1080 x 1350
+    meas = {"group": (0.5, 0.4, 0.6, 0.6), "crops": {"4:5": small, "best": small, "wide": (0, 0, 1, 1)}}
+    box = export.boxes(meas, "instagram", (3000, 2000))[0]
+    assert round(export.enlarged(box, "instagram", (3000, 2000)), 1) == 3.6
+    grown = export.widen(box, "instagram", (3000, 2000))
+    assert export.enlarged(grown, "instagram", (3000, 2000)) <= 1.0 + 1e-6
+    assert abs((grown[0] + grown[2]) / 2 - 1650) < 2  # still around the action
+    assert export.enlarged((0, 0, 3000, 2000), "original", (3000, 2000)) == 1.0
+    assert export.enlarged(box, "youtube", (3000, 2000)) == 1.0  # saved at the crop's own size
+    out = {f: export.edit_one(src, meas, "instagram", "O", tmp_path / f, fit=f)[0] for f in ("widen", "native", "enlarge")}
+    assert Image.open(out["widen"]).size == (1080, 1350)
+    assert Image.open(out["native"]).size == (300, 400)
+    assert Image.open(out["enlarge"]).size == (1080, 1350)
+    # your crop is kept per size
+    assert export.your_crop({"story": (0, 0, 0.5, 1)}, "story") == (0, 0, 0.5, 1)
+    assert export.your_crop({"story": (0, 0, 0.5, 1)}, "instagram") is None

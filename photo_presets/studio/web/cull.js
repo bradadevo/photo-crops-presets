@@ -41,7 +41,7 @@ const alive = (p) => p.state !== "gone";
 async function cuState() {
   const r = await fetch("/api/cull/state").then((x) => x.json()).catch(() => null);
   if (!r) return;
-  Object.assign(cu, { shoots: r.shoots, cards: r.cards, taste: r.taste, ai: r.ai, sizes: r.sizes, versions: r.versions });
+  Object.assign(cu, { shoots: r.shoots, cards: r.cards, taste: r.taste, ai: r.ai, sizes: r.sizes, versions: r.versions, fits: r.fits });
   if (cu.sel && !cu.shoots.some((s) => s.id === cu.sel)) cu.sel = null;
   if (!cu.sel && cu.shoots.length) cu.sel = cu.shoots[0].id;
 }
@@ -417,12 +417,12 @@ function cuPaintMain() {
   if (!p) { one.innerHTML = `<div class="cu-none">Nothing to show</div>`; return; }
   const f = flagOf(p);
   const frames = p.bsize > 1 ? [...cu.photos.values()].filter((q) => alive(q) && q.burst === p.burst).sort((a, b) => (a.t ?? 0) - (b.t ?? 0) || a.id - b.id) : [];
-  const box = p.crop || p.crops?.[CU_SHAPE[cuShoot()?.settings?.size] || "best"];
+  const sizeKey = cuSizeKey(), box = cuCropOf(p, sizeKey), q = box && cuQual(p, sizeKey, box);
   one.innerHTML = `<div class="cu-stage${f ? " f-" + f : ""}" id="cu-stage">
       ${cu.zoom ? `<div class="cu-zoom"><img src="/img/cull/${cu.sel}/${p.id}/zoom.jpg?x=${cu.zoom.x.toFixed(4)}&y=${cu.zoom.y.toFixed(4)}&w=${Math.round(one.clientWidth * devicePixelRatio)}&h=${Math.round((one.clientHeight - 120) * devicePixelRatio)}" alt="">
           <span class="tag">100% · click to look elsewhere · Z or Esc to go back</span></div>`
       : `<div class="cu-pic" id="cu-pic"><img id="cu-img" src="/img/cull/${cu.sel}/${p.id}/view.jpg" alt="" draggable="false">
-          ${cu.cropShow && box ? `<div class="cu-crop" id="cu-crop" style="left:${box[0] * 100}%;top:${box[1] * 100}%;width:${(box[2] - box[0]) * 100}%;height:${(box[3] - box[1]) * 100}%" title="The crop on the action: drag to move it; scroll to resize"><i></i></div>` : ""}
+          ${cu.cropShow && box ? `<div class="cu-crop" id="cu-crop" style="left:${box[0] * 100}%;top:${box[1] * 100}%;width:${(box[2] - box[0]) * 100}%;height:${(box[3] - box[1]) * 100}%" title="The crop on the action: drag to move it; scroll to resize"><i></i><span class="cu-px${q && q.f > 1.01 ? " soft" : ""}" id="cu-px">${q ? cuQualText(q, true) : ""}</span></div>` : ""}
           ${p.focus && cu.marks ? `<span class="cu-af" style="left:${p.focus[0] * 100}%;top:${p.focus[1] * 100}%" title="Where the camera focused"></span>` : ""}</div>`}
       <div class="cu-verdict">${f ? `<span class="v-${f}">${icon(f === "keep" ? "keep" : "reject")} ${f === "keep" ? "Keep" : "Reject"}</span><small>${yours(p) ? "your mark" : `pass 1 · ${Math.round((p.auto?.[1] || 0) * 100)}% sure`}</small>` : `<small>Not marked yet</small>`}</div></div>
     <div class="cu-strip">
@@ -451,6 +451,42 @@ function cuPaintMain() {
   [1, -1].forEach((d) => { const q = cu.order[cu.order.indexOf(p.id) + d]; if (q != null) new Image().src = `/img/cull/${cu.sel}/${q}/view.jpg`; });
 }
 const CU_SHAPE = { instagram: "4:5", story: "9:16", youtube: "16:9", original: "wide", ai: "best" };
+const CU_TARGET = { instagram: [1080, 1350], story: [1080, 1920] };
+const CU_SIZE_NAME = { instagram: "Instagram", story: "Story", youtube: "YouTube", original: "Original", ai: "Best crop" };
+const cuSizeKey = () => cuShoot()?.settings?.size || "instagram";
+/* Your crop for this size (kept per size), else the automatic one. */
+function cuCropOf(p, sizeKey) {
+  const mine = p.crop && !Array.isArray(p.crop) ? p.crop[sizeKey] : p.crop;
+  return mine || p.crops?.[CU_SHAPE[sizeKey] || "best"] || null;
+}
+/* How many real pixels the crop has, what the size needs, and how much it would be enlarged (f > 1: softer). */
+function cuQual(p, sizeKey, box) {
+  const full = p.full || p.size; if (!full || !box) return null;
+  const cw = Math.round((box[2] - box[0]) * full[0]), ch = Math.round((box[3] - box[1]) * full[1]);
+  const t = sizeKey === "original" ? full : CU_TARGET[sizeKey];
+  const f = t ? Math.max(t[0] / Math.max(1, cw), t[1] / Math.max(1, ch)) : 1;
+  return { cw, ch, t, f };
+}
+function cuQualText(q, short = false) {
+  const px = `${q.cw.toLocaleString()} × ${q.ch.toLocaleString()} px`;
+  if (!q.t) return short ? `${px} · full detail` : `${px}: saved at its own size, full detail`;
+  if (q.f <= 1.01) return short ? `${px} · sharp` : `${px}: sharp at ${q.t[0].toLocaleString()} × ${q.t[1].toLocaleString()}, nothing enlarged`;
+  return short ? `${px} · enlarged ${q.f.toFixed(1)}×` : `${px}: would be enlarged ${q.f.toFixed(1)}× to ${q.t[0].toLocaleString()} × ${q.t[1].toLocaleString()}, so softer`;
+}
+/* The crop grown around its middle (same shape) until nothing is enlarged, inside the photo. */
+function cuWidened(p, sizeKey, box) {
+  const q = cuQual(p, sizeKey, box); if (!q || q.f <= 1) return box;
+  let w = (box[2] - box[0]) * q.f, h = (box[3] - box[1]) * q.f;
+  if (w > 1 || h > 1) { const s = 1 / Math.max(w, h); w *= s; h *= s; }
+  const cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
+  const x = Math.min(Math.max(cx - w / 2, 0), 1 - w), y = Math.min(Math.max(cy - h / 2, 0), 1 - h);
+  return [x, y, x + w, y + h].map((v) => +v.toFixed(4));
+}
+function cuSaveCrop(p, sizeKey, box, label) {
+  const all = p.crop && !Array.isArray(p.crop) ? { ...p.crop } : {};
+  if (box) all[sizeKey] = box; else delete all[sizeKey];
+  cuSet([p.id], { crop: Object.keys(all).length ? all : null }, label);
+}
 function cuFaceStyle(p, fc) {
   const [x0, y0, x1, y1] = fc.box, w = x1 - x0, h = y1 - y0, pad = 0.6;
   const W = w * (1 + pad * 2), H = h * (1 + pad * 2), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
@@ -463,11 +499,13 @@ function cuCropDrag(p) {
   const put = (b) => { c.style.left = `${b[0] * 100}%`; c.style.top = `${b[1] * 100}%`; c.style.width = `${(b[2] - b[0]) * 100}%`; c.style.height = `${(b[3] - b[1]) * 100}%`; };
   const clampB = (b) => { const w = b[2] - b[0], h = b[3] - b[1]; const x = Math.min(Math.max(b[0], 0), 1 - w), y = Math.min(Math.max(b[1], 0), 1 - h); return [x, y, x + w, y + h]; };
   let saveT = null;
-  const save = (b) => { clearTimeout(saveT); saveT = setTimeout(() => cuSet([p.id], { crop: b.map((v) => +v.toFixed(4)) }, "Move the crop"), 350); };
+  const sizeKey = cuSizeKey();
+  const label = () => { const q = cuQual(p, sizeKey, cur()); const el = $("#cu-px"); if (q && el) { el.textContent = cuQualText(q, true); el.classList.toggle("soft", q.f > 1.01); } };
+  const save = (b) => { label(); clearTimeout(saveT); saveT = setTimeout(() => cuSaveCrop(p, sizeKey, b.map((v) => +v.toFixed(4)), "Move the crop"), 350); };
   c.onpointerdown = (e) => {
     e.preventDefault(); c.setPointerCapture(e.pointerId);
     const r = pic.getBoundingClientRect(), start = cur(), sx = e.clientX, sy = e.clientY;
-    c.onpointermove = (m) => put(clampB([start[0] + (m.clientX - sx) / r.width, start[1] + (m.clientY - sy) / r.height, start[2] + (m.clientX - sx) / r.width, start[3] + (m.clientY - sy) / r.height]));
+    c.onpointermove = (m) => { put(clampB([start[0] + (m.clientX - sx) / r.width, start[1] + (m.clientY - sy) / r.height, start[2] + (m.clientX - sx) / r.width, start[3] + (m.clientY - sy) / r.height])); label(); };
     c.onpointerup = () => { c.onpointermove = null; save(cur()); };
   };
   c.onwheel = (e) => {
@@ -531,8 +569,14 @@ function cuPaintInfo() {
     ${frames.length ? `<p class="cu-burst">${icon("stack")} Burst of ${frames.length} frames${p.best ? " · <b>this is the best</b>" : ""} <a href="#" id="cu-cmp-burst">compare them (C)</a></p>` : ""}
     ${p.ai ? `<div class="cu-ai">${p.ai.error ? `<small class="bad-t">AI: ${esc(p.ai.error)}</small>` : `<b>AI ${p.ai.score}/10</b> ${esc(p.ai.reason)}`}</div>` : ""}
     <h4 class="sub">Crop on the action</h4>
-    <label class="check-row"><input type="checkbox" id="cu-cropshow" ${cu.cropShow ? "checked" : ""}><span>Show it on the big photo<small>Drag to move it, scroll to resize. Used when you crop and edit the keepers</small></span></label>
-    ${p.crop ? `<button class="btn ghost small" id="cu-crop-reset">Back to the automatic crop</button>` : ""}
+    <div class="seg small cu-sizes">${["instagram", "story", "youtube", "original"].map((k) => `<button class="${cuSizeKey() === k ? "on" : ""}" data-size="${k}" title="${esc(cu.sizes[k] || k)}">${CU_SIZE_NAME[k]}</button>`).join("")}</div>
+    ${(() => { const sk = cuSizeKey(), b = cuCropOf(p, sk), q = b && cuQual(p, sk, b); if (!q) return "";
+      const soft = q.f > 1.01, wb = soft ? cuWidened(p, sk, b) : null, wq = wb && cuQual(p, sk, wb);
+      return `<p class="cu-q ${soft ? "soft" : "ok"}">${icon(soft ? "info" : "check")}<span>${esc(cuQualText(q))}</span></p>
+        ${soft ? `<button class="btn small" id="cu-widen" title="Grow the crop around the action until nothing is enlarged">Widen it to stay sharp${wq && wq.f > 1.01 ? ` (as far as the photo allows: ${wq.f.toFixed(1)}×)` : ""}</button>
+          ${sk === "original" ? `<p class="faint cu-qnote">Original size always enlarges a crop. For full detail, choose Instagram or Story (made at their own size) or YouTube (saved at the crop's own size).</p>` : ""}` : ""}`; })()}
+    <label class="check-row"><input type="checkbox" id="cu-cropshow" ${cu.cropShow ? "checked" : ""}><span>Show it on the big photo<small>Drag to move it, scroll to resize. Its pixels show on it, amber when it would be enlarged</small></span></label>
+    ${p.crop && (Array.isArray(p.crop) || p.crop[cuSizeKey()]) ? `<button class="btn ghost small" id="cu-crop-reset">Back to the automatic crop</button>` : ""}
     <h4 class="sub">Camera</h4>
     <table class="ck-kv"><tbody>${[["Taken", p.t ? new Date(p.t * 1000).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit", second: "2-digit" }) : null],
       ["Shutter", shutter], ["Aperture", c.aperture ? `f/${+c.aperture.toFixed(1)}` : null], ["ISO", c.iso], ["Focal length", c.focal ? `${Math.round(c.focal)} mm` : null], ["Camera", c.camera]]
@@ -544,7 +588,13 @@ function cuPaintInfo() {
   $("#cu-undo1")?.addEventListener("click", (e) => { e.preventDefault(); cuMark(null); });
   $("#cu-cmp-burst")?.addEventListener("click", (e) => { e.preventDefault(); cu.picked.clear(); cuSetView("compare"); });
   $("#cu-cropshow").onchange = (e) => { cu.cropShow = e.target.checked; store.set("cull.crop", cu.cropShow); if (cu.view !== "one") cuSetView("one"); else cuPaintMain(); };
-  $("#cu-crop-reset")?.addEventListener("click", () => cuSet([p.id], { crop: null }, "Reset the crop"));
+  $("#cu-crop-reset")?.addEventListener("click", () => Array.isArray(p.crop) ? cuSet([p.id], { crop: null }, "Reset the crop") : cuSaveCrop(p, cuSizeKey(), null, "Reset the crop"));
+  $("#cu-widen")?.addEventListener("click", () => { const sk = cuSizeKey(); cuSaveCrop(p, sk, cuWidened(p, sk, cuCropOf(p, sk)), "Widen the crop"); });
+  box.querySelectorAll("[data-size]").forEach((b) => b.onclick = async () => {
+    const sh = cuShoot(); sh.settings.size = b.dataset.size;
+    await api(`/api/cull/shoots/${sh.id}`, { settings: { size: b.dataset.size } }, { method: "PATCH" });
+    cuPaintInfo(); if (cu.view === "one") cuPaintMain();
+  });
   $("#cu-reveal").onclick = () => api("/api/reveal", { path: p.path || "" }).catch(() => {});
 }
 
@@ -683,10 +733,21 @@ async function cuOut(what) {
       <p style="margin-top:0">Each keeper is cropped on the action (yours where you moved the crop) and saved in a new folder. Your originals are never changed.</p>
       <h4 class="sub">Size</h4><div class="cu-radio">${Object.entries(cu.sizes).map(([k, l]) => `<label><input type="radio" name="ce-size" value="${k}" ${k === size ? "checked" : ""}> ${esc(l)}${k === "ai" ? ` <small class="faint">uses the AI ratings</small>` : ""}</label>`).join("")}</div>
       <h4 class="sub">Versions of each</h4><div class="cu-radio">${Object.entries(cu.versions).map(([k, l]) => `<label><input type="checkbox" name="ce-v" value="${k}" ${k === "A" ? "checked" : ""}> <b>${k}</b> ${esc(l)}${k === "D" ? ` <small class="faint">Gemini, about $0.001–0.002 a photo</small>` : ""}</label>`).join("")}</div>
+      <div id="ce-q"></div>
       <p class="faint" id="ce-note"></p></div>
     <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ce-go">Make them</button></footer>`);
+  let fit = store.get("cull.fit", "widen");
   const note = () => {
     const sz = $("input[name=ce-size]:checked", m).value, vs = $$("input[name=ce-v]:checked", m).map((x) => x.value);
+    const qs = ids.map((id) => { const p = cuP(id), b = cuCropOf(p, sz); return b && cuQual(p, sz, b); }).filter(Boolean);
+    const soft = qs.filter((q) => q.f > 1.01), worst = Math.max(1, ...qs.map((q) => q.f));
+    $("#ce-q", m).innerHTML = sz === "youtube" || sz === "ai"
+      ? `<p class="cu-q ok">${icon("check")}<span>Saved at each crop's own size: full detail, nothing enlarged.</span></p>`
+      : !soft.length ? `<p class="cu-q ok">${icon("check")}<span>Every crop has the pixels this size needs: all sharp, nothing enlarged.</span></p>`
+      : `<p class="cu-q soft">${icon("info")}<span><b>${plural(soft.length, "crop")} of ${ids.length}</b> ${soft.length === 1 ? "is" : "are"} zoomed in further than this size can hold (up to ${worst.toFixed(1)}× enlarged, so softer).${sz === "original" ? " Original size always enlarges a crop." : ""}</span></p>
+        <div class="cu-radio cu-fit">${Object.entries(cu.fits || {}).map(([k, l]) => `<label><input type="radio" name="ce-fit" value="${k}" ${k === fit ? "checked" : ""}> ${esc(l)}${k === "widen" ? ` <small class="good-t">recommended: no quality lost</small>` : ""}</label>`).join("")}</div>`;
+    paintIcons($("#ce-q", m));
+    $$("input[name=ce-fit]", m).forEach((r) => r.onchange = () => { fit = r.value; store.set("cull.fit", fit); });
     const unrated = ids.filter((id) => !cuP(id).ai || cuP(id).ai.error).length;
     $("#ce-note", m).innerHTML = [`${plural(ids.length * Math.max(1, vs.length), "picture")} to make`,
       sz === "ai" && unrated ? `<span class="warn-t">${unrated} not rated by AI yet: they use the automatic crop (Ask AI to rate first for its crop)</span>` : "",
@@ -697,7 +758,7 @@ async function cuOut(what) {
     const sz = $("input[name=ce-size]:checked", m).value, vs = $$("input[name=ce-v]:checked", m).map((x) => x.value).join("");
     if (!vs) { toast("Choose at least one version"); return; }
     closeModal();
-    await api(`/api/cull/shoots/${sh.id}/export`, { what: "edit", ids, size: sz, versions: vs }); cuJobStart("Cropping and editing");
+    await api(`/api/cull/shoots/${sh.id}/export`, { what: "edit", ids, size: sz, versions: vs, fit }); cuJobStart("Cropping and editing");
   };
 }
 let cuJobToast = null, cuJobLabel = "";

@@ -18,7 +18,7 @@ from PIL import Image
 
 from photo_crops import focus, framing, images
 
-VERSION = 3  # raise when a measurement changes, so files are measured again
+VERSION = 4  # raise when a measurement changes, so files are measured again
 EDGE = 1600  # the photo is looked at this size (RAW: the camera's own preview)
 THUMB_EDGE = 420
 SHAPES = ["4:5", "9:16", "16:9", "1:1", "3:2", "best"]
@@ -238,6 +238,8 @@ def measure(path: Path, cache: Path) -> dict:
     out["faces"] = [{"px": f["px"], "eyes": f["eyes"], "quality": f["quality"],
                      "box": tuple(v / d for v, d in zip(f["box"], (W, H, W, H))) if f["box"] else None,
                      "main": f["person"] == main} for f in faces]
+    # the photo's real size: how many pixels each crop really has (when an export would enlarge it)
+    out["full"] = full_size(path, (W, H))
     # the crop on the action in every shape, and the no-zoom pro crop (shares of the photo)
     if people:
         # the action itself: the main player and a ball near them (in the air above them too)
@@ -248,7 +250,7 @@ def measure(path: Path, cache: Path) -> dict:
             action += [b for b in balls if abs((b[0] + b[2]) / 2 - mx) <= 1.5 * mh
                        and main_p.box[1] - 1.2 * mh <= (b[1] + b[3]) / 2 <= main_p.box[3]]
         # the crop maths at the photo's real size (its smallest crop is in real pixels)
-        k = full_size(path, (W, H))[0] / W
+        k = out["full"][0] / W
         sc = lambda b: tuple(v * k for v in b)
         big = (round(W * k), round(H * k))
         fplan = framing.Plan(_scaled(plan.subject, k), sc(plan.group), plan.reason, plan.team_photo)

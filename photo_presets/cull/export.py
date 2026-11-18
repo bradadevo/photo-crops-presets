@@ -45,6 +45,53 @@ def copy_files(files: list[Path], folder: Path) -> list[Path]:
     return out
 
 
+FITS = {"widen": "Widen those crops just enough to stay sharp",
+        "native": "Keep the crop's own pixels (a smaller file, never enlarged)",
+        "enlarge": "Enlarge them to the full size anyway (softer)"}
+
+
+def target(size_key: str, full: tuple[int, int]) -> tuple[int, int] | None:
+    """The pixels an export of this size needs (None: the crop's own size, never enlarged)."""
+    size = SIZES[size_key]
+    if size.pixels:
+        return size.pixels
+    if size.match_source:
+        return tuple(full)
+    return None
+
+
+def enlarged(box: crops.Box, size_key: str, full: tuple[int, int]) -> float:
+    """How many times this crop would be enlarged for this size (1.0 or less: no loss)."""
+    t = target(size_key, full)
+    if not t:
+        return 1.0
+    return max(t[0] / max(1, box[2] - box[0]), t[1] / max(1, box[3] - box[1]))
+
+
+def widen(box: crops.Box, size_key: str, full: tuple[int, int]) -> crops.Box:
+    """The crop grown around its middle (same shape) until it has the pixels the size needs, kept
+    inside the photo; as large as the photo allows when it can't get there."""
+    f = enlarged(box, size_key, full)
+    if f <= 1.0:
+        return box
+    W, H = full
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    w, h = (box[2] - box[0]) * f, (box[3] - box[1]) * f
+    if w > W or h > H:
+        s = min(W / w, H / h)
+        w, h = w * s, h * s
+    x0 = min(max(cx - w / 2, 0), W - w)
+    y0 = min(max(cy - h / 2, 0), H - h)
+    return round(x0), round(y0), round(x0 + w), round(y0 + h)
+
+
+def your_crop(override, size_key: str):
+    """Your own crop for this size (the crop is kept per size; an older single crop counts for all)."""
+    if isinstance(override, dict):
+        return override.get(size_key)
+    return override
+
+
 def boxes(m: dict, size_key: str, img_size: tuple[int, int], override: tuple | None = None,
           ai_crop: tuple | None = None) -> tuple[crops.Box, crops.Box]:
     """The tight crop (A, C, D, O) and the wider one (B), in pixels. The crop on the action from pass 1
@@ -85,13 +132,15 @@ def _final(out: Image.Image, src: Image.Image, size: crops.OutputSize, sharpen: 
 
 
 def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, override: tuple | None = None,
-             ai_crop: tuple | None = None, adjust_fn=None) -> list[Path]:
+             ai_crop: tuple | None = None, adjust_fn=None, fit: str = "widen") -> list[Path]:
     """One keeper's versions, saved in folder as <name>_<version>.jpg with its camera data.
     adjust_fn: Gemini's adjustments for D (given the natural edit), only when D is asked for."""
     photo = images.load(path)
     img, exif = photo.image, images.upright_exif(photo.exif) if photo.from_raw else photo.exif
     size = SIZES[size_key]
-    tight, wide = boxes(m, size_key, img.size, override, ai_crop)
+    tight, wide = boxes(m, size_key, img.size, your_crop(override, size_key), ai_crop)
+    if fit == "widen":  # never enlarged: a crop too small for the size grows just enough
+        tight, wide = widen(tight, size_key, img.size), widen(wide, size_key, img.size)
     subject = m.get("group") or m.get("subject")
     folder.mkdir(parents=True, exist_ok=True)
     out = []
@@ -105,11 +154,12 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
         """The crop at its final size first, so the edit's detail and clarity suit what is seen
         (edited at 33 MP and then shrunk, the texture packs together and looks crunchy)."""
         crop = img.crop(box)
-        if size.pixels:
-            return crop.resize(size.pixels, Image.Resampling.LANCZOS)
-        if size.match_source and crop.size != img.size:
-            return crop.resize(img.size, Image.Resampling.LANCZOS)
-        return crop
+        t = target(size_key, img.size)
+        if not t or crop.size == tuple(t):
+            return crop
+        if fit == "native" and (crop.width < t[0] or crop.height < t[1]):
+            return crop  # its own pixels: never enlarged (it may be made smaller, never bigger)
+        return crop.resize(t, Image.Resampling.LANCZOS)
 
     def sub(box, shown):
         s = _subject_in(box, subject, img.size)
