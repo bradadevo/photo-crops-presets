@@ -649,6 +649,9 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
 app = FastAPI(title="AllProPhoto")
 from photo_presets.studio import check as _check  # the Check tab (how a clip or photo was shot, and fixes)
 app.include_router(_check.router)
+from photo_presets.studio import cull as _cull  # the Culling tab (pass 1 by the app, pass 2 by you)
+app.include_router(_cull.router)
+_cull.SEND["looks"] = S.add_photos  # the Culling tab's keepers go into Looks
 
 
 def prefs() -> dict:

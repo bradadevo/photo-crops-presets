@@ -8,6 +8,7 @@ dependencies = [
     "accelerate>=1.15.0",
     "diffusers>=0.43.0",
     "exifread>=3.5.1",
+    "google-genai>=3.6.1",
     "gradio>=6.31.0",
     "librosa>=1.0.0",
     "numpy",

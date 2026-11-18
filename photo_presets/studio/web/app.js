@@ -237,6 +237,9 @@ function render() {
   $("#app").classList.toggle("reel-mode", st.mode === "reel");
   $("#app").classList.toggle("check-mode", st.mode === "check");
   $("#check").hidden = st.mode !== "check";
+  $("#app").classList.toggle("cull-mode", st.mode === "cull");
+  $("#cull").hidden = st.mode !== "cull";
+  if (st.mode === "cull") { $$(".modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === st.mode)); renderTop(); renderCull(); return; }
   if (st.mode === "check") { $$(".modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === st.mode)); renderTop(); renderCheck(); return; }
   $$(".modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === st.mode));
   renderTop(); renderRail(); renderStrip(); renderViewer(); renderMake(); renderTabs(); renderTasks();
@@ -1345,6 +1348,7 @@ window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", async (e) => {
   e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
   if (st.mode === "check") { ckUpload(await droppedFiles(e.dataTransfer)); return; }
+  if (st.mode === "cull") { toast("Add a shoot with + (Add a folder)", { small: "Culling works on your folders where they are, so nothing is copied" }); return; }
   if (e.target.closest?.("#r-order")) return;
   if (e.target.closest?.(".kit-drop")) { for (const f of e.dataTransfer?.files || []) await addLogo(f); return; }
   const fr = $("#frame")?.getBoundingClientRect();  // (by where it was let go: the window's drop layer is over the picture)
@@ -1404,6 +1408,8 @@ function showHelp() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (st.mode === "cull" && cullKey(e)) return;  // (the Culling tab has its own keys and its own undo)
+  if (st.mode === "cull" && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") return;
   const undoKey = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z";
   // ⌘Z in the edit panel's boxes undoes the picture's last change (the box shows it), not just letters
   const ownBox = e.target.closest?.("#pane-edit input:not(#e-name):not(#pp-name), #pane-edit textarea");
@@ -1492,6 +1498,7 @@ function init() {
   $("#export-btn").onclick = exportDefault;
   $$(".modes button").forEach((b) => b.onclick = () => { st.mode = b.dataset.mode; viewerSig = ""; render(); });
   $("#check-btn")?.addEventListener("click", () => { closeMenus(); st.mode = "check"; viewerSig = ""; render(); });
+  $("#cull-btn")?.addEventListener("click", () => { closeMenus(); st.mode = "cull"; viewerSig = ""; render(); });
   $$(".tabs button").forEach((b) => b.onclick = () => {
     const cur = slotById(st.current);
     if (b.dataset.tab === "edit" && !(cur && cur.state === "done")) { editPhoto(); return; }
