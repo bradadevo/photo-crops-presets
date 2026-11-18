@@ -257,6 +257,11 @@ def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, f
         zone = np.clip((1.0 - d) / 0.3, 0, 1)
         chin = int((fy * H + r * 0.9 - y0) / (y1 - y0) * (Y1 - Y0))
         zone[max(0, chin):] *= np.clip(1 - (np.arange(max(0, chin), Y1 - Y0) - chin) / max(1, (Y1 - Y0) * 0.1), 0, 1)[:, None]
+        # only around this head itself: another player's leg or arm in the same square is not this
+        # head's piece, and keeps the first cut-out (it used to be wiped out, then blurred by the look)
+        reach = max(5, int((X1 - X0) * 0.08)) | 1
+        own = cv2.dilate((lab == here).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (reach, reach)))
+        zone = zone * cv2.GaussianBlur(own.astype(np.float32), (0, 0), reach / 3)
         out[Y0:Y1, X0:X1] = old * (1 - zone) + fine * zone
     return out
 
@@ -400,7 +405,7 @@ def cutout(img: Image.Image, subject_mask: np.ndarray) -> np.ndarray | None:
     return full
 
 
-MATTE_VERSION = 3  # (raised when the cut-out is made differently: the kept ones are made again)
+MATTE_VERSION = 6  # (raised when the cut-out is made differently: the kept ones are made again)
 MATTES_KEPT = 400  # cut-outs kept on disk, the oldest let go
 
 
