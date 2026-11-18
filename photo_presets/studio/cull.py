@@ -42,7 +42,8 @@ class Shoot:
     def __init__(self, sid: int, name: str, folders: list[str], settings: dict | None = None,
                  auto: dict | None = None):
         self.id, self.name, self.folders = sid, name, folders
-        self.settings = {"keep": "", "strict": 0.5, "per_burst": True, "size": "instagram", **(settings or {})}
+        self.settings = {"keep": "", "strict": 0.5, "per_burst": True, "size": "instagram", "saved": [],
+                         **(settings or {})}  # saved: the folders your keepers went to, newest first
         self.photos: list[dict] = []
         self.by_path: dict[str, dict] = {}
         self.auto: dict[str, list] = auto or {}  # path -> [flag, sure, why]: pass 1's marks, kept as made
@@ -99,6 +100,10 @@ class Cull:
             for s in data.get("shoots", []):
                 sh = Shoot(s["id"], s["name"], s["folders"], s.get("settings"), s.get("auto"))
                 sh.pass1_at = s.get("pass1_at")
+                if not sh.settings.get("saved"):  # (exports made before the app remembered them)
+                    sh.settings["saved"] = sorted((str(d) for f in sh.folders if Path(f).is_dir() for d in Path(f).iterdir()
+                                                   if d.is_dir() and (d.name == "Picks" or d.name.startswith("Culled - "))),
+                                                  key=lambda d: -Path(d).stat().st_mtime)[:5]
                 self.shoots[sh.id] = sh
                 sh.add(files.shots_in([Path(f) for f in sh.folders]))
                 self.queue.put(sh.id)
@@ -459,6 +464,9 @@ async def export_keepers(sid: int, req: Request):
         except Exception as x:
             sh.job.update(state="failed", error=f"{type(x).__name__}: {x}"[:200])
         sh.job["ended"] = time.time()
+        if sh.job.get("done"):  # remembered, so the folder can always be found again
+            sh.settings["saved"] = [str(folder)] + [f for f in sh.settings.get("saved", []) if f != str(folder)][:4]
+            C.save()
         sh.rev += 1
     threading.Thread(target=run, daemon=True).start()
     return {"folder": str(folder), "total": len(chosen)}

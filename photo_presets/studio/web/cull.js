@@ -200,6 +200,7 @@ function cuPaintSide() {
         <button class="x" data-forget="${s.id}" title="Take this shoot out of the list (the photos stay where they are)">${icon("x")}</button></div>`; }).join("")
       || `<div class="ck-empty"><p><b>No shoots yet</b></p><p>Add a game's folder, or import from the camera card.</p>
           <button class="btn primary" data-add="folder">${icon("plus")} Add a folder…</button>${card ? "" : `<button class="btn ghost" data-add="card">Import from a card…</button>`}</div>`}</div>
+    ${sh && (sh.settings?.saved || []).length ? `<h4 class="sub">Your keepers went to</h4><div class="cu-saved">${sh.settings.saved.map((f) => `<button data-reveal="${esc(f)}" title="${esc(f)}">${icon("folder")}<span>${esc(f.split("/").pop())}<small>${esc(f.replace(/^\/Users\/[^/]+/, "~").split("/").slice(0, -1).join("/"))}</small></span></button>`).join("")}</div>` : ""}
     ${sh ? `<h4 class="sub">Show</h4><div class="cu-fs">
       ${row("all", "Everything", c.all, "Every photo")}
       ${row("keep", `${icon("keep")} Keep`, c.keep, "Kept by pass 1 or by you")}
@@ -232,6 +233,7 @@ function cuPaintSide() {
     cu.shootSig = ""; renderCull();
   });
   side.querySelectorAll("[data-show]").forEach((b) => b.onclick = () => { cu.show = b.dataset.show; cuRefilter(); });
+  side.querySelectorAll("[data-reveal]").forEach((b) => b.onclick = () => api("/api/reveal", { path: b.dataset.reveal }));
   side.querySelectorAll("[data-iss]").forEach((b) => b.onclick = () => { const k = b.dataset.iss; cu.issues.has(k) ? cu.issues.delete(k) : cu.issues.add(k); cuRefilter(); });
   $("#cu-iss-clear")?.addEventListener("click", (e) => { e.preventDefault(); cu.issues.clear(); cuRefilter(); });
   side.querySelectorAll("[data-sf]").forEach((b) => b.onclick = () => { cu.stars = +b.dataset.sf; cuRefilter(); });
@@ -773,6 +775,7 @@ function cuJobWatch() {
     else if (j.what === "ai") { t.done(`Rated ${plural(j.total, "photo")} with AI`, `${(j.tokens || 0).toLocaleString()} tokens`); cuPhotos().then(() => cuPaintInfo()); }
     else if (j.what === "import") t.done(`Imported ${plural(j.copied || 0, "file")}${j.skipped ? ` (${j.skipped} were already copied)` : ""}`, j.folder?.replace(/^\/Users\/[^/]+/, "~"), { label: "Show in Finder", run: () => api("/api/reveal", { path: j.folder }) });
     else t.done(`${j.what === "copy" ? "Copied" : "Made"} ${plural(j.done, "keeper")}`, j.folder?.replace(/^\/Users\/[^/]+/, "~"), { label: "Show in Finder", run: () => api("/api/reveal", { path: j.folder }) });
+    if (j.state === "done" && (j.what === "copy" || j.what === "edit")) cuState().then(cuPaintSide);  // (the folder stays listed on the left)
   }
 }
 
