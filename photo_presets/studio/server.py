@@ -647,6 +647,8 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
 # The app -------------------------------------------------------------------------------------
 
 app = FastAPI(title="AllProPhoto")
+from photo_presets.studio import check as _check  # the Check tab (how a clip or photo was shot, and fixes)
+app.include_router(_check.router)
 
 
 def prefs() -> dict:

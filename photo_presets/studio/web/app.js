@@ -235,6 +235,9 @@ async function loadLooks() {
 // Rendering --------------------------------------------------------------------------------
 function render() {
   $("#app").classList.toggle("reel-mode", st.mode === "reel");
+  $("#app").classList.toggle("check-mode", st.mode === "check");
+  $("#check").hidden = st.mode !== "check";
+  if (st.mode === "check") { $$(".modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === st.mode)); renderTop(); renderCheck(); return; }
   $$(".modes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === st.mode));
   renderTop(); renderRail(); renderStrip(); renderViewer(); renderMake(); renderTabs(); renderTasks();
   if (st.mode === "reel") renderReel();
@@ -1332,11 +1335,16 @@ function bindAdd(root) {
 }
 
 let dragDepth = 0;
-window.addEventListener("dragenter", (e) => { if ([...e.dataTransfer.types].includes("Files")) { dragDepth++; $("#drop").hidden = false; } });
+window.addEventListener("dragenter", (e) => {
+  if (![...e.dataTransfer.types].includes("Files")) return;
+  dragDepth++; $("#drop").hidden = false;
+  $("#drop b").textContent = st.mode === "check" ? "Drop to check these clips or photos" : "Drop to add photos";
+});
 window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").hidden = true; } });
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", async (e) => {
   e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
+  if (st.mode === "check") { ckUpload(await droppedFiles(e.dataTransfer)); return; }
   if (e.target.closest?.("#r-order")) return;
   if (e.target.closest?.(".kit-drop")) { for (const f of e.dataTransfer?.files || []) await addLogo(f); return; }
   const fr = $("#frame")?.getBoundingClientRect();  // (by where it was let go: the window's drop layer is over the picture)
@@ -1401,6 +1409,7 @@ document.addEventListener("keydown", (e) => {
   const ownBox = e.target.closest?.("#pane-edit input:not(#e-name):not(#pp-name), #pane-edit textarea");
   if (undoKey && ownBox && st.mode === "edit") { e.preventDefault(); ownBox.blur(); (e.shiftKey ? redo : undo)(); return; }
   if (e.target.closest?.("input, textarea, select")) return;
+  if (undoKey && st.mode === "check") return;  // (the Check tab never changes your looks)
   if (undoKey) { e.preventDefault(); (e.shiftKey ? redo : undo)(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !String(window.getSelection())) {
     const cur = slotById(st.current);
@@ -1482,6 +1491,7 @@ function init() {
   });
   $("#export-btn").onclick = exportDefault;
   $$(".modes button").forEach((b) => b.onclick = () => { st.mode = b.dataset.mode; viewerSig = ""; render(); });
+  $("#check-btn")?.addEventListener("click", () => { closeMenus(); st.mode = "check"; viewerSig = ""; render(); });
   $$(".tabs button").forEach((b) => b.onclick = () => {
     const cur = slotById(st.current);
     if (b.dataset.tab === "edit" && !(cur && cur.state === "done")) { editPhoto(); return; }

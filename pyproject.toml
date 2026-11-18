@@ -16,6 +16,7 @@ dependencies = [
     "pillow-heif>=1.8.1",
     "pyobjc-framework-vision>=11",
     "pypdfium2>=5.15.2",
+    "python-docx>=1.2.0",
     "pywebview>=6.2.1",
     "rawpy",
     "rembg[cpu]>=2.0.87",

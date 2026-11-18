@@ -298,6 +298,32 @@ width), and **Words and banners size** makes them all smaller or bigger.
 Exporting a poster in other sizes lays it out again for each size's shape
 (nothing is cropped off), and export has a **Wide 16:9** size too.
 
+**Check tab** (next to Looks and Reel, or Tools → Shot check): how a video or
+photo was shot, what is holding it back, how to fix the file and what to change
+next time. No AI: the camera's own settings in the file, measurements of the
+picture, and plain rules.
+- **Add** clips and photos with **+** (they stay where they are) or drop them on
+  the window. Videos take about a third of their length to check; photos a
+  second or two. Results are kept, so a file is checked once.
+- **What's holding it back**, and for videos **when it happens**: a timeline of
+  soft pans, shaky stretches, brightness jumps and too-dark or too-bright
+  stretches; click one to see that frame, **Play this moment** to watch it.
+  Photos: **Problem areas** shows pure white in red, pure black in blue and
+  circles the sharpest detail.
+- **Fix this file**: brightness, recover bright areas (photos; far more from
+  RAW), neutral color, even out brightness and steady the camera (videos),
+  reduce grain, sharpen. Each is suggested when it is needed, says what it can't
+  do, and shows live before/after (drag the line). **Make a fixed copy** saves a
+  new file in a `Clip Analysis/Fixed` folder next to the original (never over
+  it); steadying checks its own result and says plainly if it didn't help.
+- **Next time you shoot**: the settings to change and why, and habits.
+- **Compare**: tick two or more files. A table, the measurements that matter
+  first, the best and weakest on each marked, **Only what differs**, plus plain
+  notes on what differs.
+- **Export**: a Word report (opens in Google Drive too) and/or a spreadsheet,
+  in a `Clip Analysis` folder next to the first file.
+The same checks run from Terminal in the clip-analyzer project.
+
 **Edit anything on a poster, at any time** (Poster tool):
 - every word: click it to type, drag it to move it, its corner to resize it,
   Delete to take it off (**Words back to their places** undoes the moving);
