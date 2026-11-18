@@ -375,7 +375,8 @@ def high_key(a, p, ctx):
     return np.clip(out + (1 - out) * white[..., None], 0, 1)
 
 
-@op("backdrop", label="Studio backdrop", layer="background", top="#3d86c6", bottom="#000000", glow=0.5, amount=1.0)
+@op("backdrop", label="Studio backdrop", layer="background", top="#3d86c6", bottom="#000000", glow=0.5, amount=1.0,
+    floor=0.6)
 def backdrop(a, p, ctx):
     """Replaces the background with a smooth studio gradient (top color into
     bottom color) lit from above the player, like a portrait backdrop."""
@@ -391,11 +392,161 @@ def backdrop(a, p, ctx):
     d2 = ((xx / w - cx) / 0.45) ** 2 + ((yy / h) / 0.35) ** 2
     light = float(p["glow"]) * np.exp(-d2).astype(np.float32)
     grad += (1 - grad) * light[..., None] * 0.8
+    if float(p.get("floor", 0.6)) > 0:
+        # the floor of the sweep: a little darker, curving up into the wall just behind the feet,
+        # with the light falling in a pool around the players and their shadow under them
+        floor = float(p.get("floor", 0.6))
+        fy = (ctx.scene.feet[1] if ctx.scene.feet else 0.92) * h
+        ph = ctx.scene.subject_height * h
+        on = _smoothstep(fy - 0.7 * ph, fy + 0.15 * ph, yy.astype(np.float32))
+        grad *= (1 - 0.25 * floor * on)[..., None]
+        pool = _blob(h, w, cx * w, fy, 0.9 * ph, 0.12 * ph) * on
+        grad += (1 - grad) * (0.35 * floor * pool)[..., None]
+        shadow = _ground_shadow(ctx.alpha, h, w)
+        if shadow is not None:
+            grad *= (1 - 0.8 * floor * shadow)[..., None]
     grad += np.random.default_rng(ctx.seed).normal(0, 0.004, (h, w, 1)).astype(np.float32)  # no banding
     return a + (np.clip(grad, 0, 1) - a) * float(p["amount"])
 
 
 # Studio smoke and light ---------------------------------------------------------
+
+# Grounding: where the field ends, and the players' shadows on it -----------------
+
+def _horizon(ctx, h: int, w: int) -> np.ndarray | None:
+    """Where the field ends, as a row (pixels) for every column: the top of the
+    grass that runs up from the bottom of the frame, a straight line fitted
+    across the frame (so a tilted photo gets a tilted line). None when no field
+    shows (no grass) or it fills the frame to the top."""
+    src = ctx.original if ctx.original is not None else None
+    if src is None:
+        return None
+    sw = 240
+    sh = max(8, int(round(h * sw / w)))
+    small = cv2.resize(np.clip(src, 0, 1), (sw, sh), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor((small * 255).astype(np.uint8), cv2.COLOR_RGB2HSV)
+    behind = np.ones((sh, sw), np.float32)
+    if ctx.alpha is not None:
+        behind = (cv2.resize(ctx.alpha, (sw, sh), interpolation=cv2.INTER_AREA) < 0.3).astype(np.float32)
+    green = (hsv[..., 0] >= 28) & (hsv[..., 0] <= 92) & (hsv[..., 1] >= 45) & (hsv[..., 2] >= 25)
+    # this field's own grass: its color in the bottom of the frame. Trees are green too, but darker
+    # and bluer, so only colors close to this grass count
+    low = green[int(sh * 0.8):] & (behind[int(sh * 0.8):] > 0)
+    if low.sum() < 20:
+        return None
+    ref = hsv[int(sh * 0.8):][low].astype(np.float32)
+    hue, val = float(np.median(ref[:, 0])), float(np.median(ref[:, 2]))
+    hf, vf = hsv[..., 0].astype(np.float32), hsv[..., 2].astype(np.float32)
+    grass = (green & (np.abs(hf - hue) <= 12) & (vf >= 0.62 * val) & (vf <= 1.6 * val + 20)).astype(np.float32)
+    bins, xs, ys = 12, [], []
+    for b in range(bins):
+        x0, x1 = b * sw // bins, (b + 1) * sw // bins
+        g, k = grass[:, x0:x1], behind[:, x0:x1]
+        share = np.where(k.sum(1) >= 2, (g * k).sum(1) / np.maximum(k.sum(1), 1), np.nan)
+        # climb from the bottom while the column stays grass (players and goals are skipped)
+        top, miss = None, 0
+        for y in range(sh - 1, -1, -1):
+            v = share[y]
+            if np.isnan(v):
+                continue
+            if v >= 0.5:
+                top, miss = y, 0
+            else:
+                miss += 1
+                if miss > max(2, sh // 40):
+                    break
+        if top is not None and top < sh * 0.97:
+            xs.append((x0 + x1) / 2); ys.append(top)
+    if len(xs) < bins // 2:
+        return None
+    xs, ys = np.array(xs), np.array(ys, dtype=np.float64)
+    keep = np.abs(ys - np.median(ys)) <= max(3.0, 2.5 * np.median(np.abs(ys - np.median(ys))))
+    slope, icpt = np.polyfit(xs[keep], ys[keep], 1) if keep.sum() >= 2 else (0.0, float(np.median(ys)))
+    slope = float(np.clip(slope, -0.12, 0.12))
+    line = (icpt + slope * np.arange(sw)) / sh  # share of the height
+    if np.median(line) < 0.04:
+        return None  # the field fills the frame: no sky to change
+    return cv2.resize(line.astype(np.float32)[None, :], (w, 1), interpolation=cv2.INTER_LINEAR)[0] * h
+
+
+def _ground_shadow(alpha: np.ndarray | None, h: int, w: int) -> np.ndarray | None:
+    """A soft contact shadow under everything cut out that stands on the ground:
+    the feet of each player and the foot of each goal post (the lowest part of
+    each cut-out shape), spread sideways along the ground. 0-1, behind them only."""
+    if alpha is None:
+        return None
+    scale = min(1.0, 700 / max(h, w))
+    sh, sw = max(8, int(h * scale)), max(8, int(w * scale))
+    m = (cv2.resize(alpha, (sw, sh), interpolation=cv2.INTER_AREA) > 0.5).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    seed = np.zeros((sh, sw), np.float32)
+    tall = 0.0
+    for i in range(1, n):
+        x, y, bw, bh, area = stats[i]
+        if area < 12 or bh < 6:
+            continue
+        tall = max(tall, bh)
+        band = (labels[y:y + bh, x:x + bw] == i)
+        # the lowest pixels of the shape in each column: feet, post bottoms (not raised arms)
+        low = y + bh - 1 - np.argmax(band[::-1], axis=0)
+        has = band.any(axis=0)
+        reach = y + bh - max(2, int(0.06 * bh))
+        for cx in np.nonzero(has)[0]:
+            if low[cx] >= reach:
+                seed[min(sh - 1, low[cx] + 1), x + cx] = 1.0
+    if not seed.any():
+        return None
+    sx = max(1.5, 0.05 * tall)
+    shadow = cv2.GaussianBlur(seed, (0, 0), sigmaX=sx, sigmaY=max(0.8, sx * 0.22))
+    shadow = np.clip(shadow / max(float(shadow.max()), 1e-6) * 1.6, 0, 1)
+    shadow = cv2.resize(shadow, (w, h), interpolation=cv2.INTER_LINEAR)
+    return shadow * (1 - alpha)
+
+
+def _night(h: int, w: int, horizon: np.ndarray | None, seed: int) -> np.ndarray:
+    """A night sky over a stadium: near black at the top, lifting to a hazy glow
+    where the floodlights light the air above the far side of the field."""
+    y = np.arange(h, dtype=np.float32)[:, None]
+    hz = horizon[None, :] if horizon is not None else np.full((1, w), 0.55 * h, np.float32)
+    t = np.clip(y / np.maximum(hz, 1), 0, 1)  # 0 at the top, 1 at the horizon
+    top, low = np.array([0.025, 0.03, 0.045], np.float32), np.array([0.13, 0.135, 0.15], np.float32)
+    sky = top + (low - top) * (t ** 2.2)[..., None]
+    sky = sky + np.random.default_rng(seed).normal(0, 0.004, (h, w, 1)).astype(np.float32)  # no banding
+    return np.clip(sky, 0, 1)
+
+
+@op("night_sky", cutout=True, label="Night sky (hides what is behind the field)", layer="background", amount=1.0,
+    keep=0.15)
+def night_sky(a, p, ctx):
+    """Replaces everything above the far edge of the field (parked cars, houses,
+    fences, daytime sky) with a dark night sky and a band of lit haze along the
+    field's edge, so a night look has nothing behind the field that gives it
+    away. The field itself stays. keep (0-1): how much of the old background
+    shows through faintly (tree tops as dark shapes); nothing at the field's
+    edge, where cars park. With no field in the photo, the top of the frame
+    darkens instead."""
+    h, w = a.shape[:2]
+    hz = _horizon(ctx, h, w)
+    y = np.arange(h, dtype=np.float32)[:, None]
+    if hz is None:
+        _, fy, ph = _player(ctx.scene, h, w)
+        line = np.full((w,), max(0.0, fy - 1.15 * ph), np.float32)
+    else:
+        line = hz.astype(np.float32)
+    feather = max(2.0, 0.012 * h)
+    sky_share = np.clip((line[None, :] + feather - y) / (2 * feather), 0, 1)  # 1 above the field's edge
+    sky = _night(h, w, line, ctx.seed)
+    # the band just above the field's edge, where cars and fences stand, gets none of the old picture
+    band = np.clip((line[None, :] - y) / max(1.0, 0.12 * h), 0, 1)
+    ghost = np.clip(a * 0.35, 0, 1) * (float(p["keep"]) * band)[..., None]
+    sky = sky * (1 - (float(p["keep"]) * band)[..., None]) + ghost
+    # haze lit by the floodlights, lying on the far edge of the field
+    haze = np.exp(-((y - line[None, :]) / max(2.0, 0.045 * h)) ** 2).astype(np.float32)
+    sky = sky + (np.array([0.32, 0.31, 0.3], np.float32) - sky) * (0.55 * haze)[..., None]
+    out = a + (sky - a) * (sky_share * float(p["amount"]))[..., None]
+    # the haze also softens the far end of the field into the night
+    return out + (np.array([0.2, 0.2, 0.2], np.float32) - out) * (0.35 * haze * (1 - sky_share))[..., None]
+
 
 SMOKE_PLACES = ["sides", "behind", "floor", "sides_floor"]
 
@@ -424,13 +575,14 @@ def _blob(h, w, cx, cy, rx, ry):
 
 
 @op("smoke_cloud", cutout=True, label="Smoke clouds", color="#ffffff", color2="", place="sides", amount=0.85, size=1.0,
-    front=0.0)
+    front=0.0, ground=0.7)
 def smoke_cloud(a, p, ctx):
     """Billowing studio smoke shaped around the player: at both sides, behind,
     along the floor, or sides and floor. With a second color, the left cloud
     takes the first color and the right cloud the second (team colors).
     The clouds sit behind the players (when they are cut out); front (0-1) lets
-    the floor smoke roll in front of their feet too."""
+    the floor smoke roll in front of their feet too. ground (0-1): the shadow
+    under feet and goal posts, so nothing seems to float above the smoke."""
     h, w = a.shape[:2]
     scale = min(1.0, 1400 / max(h, w))
     sh, sw = max(16, int(h * scale)), max(16, int(w * scale))
@@ -455,6 +607,7 @@ def smoke_cloud(a, p, ctx):
         clouds.append((floor, p["color"], True))
     behind = 1 - ctx.alpha if ctx.alpha is not None and p.get("layer", "all") == "all" else 1.0
     out = a
+    shadow = _ground_shadow(ctx.alpha, h, w) if float(p.get("ground", 0)) > 0 else None
     for envelope, color, in_front in clouds:
         density = np.clip((envelope * (0.2 + 1.3 * billow ** 1.5) - 0.25) * 2.0, 0, 1)
         density = cv2.resize(density, (w, h), interpolation=cv2.INTER_LINEAR)
@@ -464,6 +617,9 @@ def smoke_cloud(a, p, ctx):
         smoke = np.clip(_hex(color) * shade[..., None], 0, 1)
         cover = behind + (1 - behind) * float(p["front"]) if in_front else behind
         out = out + (smoke - out) * (density * cover * float(p["amount"]))[..., None]
+    if shadow is not None:
+        # on top of the smoke: smoke under a player is shaded by them, and the feet sit in it
+        out = out * (1 - 0.75 * float(p["ground"]) * shadow)[..., None]
     return out
 
 
@@ -484,21 +640,30 @@ def stage_lights(a, p, ctx):
     return blend(a, layer, "screen", float(p["amount"]))
 
 
-@op("stadium_lights", label="Stadium light banks", layer="background", height=0.7, amount=0.9,
+@op("stadium_lights", cutout=True, label="Stadium light banks", layer="background", height=0.7, amount=0.9,
     color="#fff3dc")
 def stadium_lights(a, p, ctx):
     """Two banks of stadium floodlights (grids of bright lamps with a big glow)
-    near the left and right edges, at the player's shoulder height (height:
-    share of the player's height above their feet)."""
+    high on poles near the left and right edges, the way real ones tower over
+    the stands. height (0-1): how high in the sky above the far edge of the
+    field (0.7: well above the tree tops)."""
     h, w = a.shape[:2]
-    fx, fy, ph = _player(ctx.scene, h, w)
-    y = float(np.clip(fy - float(p["height"]) * ph, 0.12 * h, 0.6 * h))
-    bw, bh = 0.16 * w, 0.05 * w
+    hz = _horizon(ctx, h, w)
+    _, fy, ph = _player(ctx.scene, h, w)
+    far = float(np.median(hz)) if hz is not None else max(0.2 * h, fy - 1.1 * ph)
+    lift = float(np.clip(p["height"], 0.0, 1.2))
+    y = float(np.clip(far - lift * (far - 0.05 * h), 0.05 * h, max(0.05 * h, far - 0.06 * h)))
+    bw = 0.12 * w
+    bh = bw * 0.36
     lamps = np.zeros((h, w), np.float32)
     glow = np.zeros((h, w), np.float32)
-    rows, cols = 4, 11
+    poles = np.zeros((h, w), np.float32)
+    rows, cols = 4, 10
     dot = max(2, int(0.36 * bw / cols))
-    for cx in (0.11 * w, 0.89 * w):
+    for cx in (0.1 * w, 0.9 * w):
+        foot = float(hz[int(np.clip(cx, 0, w - 1))]) if hz is not None else far
+        # the pole: a thin pale line from the bank down to the far side of the field
+        cv2.line(poles, (int(cx), int(y + bh / 2)), (int(cx), int(foot)), 1.0, max(1, int(0.004 * w)), cv2.LINE_AA)
         for r in range(rows):
             for c in range(cols):
                 x = cx - bw / 2 + bw * (c + 0.5) / cols
@@ -508,8 +673,8 @@ def stadium_lights(a, p, ctx):
     # each bulb shines with a small halo of its own
     lamps = np.maximum(lamps, cv2.GaussianBlur(lamps, (0, 0), dot * 1.2) * 0.9)
     light = np.clip(lamps + glow, 0, 1)
-    layer = light[..., None] * _hex(p["color"])
-    return blend(a, layer, "screen", float(p["amount"]))
+    out = a + (np.array([0.16, 0.16, 0.17], np.float32) - a) * (0.8 * poles)[..., None]
+    return blend(out, light[..., None] * _hex(p["color"]), "screen", float(p["amount"]))
 
 
 @op("subject_vignette", cutout=True, label="Vignette around the player", amount=0.6, spread=0.3)
