@@ -136,3 +136,22 @@ def test_the_photo_and_the_logo_can_be_placed_by_hand():
     assert out[h // 2, w // 4, 0] > 0.9 and out[h // 2, w // 4, 1] < 0.1  # the logo where it was put
     box = next(b for b in poster.words(p, True, logo) if b["key"] == "logo")
     assert abs((box["x0"] + box["x1"]) / 2 - 0.25) < 0.01
+
+
+def test_a_piece_added_to_a_layout_can_go_behind_the_player():
+    """Stripes added to a ready-made layout: on top by default, behind the player when asked."""
+    import numpy as np
+    from photo_presets import poster
+    arr = np.full((500, 400, 3), 0.5, np.float32)
+    matte = np.zeros((500, 400), np.float32)
+    matte[100:450, 150:250] = 1.0  # the player in the middle
+    stripe = {"id": "s1", "type": "stripes", "colors": ["#ff0000", "#ff0000"], "dir": "h", "w": 1.1, "h": 0.1,
+              "x": 0.5, "y": 0.5, "opacity": 1.0}
+    base = {"template": "gameday", "shape": "post", "title": "", "line": ""}
+    front = poster.compose(arr, matte, {**base, "extras": [stripe]})
+    behind = poster.compose(arr, matte, {**base, "extras": [{**stripe, "behind": True}]})
+    h, w = front.shape[:2]
+    mid, side = front[h // 2, w // 2], front[h // 2, w // 10]
+    assert mid[0] > 0.8 and mid[1] < 0.2  # on top: red over the player
+    assert behind[h // 2, w // 2][0] < 0.7  # behind: the player shows in front
+    assert behind[h // 2, w // 10][0] > 0.8 and side[0] > 0.8  # beside the player: the stripe either way

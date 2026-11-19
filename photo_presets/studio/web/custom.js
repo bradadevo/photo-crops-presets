@@ -76,7 +76,7 @@ function customSection(p) {
         ${sl("w", "Width", 0.01, 1.2, 0.01, sel.w)}${sl("h", "Height", 0.005, 1.2, 0.005, sel.h)}${sl("opacity", "Strength", 0.05, 1, 0.05, sel.opacity, "%")}` : ""}
       ${t === "card" ? `${sl("w", "Width", 0.2, 1, 0.01, sel.w)}${sl("h", "Height", 0.2, 1, 0.01, sel.h)}${toggle("border", "White edge")}
         <p class="notes">The photo sits in the card, the player breaking out of its top. Drag the photo in it to move it; Photo zoom is above.</p>` : ""}
-      ${t === "card" || p.template !== "custom" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
+      ${t === "card" || p.template === "spotlight" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
       <div class="inline piece-acts"><button class="btn" data-piece-dup>${icon("copy")} Duplicate</button><button class="btn ghost" data-piece-del>${icon("trash")} Delete</button></div>
       </div></div>`;
   }
@@ -86,8 +86,8 @@ function customSection(p) {
     <div class="fld"><label>Stripes <small class="faint">· across the top; drag them anywhere</small></label><div class="stripe-sets">${STRIPE_SETS.map(([l, cs], i) => `<button data-stripe-set="${i}" title="${esc(l)}">${cs.map((c) => `<i style="background:${c === "team" ? p.color || "#1f2a44" : c}"></i>`).join("")}</button>`).join("")}</div></div>
     ${els.length ? `<div class="pieces">${els.map((el, i) => `<div class="piece-row${el.id === st.pieceSel ? " on" : ""}" data-piece="${el.id}">
       <button class="pick" data-pick-piece="${el.id}"><span class="kind">${esc(PIECE_NAMES[el.type])}</span>${el.type === "text" || el.type === "badge" ? `<span class="what">${esc(pieceLabel(el))}</span>` : el.type === "stripes" ? pieceLabel(el) : ""}${el.behind ? `<span class="behind" title="Behind the players">behind</span>` : ""}</button>
-      <button class="icon-btn" data-piece-up="${el.id}" title="Bring forward" ${off(i === els.length - 1, "It's already in front of the others.")}>▲</button>
-      <button class="icon-btn" data-piece-down="${el.id}" title="Send back" ${off(i === 0, "It's already behind the others.")}>▼</button>
+      ${els.length > 1 ? `<button class="icon-btn" data-piece-up="${el.id}" title="Bring forward: in front of your other pieces" ${off(i === els.length - 1, "It's already on top of your other pieces. To put it behind the player, turn on Behind the players below.")}>▲</button>
+      <button class="icon-btn" data-piece-down="${el.id}" title="Send back: behind your other pieces" ${off(i === 0, "It's already under your other pieces. To put it behind the player, turn on Behind the players below.")}>▼</button>` : ""}
       <button class="icon-btn" data-piece-x="${el.id}" title="Delete">${icon("x")}</button></div>`).join("")}</div>` : `<p class="notes">Nothing on it yet: add a title, a score banner, your logo…</p>`}
     ${props}
     ${custom ? "" : "<!--"}${sl("fade_top", "Dark fade at the top", 0, 0.9, 0.05, p.fade_top ?? 0.35, "%").replace('data-prop="fade_top"', 'data-fade="fade_top"')}

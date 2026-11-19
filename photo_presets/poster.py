@@ -359,15 +359,29 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
             nf = _fit_font(p.get("away", ""), DEMI, W * 0.24, u * 0.03)
             _say(d, "away", (W * 0.76, mid), p.get("away", ""), font=nf, fill=(255, 255, 255, 235), anchor="mm")
             out = _over(out, lay)
-    if t != "custom" and p.get("extras"):  # your pieces on top of the layout
+    if t != "custom" and p.get("extras"):  # your pieces on the layout: behind the players, or on top
         from photo_presets import custom_poster
-        lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         boxes = getattr(_NOTE, "boxes", None)
         team = tuple(int(c * 255) for c in color)
-        for e in p["extras"]:
-            custom_poster._piece(lay, e, W, H, u, team, getattr(_NOTE, "logos", None), _say, _font,
-                                 boxes if boxes is not None else [])
-        out = _over(out, _shadowed(lay, u * 0.008, 0.3))
+        mm = None
+        if matte is not None and t != "spotlight":  # (the players where the layout put them)
+            mm, _ = _cover(matte.astype(np.float32), W, H, (fx, fy - 0.05))
+            mm = cv2.GaussianBlur(np.clip((mm - 0.35) / 0.4, 0, 1), (0, 0), 0.8)[..., None]
+        for behind in (True, False):
+            if mm is None:  # (no players found: every piece on top)
+                group = [] if behind else p["extras"]
+            else:
+                group = [e for e in p["extras"] if bool(e.get("behind")) == behind]
+            if not group:
+                continue
+            base = out
+            lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            for e in group:
+                custom_poster._piece(lay, e, W, H, u, team, getattr(_NOTE, "logos", None), _say, _font,
+                                     boxes if boxes is not None else [])
+            out = _over(out, _shadowed(lay, u * 0.008, 0.3))
+            if behind:  # the players (as the layout made them) back in front of these pieces
+                out = out * (1 - mm) + base * mm
     if logo is not None and t == "custom":
         pass  # (its logo is one of its pieces)
     elif logo is not None and p.get("logo_at"):
