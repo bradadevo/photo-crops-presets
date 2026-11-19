@@ -132,7 +132,7 @@ class Cull:
         self.load()
         sh = self.shoots.get(sid)
         if not sh:
-            raise HTTPException(404, "That shoot is no longer here")
+            raise HTTPException(404, "That event is no longer here")
         return sh
 
     def new_shoot(self, folders: list[str], name: str | None = None) -> Shoot:
@@ -309,7 +309,7 @@ async def add_shoot(req: Request):
     body = await req.json()
     folders = body.get("folders")
     if not folders:
-        out = _osascript('set fs to choose folder with prompt "Choose the folder (or folders) of a shoot to cull" '
+        out = _osascript('set fs to choose folder with prompt "Choose the folder (or folders) of an event to cull" '
                          'with multiple selections allowed\nset out to ""\nrepeat with f in fs\n'
                          'set out to out & POSIX path of f & linefeed\nend repeat\nreturn out')
         folders = [p.strip().rstrip("/") for p in out.splitlines() if p.strip()]

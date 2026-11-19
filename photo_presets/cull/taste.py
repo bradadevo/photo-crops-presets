@@ -1,6 +1,6 @@
 """Learns your taste from your own pass-2 decisions (keep or reject), on this Mac: a small
 logistic model over pass 1's measurements (sharpness, face, size in frame, ball, light...).
-Once it has seen enough of both, its guess is blended into pass 1's score, so each game's first
+Once it has seen enough of both, its guess is blended into pass 1's score, so each event's first
 pass gets closer to what you would pick."""
 
 from __future__ import annotations

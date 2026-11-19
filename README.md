@@ -445,13 +445,13 @@ looks. The classic app on its own: `uv run allprophoto-classic`.
 Every picture keeps the photo's real date and camera details (date taken, camera, lens, exposure), Sony RAW files included, and saved files are dated when the photo was taken. Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
 
-### Culling (keep the best of a game, delete the rest)
+### Culling (keep the best of an event, delete the rest)
 
 The **Culling** tab (also Tools → Culling) works on your folders where they are, and on whole
 tournaments (1,500+ photos stay quick: thumbnails come from the camera's own previews in about a
 minute, and only what is on screen is drawn).
 
-1. **Pass 1, the app.** Add a game's folder (or **Import from the camera card**: new photos only,
+1. **Pass 1, the app.** Add an event's folder (or **Import from the camera card**: new photos only,
    into a dated folder, culled while they copy). On this Mac and free, the app looks at every photo:
    is the main player sharp (judged against the rest of the shoot, so a dull day doesn't mark
    everything soft), are the eyes open (Apple's face quality on each player's face), did the camera's
@@ -461,7 +461,7 @@ minute, and only what is on screen is drawn).
 2. **Your pass.** Starts with the photos pass 1 was least sure about. `P` keep, `X` reject, `1`–`5`
    stars, `←` `→` next, `Space` one big photo, `Z` 100% (on the face), `C` compare a burst or your
    selection side by side, `G` gallery, `⌘Z` undo. Your marks always win over pass 1's (dashed marks are
-   pass 1's, solid ones yours), and teach it your taste for the next game.
+   pass 1's, solid ones yours), and teach it your taste for the next event.
 3. **Finish** (one page, top to bottom):
    1. **Clear out the rejects**: look at them first, or delete them (JPEG and RAW together go to the
       Trash, with undo).
@@ -478,7 +478,7 @@ minute, and only what is on screen is drawn).
 You can also move a crop from the big photo (`R` shows it: drag to move it, scroll to resize; its
 pixels show on it, amber when it would be enlarged). Gemini is used only when you ask (rating keepers
 for the AI's own crops, the AI touch-up), and the cost shows first.
-The timeline across the top is the whole game: tall bars are the big moments.
+The timeline across the top is the whole event: tall bars are the big moments.
 
 ### Tools: preset editor, Lightroom presets, assets
 

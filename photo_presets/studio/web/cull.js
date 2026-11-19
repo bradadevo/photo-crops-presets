@@ -122,7 +122,7 @@ function renderCull() {
   if (!cu.built) {
     cu.built = true;
     box.innerHTML = `<aside class="cu-side" id="cu-side"></aside>
-      <section class="cu-main"><div class="cu-bar" id="cu-bar"></div><div class="cu-tl" id="cu-tl" title="The whole shoot over time: tall bars are bursts of shooting (big moments). Click to jump there."></div>
+      <section class="cu-main"><div class="cu-bar" id="cu-bar"></div><div class="cu-tl" id="cu-tl" title="The whole event over time: tall bars are bursts of shooting (big moments). Click to jump there."></div>
         <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div></div>
         <div class="cu-keys" id="cu-keys"></div></section>
       <aside class="cu-info" id="cu-info"></aside>
@@ -187,8 +187,8 @@ function cuPaintSide() {
   const row = (k, label, n, tip) => `<button class="cu-f${cu.show === k ? " on" : ""}" data-show="${k}" title="${esc(tip)}"><span>${label}</span><b>${n.toLocaleString()}</b></button>`;
   side.innerHTML = `<div class="ck-head"><h2>Culling</h2>
       <button class="icon-btn" id="cu-help" title="How culling works">${icon("info")}</button>
-      <div class="menu-wrap"><button class="icon-btn" id="cu-add" title="Add a shoot" aria-haspopup="menu">${icon("plus")}</button>
-        <div class="menu" id="cu-add-menu" role="menu" hidden><button role="menuitem" data-add="folder">Add a folder…<small>A game's photos (JPEG and RAW). They stay where they are</small></button>
+      <div class="menu-wrap"><button class="icon-btn" id="cu-add" title="Add an event" aria-haspopup="menu">${icon("plus")}</button>
+        <div class="menu" id="cu-add-menu" role="menu" hidden><button role="menuitem" data-add="folder">Add a folder…<small>An event's photos (JPEG and RAW). They stay where they are</small></button>
           <button role="menuitem" data-add="card">Import from the camera card…<small>${card ? `${esc(card.name)}: ${card.photos.toLocaleString()} photos` : "Plug in the card first"}</small></button></div></div></div>
     ${card ? `<button class="cu-card" id="cu-card">${icon("card")}<span><b>${esc(card.name)}</b> card · ${card.photos.toLocaleString()} photos<small>Import and start culling while it copies</small></span></button>` : ""}
     <div class="cu-shoots">${cu.shoots.map((s) => {
@@ -197,8 +197,8 @@ function cuPaintSide() {
         <b>${esc(s.name)}</b><small>${busy ? `<span class="spin sm"></span> Pass 1 · ${s.measured.toLocaleString()} of ${s.total.toLocaleString()} · ${say(s.left)}`
           : `${s.total.toLocaleString()} photos · <span class="good-t">${s.keep.toLocaleString()} keep</span> · <span class="bad-t">${s.reject.toLocaleString()} reject</span>`}</small>
         ${busy ? `<i class="cu-prog" style="width:${(s.measured / Math.max(1, s.total) * 100).toFixed(1)}%"></i>` : ""}
-        <button class="x" data-forget="${s.id}" title="Take this shoot out of the list (the photos stay where they are)">${icon("x")}</button></div>`; }).join("")
-      || `<div class="ck-empty"><p><b>No shoots yet</b></p><p>Add a game's folder, or import from the camera card.</p>
+        <button class="x" data-forget="${s.id}" title="Take this event out of the list (the photos stay where they are)">${icon("x")}</button></div>`; }).join("")
+      || `<div class="ck-empty"><p><b>No events yet</b></p><p>Add an event's folder, or import from the camera card.</p>
           <button class="btn primary" data-add="folder">${icon("plus")} Add a folder…</button>${card ? "" : `<button class="btn ghost" data-add="card">Import from a card…</button>`}</div>`}</div>
     ${sh && (sh.settings?.saved || []).length ? `<h4 class="sub">Your keepers went to</h4><div class="cu-saved">${sh.settings.saved.map((f) => `<button data-reveal="${esc(f)}" title="${esc(f)}">${icon("folder")}<span>${esc(f.split("/").pop())}<small>${esc(f.replace(/^\/Users\/[^/]+/, "~").split("/").slice(0, -1).join("/"))}</small></span></button>`).join("")}</div>` : ""}
     ${sh ? `<h4 class="sub">Show</h4><div class="cu-fs">
@@ -558,7 +558,7 @@ function cuJobDone(j) {
 
 // -- the start page: the three things culling does, and how ------------------------------------------
 const CU_THREE = [
-  ["keep", "Find the keepers in minutes", "The app goes through the whole game for you and marks the best frame of every moment: sharp on the player, eyes open, the ball in play. Each mark says why."],
+  ["keep", "Find the keepers in minutes", "The app goes through the whole event for you and marks the best frame of every moment: sharp on the player, eyes open, the ball in play. Each mark says why."],
   ["trash", "Clear out the rest, safely", "You check its picks fast (the ones it's unsure about first), then delete the rejects in one go. They go to the Trash, with undo: nothing is lost by accident."],
   ["export", "Get the best ready to post", "Each keeper is cropped on the action for Instagram, Story or YouTube with a clean edit, copied to a Picks folder, or sent to Looks and Reel."],
 ];
@@ -568,7 +568,7 @@ function cuGuide(one, back) {
     ${back ? `<button class="btn ghost" id="cu-guide-back">${icon("left")} Back to ${esc(cuShoot()?.name || "the photos")}</button>` : ""}
     <h1>Culling</h1><p class="lead">From a full memory card to the photos worth sharing.</p>
     <div class="cu-three">${CU_THREE.map(([ic, t, s], i) => `<div class="cu-three-c"><span class="n">${i + 1}</span>${icon(ic)}<b>${t}</b><p>${s}</p></div>`).join("")}</div>
-    ${back ? "" : `<div class="cu-go"><button class="btn primary big" data-go="folder">${icon("plus")} Add a game's folder…</button>
+    ${back ? "" : `<div class="cu-go"><button class="btn primary big" data-go="folder">${icon("plus")} Add an event's folder…</button>
       <button class="btn big" data-go="card">${icon("card")} ${card ? `Import from ${esc(card.name)} (${card.photos.toLocaleString()} photos)` : "Import from the camera card…"}</button></div>
       <p class="faint">Your photos stay where they are. Nothing leaves your Mac unless you ask the AI to rate (it shows the cost first).</p>`}
     <h2>How it goes</h2>
@@ -952,10 +952,10 @@ async function cuImport() {
 function cuHelp() {
   modal(`<header><h2>How culling works</h2></header><div class="body cu-helpbody">
     <ol class="ck-steps">
-      <li><span class="n">1</span><div><b>Pass 1: the app</b><p>Add a game's folder (or import the camera card). The app looks at every photo on your Mac, free: is the main player sharp, are the eyes open, did the camera focus on the players, is the ball in the play, the light, and which frames are one burst. It marks each one <b>keep</b> or <b>reject</b> with the reason, and how sure it is.</p></div></li>
-      <li><span class="n">2</span><div><b>Your pass</b><p>Press <b>Your pass</b>: the photos pass 1 was least sure about come first. <kbd>P</kbd> keep, <kbd>X</kbd> reject, <kbd>→</kbd> next, <kbd>Space</kbd> big, <kbd>Z</kbd> 100%, <kbd>C</kbd> compare a burst. Your mark always wins, and teaches pass 1 your taste for the next game.</p></div></li>
+      <li><span class="n">1</span><div><b>Pass 1: the app</b><p>Add an event's folder (or import the camera card). The app looks at every photo on your Mac, free: is the main player sharp, are the eyes open, did the camera focus on the players, is the ball in the play, the light, and which frames are one burst. It marks each one <b>keep</b> or <b>reject</b> with the reason, and how sure it is.</p></div></li>
+      <li><span class="n">2</span><div><b>Your pass</b><p>Press <b>Your pass</b>: the photos pass 1 was least sure about come first. <kbd>P</kbd> keep, <kbd>X</kbd> reject, <kbd>→</kbd> next, <kbd>Space</kbd> big, <kbd>Z</kbd> 100%, <kbd>C</kbd> compare a burst. Your mark always wins, and teaches pass 1 your taste for the next event.</p></div></li>
       <li><span class="n">3</span><div><b>Finish</b><p><b>Delete rejects</b> moves them to the Trash (undo with ⌘Z, or from the Trash). <b>Keepers</b>: copy them, crop and edit them for Instagram / Story / YouTube, or send them to Looks and Reel.</p></div></li></ol>
-    <p class="faint">Bursts show as one stack (the best frame on top): open one with its ×N badge. The timeline at the top is the whole game: tall bars are the big moments. Gemini is only used when you ask (Ask AI to rate, the D edit), and shows the cost first.</p>
+    <p class="faint">Bursts show as one stack (the best frame on top): open one with its ×N badge. The timeline at the top is the whole event: tall bars are the big moments. Gemini is only used when you ask (Ask AI to rate, the D edit), and shows the cost first.</p>
     </div><footer><button class="btn primary" data-close>Got it</button></footer>`);
 }
 
