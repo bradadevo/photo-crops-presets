@@ -653,6 +653,11 @@ const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], 
   ["teamcolor", "Team Color", "The background in your team color, the player in full color"],
   ["matchday", "Matchday", "The opponent on a team-color band, when and where below"],
   ["champions", "Champions", "Gold title behind the team, the event below"],
+  ["jersey", "Jersey Number", "Their number, giant, in the team color behind them"],
+  ["cover", "Cover Story", "A magazine cover: the title behind their head, a headline below"],
+  ["split", "Diagonal Split", "A team-color panel on the diagonal with their name, their number big"],
+  ["card", "Player Card", "A collector's card: a team-color frame, a gold rule and a nameplate"],
+  ["cinematic", "Cinematic", "Film letterbox bars, the name between thin gold rules"],
   ["custom", "Custom ✦", "Your own: move, resize and restyle every piece (starts from the layout you are on)"]];
 const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]], spotlight: [["title", "Name"], ["line", "Position"], ["number", "Number"]],
   final: [["title", "Above the score"], ["home", "Your team"], ["home_score", "Their score"], ["away", "The other team"], ["away_score", "Its score"]],
@@ -660,7 +665,12 @@ const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]]
   name: [["title", "Name"], ["line", "Line under it"]], goal: [["title", "Title"], ["name", "Scorer"], ["minute", "Minute"]],
   teamcolor: [["title", "Name or title"], ["line", "Line under it"]],
   matchday: [["title", "Small title"], ["away", "Opponent"], ["line", "When and where"]],
-  champions: [["title", "Title"], ["line", "The event"]] };
+  champions: [["title", "Title"], ["line", "The event"]],
+  jersey: [["number", "Number"], ["title", "Name"], ["line", "Line under it"]],
+  cover: [["title", "Magazine title"], ["line", "Issue line"], ["name", "Headline"], ["away", "Line under the headline"]],
+  split: [["title", "Name"], ["line", "Line under it"], ["number", "Number"]],
+  card: [["title", "Name"], ["line", "Position or year"], ["number", "Number"]],
+  cinematic: [["title", "Name"], ["line", "Line under it"]] };
 const POSTER_SHAPES = [["post", "Post", "Instagram post, 4:5", 4, 5], ["square", "Square", "Instagram or Facebook square, 1:1", 1, 1],
   ["story", "Story", "Instagram or TikTok story or reel, 9:16", 9, 16], ["wide", "Wide", "YouTube, X or Facebook, 16:9", 16, 9]];
 const WORD_COLORS = ["#ffffff", "#111111", "#d4af37", "#c8102e", "#0b3d91", "#1f2a44", "#0f5f3a", "#d97706", "#5b2a86", "#7dd3fc"];

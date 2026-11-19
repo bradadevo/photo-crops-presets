@@ -30,6 +30,7 @@ from PIL import Image
 from photo_presets import procedural
 
 CONFIG_FILE = Path.home() / ".config" / "photo-crops-presets" / "assets.json"
+BUILTIN_LUTS = Path(__file__).parent / "luts_builtin"  # (made by photo_presets.grades)
 CACHE_DIR = Path.home() / ".cache" / "photo-crops-presets" / "assets"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 VIDEO_EXTS = {".mov", ".mp4", ".m4v"}
@@ -90,6 +91,8 @@ class Library:
     def scan(self) -> None:
         s = self.sources
         self.luts, self.textures, self.overlays = {}, {}, {}
+        for p in sorted(BUILTIN_LUTS.glob("*.cube")):  # AllProPhoto's own pro grades, always there
+            self.luts[p.stem] = Source(str(p))
         for folder in _paths(s.lut_folders):
             if folder.is_dir():
                 for p in sorted(folder.rglob("*.cube")):

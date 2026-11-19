@@ -522,3 +522,22 @@ def test_floodlights_stand_high_above_the_field_and_players_cast_a_shadow(empty_
     assert shadow is not None
     assert shadow[int(h * 0.86), 77] > 0.3, "a shadow right under the feet"
     assert shadow[int(h * 0.5), 60] < 0.05, "none beside the body"
+
+
+def test_pro_grades_are_real_luts_kind_to_skin_and_the_pitch():
+    """AllProPhoto's own grades: real .cube LUTs that load, in their own group, never turning skin
+    orange or the pitch yellow."""
+    import numpy as np
+    from photo_presets import grades, luts, presets
+    from photo_presets.assets import BUILTIN_LUTS
+    for name, g in grades.GRADES.items():
+        lut = luts.parse_cube(str(BUILTIN_LUTS / f"{name}.cube"))
+        assert lut is not None
+        skin = np.array([[0.80, 0.58, 0.46]])
+        out = grades.grade(skin, g)[0]
+        assert abs((out[0] - out[2]) - (skin[0, 0] - skin[0, 2])) < 0.16, name  # skin keeps its warmth, not more
+        grass = np.array([[0.55, 0.65, 0.25]])
+        o = grades.grade(grass, g)[0]
+        assert o[1] >= o[0], name  # the grass stays green, not yellow
+    groups = presets.grouped()
+    assert len(groups[presets.GRADES]) == 10

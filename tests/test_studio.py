@@ -32,7 +32,7 @@ def test_every_preset_is_in_the_picker(client):
     data = client.get("/api/looks").json()
     names = {look["name"] for look in data["looks"]}
     assert names == set(presets.load_all())
-    assert data["groups"][0] == "Bold" and "Mine" in data["groups"]
+    assert data["groups"][:2] == ["Pro grades", "Bold"] and "Mine" in data["groups"]
     assert any(look["ai"] for look in data["looks"]) and any(not look["ai"] for look in data["looks"])
     assert data["sizes"][0]["key"] == "full"
 

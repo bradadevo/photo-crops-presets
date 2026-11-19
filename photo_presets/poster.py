@@ -28,6 +28,11 @@ TEMPLATES = {
     "teamcolor": "Team Color",
     "matchday": "Matchday",
     "champions": "Champions",
+    "jersey": "Jersey Number",
+    "cover": "Cover Story",
+    "split": "Diagonal Split",
+    "card": "Player Card",
+    "cinematic": "Cinematic",
     "custom": "Custom",
 }
 SHAPES = {"post": 4 / 5, "square": 1.0, "story": 9 / 16, "wide": 16 / 9}  # width / height
@@ -42,6 +47,11 @@ DEFAULTS = {
     "teamcolor": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  U11"},
     "matchday": {"title": "MATCHDAY", "away": "VS WEST PARK", "line": "SAT 9:00 AM  ·  FIELD 4"},
     "champions": {"title": "CHAMPIONS", "line": "SPRING CUP 2026"},
+    "jersey": {"number": "7", "title": "LINCOLN", "line": "MIDFIELD"},
+    "cover": {"title": "ELITE", "line": "ISSUE 07  ·  FALL 2026", "name": "LINCOLN", "away": "THE MIDFIELD ENGINE"},
+    "split": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  U11", "number": "7"},
+    "card": {"title": "LINCOLN", "line": "MIDFIELD  ·  2026", "number": "7"},
+    "cinematic": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  FALL SEASON"},
     "custom": {},
 }
 GOLD = (212, 175, 55)
@@ -611,8 +621,159 @@ def _champions(pic, m, p, W, H, color, has_logo):
     return _over(out, _shadowed(lay, _NOTE.u * 0.008, 0.6))
 
 
-MORE = {"name": _name_stack, "goal": _goal, "teamcolor": _team_color, "matchday": _matchday, "champions": _champions}
-LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "champions": "bc"}
+def _jersey(pic, m, p, W, H, color, has_logo):
+    """Their number, giant, in the team color behind them; the name and a line at the bottom."""
+    u = _NOTE.u
+    out = pic * 0.78 + color * 0.08
+    out = out * (1 - _gradient(H, W, 0.0, 0.7, 0.6))
+    lay, d = _layer((W, H))
+    num = p.get("number", "")
+    if num:
+        f = _fit_font(num, HEAVY, W * 0.9, H * 0.58)
+        lighter = color + (1 - color) * 0.38  # (a shade lighter than the kit, so it reads behind a player in it)
+        _say(d, "number", (W / 2, H * 0.42), num, font=f, fill=_c255(lighter, 225), anchor="mm",
+             stroke_width=max(3, int(W * 0.006)), stroke_fill=(255, 255, 255, 235))
+    out = _over(out, _shadowed(lay, u * 0.015, 0.35))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * (0.66 if has_logo else 0.88), u * 0.1)
+    _say(d, "title", (W / 2 if not has_logo else W * 0.43, H - u * 0.135), title, font=f, fill=(255, 255, 255, 255), anchor="mm")
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, DEMI, W * 0.6, u * 0.03)
+        _say(d, "line", (W / 2 if not has_logo else W * 0.43, H - u * 0.06), line, font=lf, fill=(255, 255, 255, 215), anchor="mm")
+    return _over(out, _shadowed(lay, u * 0.008, 0.5))
+
+
+def _cover_story(pic, m, p, W, H, color, has_logo):
+    """A magazine cover: the masthead behind the player's head, the issue line under it, the cover
+    headline and its line at the bottom left."""
+    u = _NOTE.u
+    out = pic * (1 - _gradient(H, W, 0.22, 0.75, 0.55))
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.92, u * 0.27)
+    _say(d, "title", (W / 2, u * 0.025), title, font=f, fill=(255, 255, 255, 245), anchor="mt")
+    out = _over(out, _shadowed(lay, u * 0.01, 0.3))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, BOLD, W * 0.6, u * 0.024)
+        _say(d, "line", (W * 0.05, u * 0.035 + f.size * 0.98), line, font=lf, fill=(255, 255, 255, 230), anchor="lt")
+    name = p.get("name", "")
+    wid = W * (0.62 if has_logo else 0.86)
+    nf = _fit_font(name, HEAVY, wid, u * 0.11)
+    if name:
+        d.rectangle((W * 0.05, H - u * 0.24, W * 0.05 + u * 0.07, H - u * 0.232), fill=_c255(color))
+    _say(d, "name", (W * 0.05, H - u * 0.195), name, font=nf, fill=(255, 255, 255, 255), anchor="lt")
+    sub = p.get("away", "")
+    if sub:
+        sf = _fit_font(sub, DEMI, wid, u * 0.032)
+        _say(d, "away", (W * 0.05, H - u * 0.055), sub, font=sf, fill=(255, 255, 255, 225), anchor="ls")
+    return _over(out, _shadowed(lay, u * 0.008, 0.55))
+
+
+def _split(pic, m, p, W, H, color, has_logo):
+    """A team-color panel cut on the diagonal across the bottom left, the player in front of it, their
+    name on it, their number big and outlined at the top right."""
+    u = _NOTE.u
+    out = pic * (1 - _gradient(H, W, 0.0, 0.35, 0.6))
+    lay, d = _layer((W, H))
+    num = p.get("number", "")
+    if num:
+        f = _fit_font(num, HEAVY, W * 0.4, u * 0.3)
+        _say(d, "number", (W * 0.95, u * 0.03), num, font=f, fill=(255, 255, 255, 0), anchor="rt",
+             stroke_width=max(2, int(W * 0.004)), stroke_fill=(255, 255, 255, 200))
+    edge = max(3, int(u * 0.008))
+    d.polygon([(0, H * 0.56), (W * 0.78, H), (0, H)], fill=_c255(color, 238))
+    d.line([(0, H * 0.56 - edge * 3), (W * 0.78 + edge * 4, H)], fill=(255, 255, 255, 230), width=edge)
+    out = _over(out, _shadowed(lay, u * 0.012, 0.45))
+    out = _front(out, pic, m)
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.5, u * 0.1)
+    _say(d, "title", (W * 0.05, H - u * 0.105), title, font=f, fill=(255, 255, 255, 255), anchor="ls")
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, DEMI, W * 0.42, u * 0.026)
+        _say(d, "line", (W * 0.05, H - u * 0.05), line, font=lf, fill=(255, 255, 255, 225), anchor="ls")
+    return _over(out, _shadowed(lay, u * 0.006, 0.5))
+
+
+def _player_card(pic, m, p, W, H, color, has_logo):
+    """A classic collector's card: the picture inside a team-color frame with a thin gold rule, a
+    nameplate at the bottom, the number on a gold-ringed badge."""
+    u = _NOTE.u
+    y = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
+    out = np.broadcast_to(color * (0.55 + 0.35 * (1 - y)), (H, W, 3)).astype(np.float32).copy()
+    x0, y0, x1, y1 = int(W * 0.06), int(u * 0.06), int(W * 0.94), int(H - u * 0.2)
+    cw, ch = x1 - x0, y1 - y0
+    # the picture into the window, around the player
+    if m is not None and (m[..., 0] > 0.5).any():
+        ys, xs = np.nonzero(m[..., 0] > 0.5)
+        cx, cy = (xs.min() + xs.max()) / 2, ys.min() + (ys.max() - ys.min()) * 0.45
+    else:
+        cx, cy = W / 2, H / 2
+    k = max(cw / W, ch / H)
+    sw, sh = cw / k, ch / k
+    sx = int(np.clip(cx - sw / 2, 0, W - sw))
+    sy = int(np.clip(cy - sh / 2, 0, H - sh))
+    out[y0:y1, x0:x1] = cv2.resize(pic[sy:sy + int(sh), sx:sx + int(sw)], (cw, ch), interpolation=cv2.INTER_AREA)
+    lay, d = _layer((W, H))
+    rule = max(2, int(u * 0.004))
+    d.rectangle((x0 - rule * 2, y0 - rule * 2, x1 + rule * 2, y1 + rule * 2), outline=GOLD + (255,), width=rule)
+    out = _over(out, lay)
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * (0.62 if has_logo else 0.84), u * 0.085)
+    tx = W * 0.43 if has_logo else W / 2
+    _say(d, "title", (tx, H - u * 0.13), title, font=f, fill=(255, 255, 255, 255), anchor="mm")
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, DEMI, W * 0.6, u * 0.028)
+        _say(d, "line", (tx, H - u * 0.065), line, font=lf, fill=GOLD + (255,), anchor="mm")
+    num = p.get("number", "")
+    if num:
+        r = u * 0.062
+        bx, by = x0 + r * 1.25, y0 + r * 1.25
+        d.ellipse((bx - r, by - r, bx + r, by + r), fill=_c255(color), outline=GOLD + (255,), width=max(3, int(u * 0.006)))
+        nf = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
+        _NOTE.moves = {k2: v for k2, v in (p.get("moves") or {}).items() if k2 != "number"}
+        _say(d, "number", (bx, by + r * 0.04), num, font=nf, fill=(255, 255, 255, 255), anchor="mm")
+        _NOTE.moves = p.get("moves")
+    return _over(out, _shadowed(lay, u * 0.01, 0.5))
+
+
+def _cinematic(pic, m, p, W, H, color, has_logo):
+    """Film letterbox bars, the name in the bottom bar between thin gold rules, a quiet line under it."""
+    u = _NOTE.u
+    out = pic.copy()
+    top, bottom = int(H * 0.1), int(H - max(H * 0.17, u * 0.17))
+    out[:top] = out[:top] * 0.06
+    out[bottom:] = out[bottom:] * 0.06
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    f = _fit_font(title, HEAVY, W * 0.7, u * 0.07)
+    mid = bottom + (H - bottom) * 0.42
+    _say(d, "title", (W / 2, mid), title, font=f, fill=(255, 255, 255, 250), anchor="mm")
+    half = (f.getlength(title) / 2 if title else 0) + W * 0.04
+    th = max(1, int(u * 0.002))
+    for a, b in ((W * 0.1, W / 2 - half), (W / 2 + half, W * 0.9)):
+        if b > a:
+            d.rectangle((a, mid - th, b, mid + th), fill=GOLD + (220,))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(line, MEDIUM, W * 0.7, u * 0.024)
+        _say(d, "line", (W / 2, mid + f.size * 0.75), line, font=lf, fill=(220, 220, 220, 230), anchor="mt")
+    return _over(out, lay)
+
+
+MORE = {"name": _name_stack, "goal": _goal, "teamcolor": _team_color, "matchday": _matchday, "champions": _champions,
+        "jersey": _jersey, "cover": _cover_story, "split": _split, "card": _player_card, "cinematic": _cinematic}
+LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "champions": "bc",
+           "jersey": "br", "cover": "br", "split": "tl", "card": "br", "cinematic": "tl"}
 
 
 def _logo_placed(out: np.ndarray, logo: Image.Image, W: int, H: int, at: dict) -> np.ndarray:
@@ -668,8 +829,9 @@ def customized(p: dict, has_logo: bool = False) -> dict:
 
 
 # A team's posters: where each player's name and number go -------------------------------------
-NAME_KEY = {"spotlight": "title", "name": "title", "teamcolor": "title", "goal": "name", "mvp": "line"}
-NUMBER_KEY = {"spotlight": "number"}
+NAME_KEY = {"spotlight": "title", "name": "title", "teamcolor": "title", "goal": "name", "mvp": "line",
+            "jersey": "title", "cover": "name", "split": "title", "card": "title", "cinematic": "title"}
+NUMBER_KEY = {"spotlight": "number", "jersey": "number", "split": "number", "card": "number"}
 
 
 def player_fields(p: dict) -> dict:

@@ -302,8 +302,9 @@ document.addEventListener("keydown", (e) => {
 }, true);
 
 /* A team's posters: the same design for each player, only their picture, name and number changed. */
-const NAME_KEY = { spotlight: "title", name: "title", teamcolor: "title", goal: "name", mvp: "line" };
-const NUMBER_KEY = { spotlight: "number" };
+const NAME_KEY = { spotlight: "title", name: "title", teamcolor: "title", goal: "name", mvp: "line",
+  jersey: "title", cover: "name", split: "title", card: "title", cinematic: "title" };
+const NUMBER_KEY = { spotlight: "number", jersey: "number", split: "number", card: "number" };
 function playerFields(p) {  // (as the app finds them: see poster.player_fields)
   const out = {};
   if (!p) return out;

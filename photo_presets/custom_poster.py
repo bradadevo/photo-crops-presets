@@ -190,7 +190,7 @@ def _piece(lay: Image.Image, e: dict, W: int, H: int, u: float, team: tuple, log
 
 # Starting from a ready-made layout -----------------------------------------------------------
 
-BEHIND_TITLE = {"gameday", "mvp", "name", "goal", "teamcolor", "champions"}
+BEHIND_TITLE = {"gameday", "mvp", "name", "goal", "teamcolor", "champions", "cover"}
 
 
 def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[dict]:
@@ -211,6 +211,13 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
         add(type="box", x=0.5, y=(H - u * 0.18) / H, w=0.86, h=0.2, color="#0a0c10", opacity=0.66, accent=True)
     if t == "matchday":
         add(type="box", x=0.5, y=(u * 0.15) / H, w=1.1, h=0.2, color=p.get("color", "#1f2a44"), opacity=0.92, round=False, behind=True)
+    if t == "cinematic":  # its letterbox bars
+        add(type="box", x=0.5, y=0.05, w=1.1, h=0.1, color="#000000", opacity=0.94, round=False, behind=True)
+        add(type="box", x=0.5, y=1 - max(0.17, u * 0.17 / H) / 2, w=1.1, h=max(0.17, u * 0.17 / H), color="#000000",
+            opacity=0.94, round=False, behind=True)
+    if t == "card":  # its nameplate
+        add(type="box", x=0.5, y=(H - u * 0.1) / H, w=1.1, h=u * 0.2 / H, color=p.get("color", "#1f2a44"), opacity=0.95,
+            round=False, behind=True)
     seen = set()
     for w in words:
         k = w["key"]
@@ -227,7 +234,7 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
         hpx = (w["y1"] - w["y0"]) * H
         size = max(0.015, hpx / 0.74 / u)
         own = (p.get("colors") or {}).get(k)
-        if k == "number" and t == "spotlight":
+        if k == "number" and t in ("spotlight", "card"):
             add(type="badge", x=(w["x0"] + w["x1"]) / 2, y=(w["y0"] + w["y1"]) / 2, text=text, size=0.076, color=own or "")
             continue
         if k in ("title", "home_score", "name") or (t == "matchday" and k == "away") or size > 0.09:
@@ -236,9 +243,11 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
             style = "clean" if k in ("line", "home", "away") else "bold"
         if t == "goal" and k == "title":
             style = "outline"
-        color = own or ("#d4af37" if t == "champions" and k == "title" else "#ffffff")
+        color = own or ("#d4af37" if (t == "champions" and k == "title") or (t == "card" and k == "line") else "#ffffff")
+        if t == "jersey" and k == "number":  # the giant number, in the team color, behind the player
+            color, style = own or p.get("color", "#1f2a44"), "heavy"
         add(type="text", x=(w["x0"] + w["x1"]) / 2, y=(w["y0"] + w["y1"]) / 2, text=text, style=style, size=round(size, 4),
-            color=color, behind=(k == "title" and t in BEHIND_TITLE))
+            color=color, behind=(k == "title" and t in BEHIND_TITLE) or (t in ("jersey", "split") and k == "number"))
     if t == "champions":
         line = next((w for w in words if w["key"] == "line"), None)
         if line:
@@ -246,7 +255,8 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
             for xx in (0.17, 0.83):
                 add(type="rule", x=xx, y=yy, w=0.2, color=(p.get("colors") or {}).get("title", "#d4af37"))
     if p.get("logo"):  # where the layout had it
-        where = {"gameday": "br", "mvp": "br", "teamcolor": "br", "goal": "tr", "matchday": "band", "champions": "bc"}.get(t, "tl")
+        from photo_presets.poster import LOGO_AT
+        where = {"gameday": "br", "mvp": "br", **LOGO_AT}.get(t, "tl")
         lw = u * (0.088 if where == "bc" else 0.104)
         x = {"tl": 0.05 * W + lw / 2, "tr": W - 0.05 * W - lw / 2, "br": W - 0.05 * W - lw / 2,
              "band": W - 0.05 * W - lw / 2, "bc": W / 2}[where]

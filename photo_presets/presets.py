@@ -187,6 +187,56 @@ STARTERS: dict[str, dict] = {
         {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.4,
          "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
+    # Pro color grades: AllProPhoto's own LUTs (photo_presets/grades.py), finished on the player
+    "Prime Time": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Prime Time", "strength": 1.0},
+        {"op": "lens_blur", "radius": 0.004, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "subject_vignette", "amount": 0.25, "spread": 0.4}]},
+    "Golden Hour": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Golden Hour", "strength": 1.0},
+        {"op": "glow", "amount": 0.2, "threshold": 0.7},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+        {"op": "vignette", "amount": 0.25}]},
+    "Night Match": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "lut", "asset": "lut:APP Night Match", "strength": 1.0},
+        {"op": "exposure", "stops": -1.0, "layer": "background"},
+        {"op": "saturation", "amount": 0.8, "layer": "background"},
+        {"op": "specular_bloom", "amount": 0.4, "threshold": 0.8},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "vignette", "amount": 0.4}]},
+    "Blockbuster": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "lut", "asset": "lut:APP Blockbuster", "strength": 1.0},
+        {"op": "exposure", "stops": -0.4, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "grain", "amount": 0.08},
+        {"op": "vignette", "amount": 0.35}]},
+    "Bleach Bypass": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Bleach Bypass", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.8},
+        {"op": "grain", "amount": 0.15},
+        {"op": "vignette", "amount": 0.35}]},
+    "Film Stock": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Film Stock", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.3, "layer": "subject"},
+        {"op": "grain", "amount": 0.2}]},
+    "Heritage Chrome": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Heritage Chrome", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+        {"op": "grain", "amount": 0.12},
+        {"op": "vignette", "amount": 0.25}]},
+    "Ice Cold": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Ice Cold", "strength": 1.0},
+        {"op": "lens_blur", "radius": 0.004, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"}]},
+    "Lush Pitch": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Lush Pitch", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "vignette", "amount": 0.2}]},
+    "Matte Editorial": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:APP Matte Editorial", "strength": 1.0},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
@@ -238,7 +288,8 @@ def delete(name: str) -> bool:
 
 # How the app lists the starters: in groups, each with a one-line description
 BOLD, EDITORIAL, STUDIO, MINE = "Bold and dramatic", "Clean editorial", "Studio, smoke and lights", "My presets"
-GROUPS = [BOLD, EDITORIAL, STUDIO, *ART_GROUPS, MINE]
+GRADES = "Pro color grades"
+GROUPS = [GRADES, BOLD, EDITORIAL, STUDIO, *ART_GROUPS, MINE]
 ABOUT: dict[str, tuple[str, str]] = {
     "Grit & Glory": (BOLD, "Gritty black and white with smoke at the feet and rough edges"),
     "Friday Night Lights": (BOLD, "A night-game color grade, a soft spotlight on the player and film grain"),
@@ -265,6 +316,16 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Neon Pop Art Sharp Black": (BOLD, "The player as a neon pop-art painting with crisp edges and paint splatters, on a near-black background"),
     "Neon Splash": (BOLD, "The player as glowing neon line art on black, with a paint explosion behind them"),
     "Neon Streaks": (BOLD, "Neon line art on black with fine paint streaks, drops and specks flying out behind the player"),
+    "Prime Time": (GRADES, "A premium broadcast grade: rich and deep, cool shadows, warm skin, a true-green pitch"),
+    "Golden Hour": (GRADES, "Late-afternoon sun: amber highlights, a soft glow and gently teal shadows"),
+    "Night Match": (GRADES, "Under the lights: cool, deep blues, a darker background and glowing highlights"),
+    "Blockbuster": (GRADES, "The big-film look: teal shadows and background, warm skin and highlights"),
+    "Bleach Bypass": (GRADES, "Silvery, harsh and gritty, like the bleach-bypass film process"),
+    "Film Stock": (GRADES, "Soft film: pastel color, lifted blacks, warm highlights and fine grain"),
+    "Heritage Chrome": (GRADES, "Old slide film: rich reds and blues, deep contrast, a vintage warmth"),
+    "Ice Cold": (GRADES, "Crisp and cold: clean whites, steel-blue shadows, quieter color"),
+    "Lush Pitch": (GRADES, "The pitch at its best: deep, rich greens, punchy kits and true skin"),
+    "Matte Editorial": (GRADES, "The modern magazine look: muted, matte and calm"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
 
