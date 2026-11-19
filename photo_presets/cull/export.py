@@ -139,6 +139,29 @@ def _final(out: Image.Image, src: Image.Image, size: crops.OutputSize, sharpen: 
     return enhance.output_sharpen(out) if sharpen else out
 
 
+def team_on_border(img: Image.Image, group, aspect: float, t) -> Image.Image:
+    """The whole team (with a little room) across the frame, on a blurred, darkened copy of the photo
+    filling the rest of the tall shape, the way a wide photo is posted to a tall feed."""
+    from PIL import ImageFilter, ImageEnhance
+    W, H = img.size
+    gx0, gy0, gx1, gy1 = group[0] * W, group[1] * H, group[2] * W, group[3] * H
+    rx, ry = 0.05 * (gx1 - gx0), 0.12 * (gy1 - gy0)
+    box = (max(0, round(gx0 - rx)), max(0, round(gy0 - ry)), min(W, round(gx1 + rx)), min(H, round(gy1 + ry)))
+    team = img.crop(box)
+    cw, ch = (t if t else (team.width, round(team.width / aspect)))
+    small = img.resize((max(1, W // 8), max(1, H // 8)), Image.Resampling.BILINEAR)
+    k = max(cw / small.width, ch / small.height)
+    bg = small.resize((round(small.width * k), round(small.height * k)), Image.Resampling.BILINEAR)
+    bg = bg.crop(((bg.width - cw) // 2, (bg.height - ch) // 2, (bg.width - cw) // 2 + cw, (bg.height - ch) // 2 + ch))
+    bg = ImageEnhance.Brightness(bg.filter(ImageFilter.GaussianBlur(max(8, cw // 40)))).enhance(0.55)
+    s = min(cw / team.width, ch / team.height)
+    if t is None or s > 1:  # never enlarged: it sits a little smaller on the border instead
+        s = min(s, 1.0)
+    fg = team.resize((max(1, round(team.width * s)), max(1, round(team.height * s))), Image.Resampling.LANCZOS)
+    bg.paste(fg, ((cw - fg.width) // 2, (ch - fg.height) // 2))
+    return bg
+
+
 def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, override: tuple | None = None,
              ai_crop: tuple | None = None, adjust_fn=None, fit: str = "widen") -> list[Path]:
     """One keeper's versions, saved in folder as <name>_<version>.jpg with its camera data.
@@ -150,6 +173,11 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
     if fit == "widen":  # never enlarged: a crop too small for the size grows just enough
         tight, wide = widen(tight, size_key, img.size), widen(wide, size_key, img.size)
     subject = m.get("group") or m.get("subject")
+    shape = SHAPE_OF.get(size_key)
+    # a team photo too wide for this shape: the whole team on a soft border, never kids cut in half
+    team = bool(shape and not override and not ai_crop and (m.get("team_fit") or {}).get(shape) and m.get("group"))
+    if team:
+        subject = None
     folder.mkdir(parents=True, exist_ok=True)
     out = []
 
@@ -161,6 +189,8 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
     def at_size(box):
         """The crop at its final size first, so the edit's detail and clarity suit what is seen
         (edited at 33 MP and then shrunk, the texture packs together and looks crunchy)."""
+        if team:
+            return team_on_border(img, m["group"], SIZES[size_key].aspect, target(size_key, img.size))
         crop = img.crop(box)
         t = target(size_key, img.size)
         if not t or crop.size == tuple(t):

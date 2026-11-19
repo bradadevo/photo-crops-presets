@@ -18,7 +18,7 @@ from PIL import Image
 
 from photo_crops import focus, framing, images
 
-VERSION = 4  # raise when a measurement changes, so files are measured again
+VERSION = 5  # raise when a measurement changes, so files are measured again
 EDGE = 1600  # the photo is looked at this size (RAW: the camera's own preview)
 THUMB_EDGE = 420
 SHAPES = ["4:5", "9:16", "16:9", "1:1", "3:2", "best"]
@@ -256,6 +256,19 @@ def measure(path: Path, cache: Path) -> dict:
         fplan = framing.Plan(_scaled(plan.subject, k), sc(plan.group), plan.reason, plan.team_photo)
         act = sc(framing.union(action))
 
+        # the player on the ball, when it isn't the main player: the crop holds them both
+        core = main_p.box if main_p else plan.group
+        if main_p and balls:
+            near = lambda bx, p: (p.box[0] - 0.3 * p.height <= (bx[0] + bx[2]) / 2 <= p.box[2] + 0.3 * p.height
+                                  and p.box[1] <= (bx[1] + bx[3]) / 2 <= p.box[3] + 0.15 * p.height)
+            if not any(near(bx, main_p) for bx in balls):
+                on_ball = [p for p in in_play if p is not main_p and p.height >= 0.75 * main_p.height
+                           and any(near(bx, p) for bx in balls)]
+                if on_ball:
+                    q = min(on_ball, key=lambda p: abs(p.center[0] - main_p.center[0]))
+                    core = framing.union([main_p.box, q.box] + [bx for bx in balls if near(bx, q)])
+        core = sc(core)
+
         def shaped(s):
             box = framing.crop_box(fplan, big, s)
             gw, gh = fplan.group[2] - fplan.group[0], fplan.group[3] - fplan.group[1]
@@ -265,8 +278,15 @@ def measure(path: Path, cache: Path) -> dict:
                 a = framing.ASPECTS[s]
                 box = framing.fit(act, big, a, framing.PORTRAIT_ROOM if a < 1 else framing.LANDSCAPE_ROOM,
                                   framing.MIN_CROP_SHORT)
+            if s in framing.ASPECTS:
+                box = clean_edges(box, big, [sc(p.box) for p in people if p.height >= 0.45 * tallest],
+                                  act, core, plan.team_photo)
             return tuple(v / d for v, d in zip(box, (*big, *big)))
         out["crops"] = {s: shaped(s) for s in SHAPES}
+        # a team photo too wide for a tall shape: the whole team is kept (on a soft border) when made
+        gw, gh = (plan.group[2] - plan.group[0]) * k, (plan.group[3] - plan.group[1]) * k
+        out["team_fit"] = {s: bool(plan.team_photo and gw / max(gh, 1) > framing.ASPECTS[s] * 1.02)
+                           for s in SHAPES if s in framing.ASPECTS}
         out["crops"]["wide"] = tuple(v / d for v, d in zip(framing.wide_box(fplan, big), (*big, *big)))
     else:
         out["crops"] = {}
@@ -276,6 +296,47 @@ def measure(path: Path, cache: Path) -> dict:
     tmp.write_bytes(pickle.dumps(out))
     tmp.replace(keep)
     return out
+
+
+def clean_edges(box, size, people, action, main, team=False):
+    """The crop moved (or widened a little) so its edges cut through no one, with the main player as
+    near the middle as that allows and the action (the main player and the ball) always inside.
+    A person half in the frame at the edge is what makes a crop look accidental."""
+    W, H = size
+    x0, y0, x1, y1 = box
+    cw0, ch0 = x1 - x0, y1 - y0
+    tall = max((p[3] - p[1] for p in people), default=1) or 1
+    mcx, mcy = (main[0] + main[2]) / 2, (main[1] + main[3]) / 2
+    best, best_score = box, None
+    for grow in (1.0, 1.08, 1.16, 1.25, 1.35):
+        cw, ch = cw0 * grow, ch0 * grow
+        if cw > W + 0.5 or ch > H + 0.5:
+            break
+        m = 0.04 * cw  # room around the main player, who is always fully in
+        lo_x, hi_x = max(0.0, main[2] + m - cw), min(W - cw, main[0] - m)
+        lo_y, hi_y = max(0.0, main[3] + 0.02 * ch - ch), min(H - ch, main[1] - 0.06 * ch)
+        if lo_x > hi_x:
+            lo_x = hi_x = min(max(mcx - cw / 2, 0), W - cw)
+        if lo_y > hi_y:
+            lo_y = hi_y = min(max(mcy - ch / 2, 0), H - ch)
+        for left in np.linspace(lo_x, hi_x, 17):
+            for top in np.linspace(lo_y, hi_y, 9):
+                r = left + cw, top + ch
+                cut = 0.0
+                for p in people:
+                    pw, ph = p[2] - p[0], p[3] - p[1]
+                    vx = max(0.0, min(p[2], r[0]) - max(p[0], left)) / max(pw, 1)
+                    vy = max(0.0, min(p[3], r[1]) - max(p[1], top)) / max(ph, 1)
+                    seen = vx * min(1.0, vy / 0.6)  # (feet cut off at the bottom is fine; a body sliced is not)
+                    if 0.012 < seen < 0.92:
+                        cut += (ph / tall) ** 1.5 * (1.0 - 0.6 * abs(seen - 0.5))
+                # the action (the ball near them) in the frame is a plus, not a must
+                ball_out = 0.0 if (action[0] >= left and action[2] <= r[0] and action[1] >= top and action[3] <= r[1]) else 0.25
+                off = abs(mcx - (left + cw / 2)) / cw + 0.4 * abs(mcy - (top + ch * 0.48)) / ch
+                score = 2.0 * cut + (0.3 if team else 1.2) * off + 0.5 * (grow - 1.0) + ball_out
+                if best_score is None or score < best_score - 1e-9:
+                    best, best_score = (round(left), round(top), round(left + cw), round(top + ch)), score
+    return best
 
 
 def full_size(path: Path, shown: tuple[int, int]) -> tuple[int, int]:

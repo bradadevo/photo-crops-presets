@@ -455,6 +455,8 @@ function cuPlan(p, sizeKey, fit) {
   else if (fixed === "softer") label = ["warn", `Softer: enlarged ${f.toFixed(1)}×`];
   else if (fixed === "small") label = ["grey", `Smaller file: ${q.cw.toLocaleString()} × ${q.ch.toLocaleString()} px`];
   else if (whole && kind !== "none") label = ["grey", "Whole photo: already framed well"];
+  if (kind === "action" && p.team_fit?.[CU_SHAPE[sizeKey]]) { label = ["ok", "Whole team, on a soft border"];
+    why = "A team photo is too wide for this shape: everyone stays in, with a blurred border above and below"; }
   return { box, label, why, f, kind, needsFit: q && q.f > 1.01 };
 }
 

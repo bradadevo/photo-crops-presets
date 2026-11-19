@@ -169,3 +169,26 @@ def test_a_crop_too_small_for_its_size_is_widened_kept_native_or_enlarged_as_cho
     # your crop is kept per size
     assert export.your_crop({"story": (0, 0, 0.5, 1)}, "story") == (0, 0, 0.5, 1)
     assert export.your_crop({"story": (0, 0, 0.5, 1)}, "instagram") is None
+
+
+def test_crop_edges_cut_no_one():
+    """A crop centered on the main player that would slice the player beside them moves (or widens)
+    so that player is either fully in or fully out, and the main player stays inside."""
+    from photo_presets.cull.measure import clean_edges
+    size = (6000, 4000)
+    main = (2600, 1500, 3000, 2700)          # the main player
+    other = (3150, 1550, 3550, 2700)         # a player just to the right
+    box = (2400, 1200, 3360, 2400)           # centered on the main player: cuts the other in half
+    out = clean_edges(box, size, [main, other], main, main)
+    assert out[0] <= main[0] and out[2] >= main[2]  # main fully in
+    seen = max(0, min(other[2], out[2]) - max(other[0], out[0])) / (other[2] - other[0])
+    assert seen < 0.02 or seen > 0.9, seen
+    assert abs((out[2] - out[0]) / (out[3] - out[1]) - (box[2] - box[0]) / (box[3] - box[1])) < 0.01  # same shape
+
+
+def test_team_photo_on_border():
+    from PIL import Image
+    from photo_presets.cull.export import team_on_border
+    img = Image.new("RGB", (6000, 4000), (40, 120, 40))
+    out = team_on_border(img, (0.1, 0.3, 0.9, 0.8), 4 / 5, (1080, 1350))
+    assert out.size == (1080, 1350)

@@ -21,6 +21,7 @@ from PIL import Image, ImageOps
 
 from photo_crops import images
 from photo_presets.cull import ai, export, files, measure, rank, taste
+from photo_presets.cull import people as cull_people
 
 router = APIRouter()
 _STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_STATE") else None
@@ -43,7 +44,9 @@ class Shoot:
     def __init__(self, sid: int, name: str, folders: list[str], settings: dict | None = None,
                  auto: dict | None = None):
         self.id, self.name, self.folders = sid, name, folders
-        self.settings = {"keep": "", "strict": 0.5, "per_burst": True, "size": "instagram", "saved": [],
+        self.scans: dict = {}  # photo path -> its players (faces, numbers, kits), for People
+        self.people_job: dict | None = None
+        self.settings = {"keep": "", "strict": 0.5, "per_burst": True, "size": "instagram", "saved": [], "favor": "",
                          **(settings or {})}  # saved: the folders your keepers went to, newest first
         self.photos: list[dict] = []
         self.by_path: dict[str, dict] = {}
@@ -85,6 +88,7 @@ class Cull:
         self._pending = False
         self.trashed: dict[str, list] = {}  # undo tokens
         self.labels = list(LABELS)
+        self.people: list[dict] = []  # players you named: {id, name, number, face, kit, yes, no}
         self.state_file = STATE_FILE
 
     # -- keeping it across restarts
@@ -100,6 +104,7 @@ class Cull:
             self.marks = data.get("marks", {})
             self.ai = data.get("ai", {})
             self.labels = data.get("labels") or list(LABELS)
+            self.people = data.get("people", [])
             self.next = data.get("next", 1)
             for s in data.get("shoots", []):
                 sh = Shoot(s["id"], s["name"], s["folders"], s.get("settings"), s.get("auto"))
@@ -124,7 +129,7 @@ class Cull:
             return
         with self.lock:
             self._pending = False
-            data = {"next": self.next, "marks": self.marks, "ai": self.ai, "labels": self.labels,
+            data = {"next": self.next, "marks": self.marks, "ai": self.ai, "labels": self.labels, "people": self.people,
                     "shoots": [{"id": s.id, "name": s.name, "folders": s.folders, "settings": s.settings,
                                 "auto": s.auto, "pass1_at": s.pass1_at} for s in self.shoots.values()]}
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +227,13 @@ class Cull:
         if not ranked:
             return
         s = sh.settings
+        favor = next((x for x in self.people if x["id"] == s.get("favor")), None)
+        if favor and sh.scans:  # photos with your player get a lift, and say so
+            for path, h in person_hits(sh, favor).items():
+                r = ranked.get(path)
+                if r and h["status"] == "sure":
+                    r.score = min(100.0, r.score + 12 + 8 * h["quality"])
+                    r.good.insert(0, f"{favor['name']} is in it")
         rank.suggest(ranked, rank.parse_keep(s.get("keep"), len(ranked)), s.get("per_burst", True),
                      float(s.get("strict", 0.5)))
         with self.lock:
@@ -249,7 +261,7 @@ class Cull:
             "burst": r.burst if r else None, "bsize": r.burst_size if r else 1, "best": r.burst_best if r else True,
             "auto": auto, "flag": mine.get("flag"), "stars": mine.get("stars", 0), "crop": mine.get("crop"),
             "label": mine.get("label"),
-            "crops": m.get("crops") or {}, "full": m.get("full"), "faces": [f for f in m.get("faces", []) if f.get("box")],
+            "crops": m.get("crops") or {}, "full": m.get("full"), "team_fit": m.get("team_fit") or {}, "faces": [f for f in m.get("faces", []) if f.get("box")],
             "focus": m.get("focus_point"), "subject": m.get("group") or m.get("subject"),
             "cam": {k: m.get(k) for k in ("iso", "shutter", "aperture", "focal", "camera")} if m else {},
             "rel": round(r.parts.get("rel", 0), 2) if r else None, "taste": round(r.parts["taste"], 2) if r and "taste" in r.parts else None,
@@ -271,7 +283,8 @@ class Cull:
         return {"id": sh.id, "name": sh.name, "folders": sh.folders, "total": total, "measured": done,
                 "thumbs": thumbs, "keep": keep, "reject": reject, "yours": yours, "settings": sh.settings,
                 "pass1": sh.pass1_at is not None, "left": round(left), "job": sh.job, "rev": sh.rev,
-                "took": (sh.pass1_at - sh.started) if sh.pass1_at and sh.pass1_at >= sh.started else None}
+                "took": (sh.pass1_at - sh.started) if sh.pass1_at and sh.pass1_at >= sh.started else None,
+                "people": sh.people_job}
 
 
 C = Cull()
@@ -305,7 +318,8 @@ def state():
     C.load()
     k, r = C.taste.counts()
     return {"shoots": [C.summary(s) for s in sorted(C.shoots.values(), key=lambda s: -s.id)],
-            "cards": files.cards(), "labels": C.labels, "taste": {"kept": k, "rejected": r, "ready": C.taste.ready, "need": taste.MIN_EACH},
+            "cards": files.cards(), "labels": C.labels,
+            "people": [{k: p[k] for k in ("id", "name", "number")} | {"face": p.get("face") is not None} for p in C.people], "taste": {"kept": k, "rejected": r, "ready": C.taste.ready, "need": taste.MIN_EACH},
             "ai": ai.key_ready(), "sizes": {k: v.label for k, v in export.SIZES.items()}, "fits": export.FITS,
             "versions": export.VERSIONS}
 
@@ -360,7 +374,9 @@ def photos(sid: int, since: int = 0):
 async def run_pass1(sid: int, req: Request):
     sh = C.shoot(sid)
     body = await req.json()
-    sh.settings.update({k: body[k] for k in ("keep", "strict", "per_burst") if k in body})
+    sh.settings.update({k: body[k] for k in ("keep", "strict", "per_burst", "favor") if k in body})
+    if sh.settings.get("favor"):
+        people_scan(sh)
     if any(p["state"] not in ("done", "failed") for p in sh.photos):
         C.save()
         return {"waiting": True}
@@ -671,3 +687,134 @@ def zoom(sid: int, pid: int, x: float = 0.5, y: float = 0.5, w: int = 900, h: in
     img.crop((left, top, left + w, top + h)).save(buf, "JPEG", quality=90)
     return Response(buf.getvalue(), media_type="image/jpeg",
                     headers={"Cache-Control": "private, max-age=3600", "X-Box": f"{left / W},{top / H},{(left + w) / W},{(top + h) / H}"})
+
+
+# -- People: players you name (a click on them, or their number), and their photos -------------------
+
+def _scan_one(path: str):
+    from photo_presets import players
+    with measure._lock:  # (the player detector is used one photo at a time)
+        return players.scan(Path(path))
+
+
+def _people_work(sh: Shoot):
+    """Every photo of the event looked at for its players (faces, numbers, kits), once: kept on disk."""
+    todo = [p for p in sh.photos if p["state"] in ("done", "thumb") and p["path"] not in sh.scans]
+    sh.people_job = {"state": "now", "done": len(sh.scans), "total": len(sh.scans) + len(todo)}
+    for p in todo:
+        try:
+            sh.scans[p["path"]] = _scan_one(p["path"])
+        except Exception as x:
+            print(f"culling people: {p['name']}: {type(x).__name__}: {x}", flush=True)
+        sh.people_job["done"] += 1
+        sh.rev += 1
+    sh.people_job["state"] = "done"
+    sh.rev += 1
+    if sh.settings.get("favor"):  # pass 1 favors a player: now it can see them in every photo
+        C.pass1(sh)
+
+
+def people_scan(sh: Shoot):
+    if sh.people_job and sh.people_job.get("state") == "now":
+        return
+    threading.Thread(target=_people_work, args=(sh,), daemon=True).start()
+
+
+def _person(pid: str) -> dict:
+    C.load()
+    p = next((x for x in C.people if x["id"] == pid), None)
+    if not p:
+        raise HTTPException(404, "That player is no longer saved")
+    return p
+
+
+def person_hits(sh: Shoot, person: dict) -> dict[str, dict]:
+    return cull_people.matches(person, [sh.scans[p["path"]] for p in sh.photos if p["path"] in sh.scans and p["state"] != "gone"])
+
+
+@router.post("/api/cull/shoots/{sid}/people/scan")
+def start_people_scan(sid: int):
+    sh = C.shoot(sid)
+    people_scan(sh)
+    return {"job": sh.people_job}
+
+
+@router.get("/api/cull/shoots/{sid}/people/at/{pid}")
+async def people_at(sid: int, pid: int):
+    """Everyone the app sees in this photo (to click your player)."""
+    sh, p = _photo(sid, pid)
+    sc = sh.scans.get(p["path"]) or await _thread(_scan_one, p["path"])
+    sh.scans[p["path"]] = sc
+    return {"people": [{"i": i, "box": s.box, "number": s.number, "face": s.face is not None, "kind": s.kind}
+                       for i, s in enumerate(sc.people)]}
+
+
+@router.post("/api/cull/people")
+async def add_person(req: Request):
+    """A player to find: from a click on them in a photo (face, kit, number), or just a number."""
+    body = await req.json()
+    C.load()
+    pid = f"p{int(time.time() * 1000)}"
+    name = str(body.get("name") or "").strip()[:40]
+    if body.get("sid") is not None and body.get("pid") is not None and body.get("i") is not None:
+        sh, p = _photo(int(body["sid"]), int(body["pid"]))
+        sc = sh.scans.get(p["path"]) or await _thread(_scan_one, p["path"])
+        sh.scans[p["path"]] = sc
+        s = sc.people[int(body["i"])]
+        number = str(body.get("number") or s.number or "").strip() or None
+        if number:
+            s.number = number
+        person = cull_people.person_from(s, name or (f"#{number}" if number else "Player"), pid)
+    else:
+        number = str(body.get("number") or "").strip().lstrip("#")
+        if not number.isdigit():
+            raise HTTPException(400, "Type their jersey number (1 or 2 digits), or click them in a photo")
+        person = {"id": pid, "name": name or f"#{number}", "number": number, "face": None, "kit": None, "yes": [], "no": []}
+    C.people.append(person)
+    C.save()
+    return {"person": {k: person[k] for k in ("id", "name", "number")}}
+
+
+@router.patch("/api/cull/people/{pid}")
+async def edit_person(pid: str, req: Request):
+    p, body = _person(pid), await req.json()
+    if "name" in body:
+        p["name"] = str(body["name"]).strip()[:40] or p["name"]
+    if "number" in body:
+        p["number"] = str(body["number"]).strip().lstrip("#") or None
+    C.save()
+    return {"ok": True}
+
+
+@router.delete("/api/cull/people/{pid}")
+def forget_person(pid: str):
+    C.load()
+    C.people = [x for x in C.people if x["id"] != pid]
+    for sh in C.shoots.values():
+        if sh.settings.get("favor") == pid:
+            sh.settings["favor"] = ""
+    C.save()
+    return {"ok": True}
+
+
+@router.get("/api/cull/shoots/{sid}/people/{pid}/photos")
+async def person_photos(sid: int, pid: str):
+    """The event's photos with this player (as far as the event has been looked at)."""
+    sh, person = C.shoot(sid), _person(pid)
+    people_scan(sh) if len(sh.scans) < sum(1 for p in sh.photos if p["state"] != "gone") else None
+    hits = await _thread(person_hits, sh, person)
+    return {"photos": {str(sh.by_path[path]["id"]): {k: v for k, v in h.items() if k != "face"} for path, h in hits.items() if path in sh.by_path},
+            "job": sh.people_job}
+
+
+@router.post("/api/cull/people/{pid}/answer")
+async def answer(pid: str, req: Request):
+    """"Is this them?" Yes or no on a close call: their face there teaches the finder."""
+    body = await req.json()
+    person = _person(pid)
+    sh, p = _photo(int(body["sid"]), int(body["photo"]))
+    hit = (await _thread(person_hits, sh, person)).get(p["path"])
+    if hit and hit.get("face") is not None:
+        person["yes" if body.get("yes") else "no"].append(hit["face"])
+    C.save()
+    return {"ok": True}
