@@ -11,9 +11,10 @@ illustration look of a session, loading the drawing models.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-CONFIG = Path("~/.config/photo-crops-presets").expanduser()
+CONFIG = Path(os.environ.get("ALLPROPHOTO_STATE") or Path("~/.config/photo-crops-presets").expanduser())
 LEARNED = CONFIG / "timings.json"
 
 PHOTO_READY = 4.0  # seconds to get a photo ready (read it, find the players), once per photo
