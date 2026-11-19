@@ -13,8 +13,10 @@ from photo_presets.cull import crops, enhance
 
 SIZES = crops.SIZES  # instagram 4:5, story 9:16, youtube 16:9, original, ai (best crop)
 SHAPE_OF = {"instagram": "4:5", "story": "9:16", "youtube": "16:9"}
-VERSIONS = {"O": "Crop only (no edits)", "A": "Crop + natural edit", "B": "Wider crop, softer edit",
-            "C": "Crop + punchy edit", "D": "Crop + AI's suggested adjustments"}
+VERSIONS = {"A": "Natural", "C": "Punchy", "B": "Softer, a little wider", "O": "No edits (just the crop)",
+            "D": "AI touch-up"}
+# each version's file name ends in its plain name: DSC01234_natural.jpg
+WORDS = {"O": "crop-only", "A": "natural", "B": "softer", "C": "punchy", "D": "ai-touch-up"}
 FOLDER_NAMES = {"instagram": "Instagram 4x5", "story": "Story 9x16", "youtube": "YouTube 16x9",
                 "original": "Original size", "ai": "Best crop"}
 
@@ -109,8 +111,8 @@ def boxes(m: dict, size_key: str, img_size: tuple[int, int], override: tuple | N
         tight = px(m["crops"][SHAPE_OF[size_key]])
     elif m.get("crops"):  # original size and best crop without the AI: the no-zoom pro crop
         tight = px(m["crops"]["wide"]) if size_key == "original" else px(m["crops"]["best"])
-    else:
-        tight = crops.crop_box(W, H, subject, size.aspect, tight=True)
+    else:  # no players found: the biggest crop of this shape, centered (nothing to zoom in on)
+        tight = crops.crop_box(W, H, (0.0, 0.0, 1.0, 1.0), size.aspect, tight=False)
     wide = crops.crop_box(W, H, subject, size.aspect, tight=False) if size.aspect else (0, 0, W, H)
     return tight, wide
 
@@ -146,7 +148,7 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
     out = []
 
     def save(im, v):
-        dest = folder / f"{path.stem}_{v}.jpg"  # (made again: replaces the last export's own file)
+        dest = folder / f"{path.stem}_{WORDS[v]}.jpg"  # (made again: replaces the last export's own file)
         images.save_jpeg(im, dest, exif)
         out.append(dest)
 

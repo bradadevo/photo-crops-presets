@@ -96,10 +96,10 @@ def test_export_crops_on_the_action_and_edits(tmp_path):
     yours = export.boxes(meas, "instagram", (3000, 2000), override=(0.0, 0.0, 0.4, 1.0))[0]
     assert yours == (0, 0, 1200, 2000)
     out = export.edit_one(src, meas, "instagram", "OAC", tmp_path / "out")
-    assert sorted(p.name for p in out) == ["shot_A.jpg", "shot_C.jpg", "shot_O.jpg"]
+    assert sorted(p.name for p in out) == ["shot_crop-only.jpg", "shot_natural.jpg", "shot_punchy.jpg"]
     assert all(Image.open(p).size == (1080, 1350) for p in out)
     again = export.edit_one(src, meas, "instagram", "A", tmp_path / "out")  # made again: replaced, not a copy
-    assert again[0].name == "shot_A.jpg" and len(list((tmp_path / "out").iterdir())) == 3
+    assert again[0].name == "shot_natural.jpg" and len(list((tmp_path / "out").iterdir())) == 3
 
 
 def test_white_balance_needs_no_opencv_extras():

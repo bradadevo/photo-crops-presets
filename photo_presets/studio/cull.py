@@ -442,6 +442,7 @@ async def export_keepers(sid: int, req: Request):
     size = body.get("size") or sh.settings.get("size", "instagram")
     versions = "".join(v for v in (body.get("versions") or "A") if v in "OABCD")
     fit = body.get("fit") if body.get("fit") in export.FITS else "widen"
+    shown = {int(k): tuple(v) for k, v in (body.get("crops") or {}).items() if v}  # the crops the Finish page showed
     if what == "edit":
         sh.settings["size"] = size
     folder = _out_folder(sh, body.get("folder") or ("Picks" if what == "copy" else f"Culled - {export.FOLDER_NAMES[size]}"))
@@ -456,9 +457,10 @@ async def export_keepers(sid: int, req: Request):
                     a = C.ai.get(p["path"]) or {}
                     ai_crop = (tuple(a["crop"]), a.get("shape", "4:5")) if a.get("crop") else None
                     adjust_fn = (lambda img: ai.adjustments(img)) if "D" in versions else None
-                    export.edit_one(Path(p["path"]), p.get("m") or {}, size, versions, folder,
-                                    C.marks.get(p["path"], {}).get("crop") if size not in ("ai",) else None,
-                                    ai_crop, adjust_fn, fit)
+                    crop = shown.get(p["id"]) if size != "ai" or not ai_crop else None
+                    if crop is None and size != "ai":
+                        crop = C.marks.get(p["path"], {}).get("crop")
+                    export.edit_one(Path(p["path"]), p.get("m") or {}, size, versions, folder, crop, ai_crop, adjust_fn, fit)
                 sh.job["done"] = i
             sh.job["state"] = "done"
         except Exception as x:

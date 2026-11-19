@@ -254,30 +254,23 @@ function cuPaintBar() {
         <span class="n">1</span><span class="t">Pass 1</span>${measuring ? `<span class="x">· ${Math.round(sh.measured / Math.max(1, sh.total) * 100)}%</span>` : sh.pass1 ? `<span class="x">: ${c.keep.toLocaleString()} keep</span>` : ""}${icon("chev")}</button>
       <button class="cu-step${c.todo === 0 && c.all ? " done" : ""}" id="cu-pass2" title="Your pass: go through what pass 1 decided. Starts with where it was least sure">
         <span class="n">2</span><span class="t">Your pass</span>${c.unsure ? `<span class="x">· ${c.unsure.toLocaleString()} unsure</span>` : ""}</button>
-      <button class="cu-step" id="cu-pass3" ${off(!c.reject && !c.keep, "Nothing marked yet")} title="Delete the rejects (to the Trash) and use the keepers">
+      <button class="cu-step${cu.finish ? " now" : ""}" id="cu-pass3" ${off(!c.reject && !c.keep, "Nothing marked yet")} title="Delete the rejects, then crop, copy or use the keepers">
         <span class="n">3</span><span class="t">Finish</span></button></div>
     <div class="seg small" id="cu-views">${[["grid", "grid", "Gallery (G)"], ["one", "single", "One big photo (Space)"], ["compare", "compare", "Side by side (C)"]].map(([k, ic, t]) => `<button class="${cu.view === k ? "on" : ""}" data-view="${k}" title="${t}">${icon(ic)}</button>`).join("")}</div>
     <button class="icon-btn cu-tog${cu.group ? " on" : ""}" id="cu-group" title="${cu.group ? "Bursts are stacked: each shows as its best frame (click to show every frame)" : "Every frame shows (click to stack each burst as its best frame)"}">${icon("stack")}</button>
     <span class="grow"></span>
     ${n > 1 ? `<span class="cu-selinfo">${n} selected</span>` : ""}
     <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo to the Trash (you can undo, or put them back from the Trash)">${icon("trash")}<span class="lbl"> Delete rejects</span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
-    <div class="menu-wrap"><button class="btn primary" id="cu-out" ${off(!c.keep, "No keepers yet")}>${icon("export")} Keepers${c.keep ? ` (${c.keep.toLocaleString()})` : ""} ${icon("chev")}</button>
-      <div class="menu" id="cu-out-menu" role="menu" hidden>
-        <button role="menuitem" data-out="copy">Copy keepers to a folder…<small>The files as they are (JPEG and RAW), in a Picks folder</small></button>
-        <button role="menuitem" data-out="edit">Crop and edit keepers…<small>Instagram, Story, YouTube or original size: crop on the action, edited</small></button>
-        <button role="menuitem" data-out="looks">Send keepers to Looks<small>Make looks, posters and reels from them</small></button>
-        <button role="menuitem" data-out="reel">Send keepers to Reel<small>They go into Looks; make a look of each, then the reel</small></button>
-        <button role="menuitem" data-out="ai">Ask AI to rate…<small>Gemini scores the shown keepers and finds its best crop (shows the cost first)</small></button></div></div>`;
+    <button class="btn primary" id="cu-fin" ${off(!c.keep, "No keepers yet")} title="Step 3: delete the rejects, then crop, copy or use the keepers">Finish${c.keep ? ` · ${c.keep.toLocaleString()} keepers` : ""} ${icon("right")}</button>`;
   paintIcons(bar);
   $("#cu-pass1").onclick = cuPass1;
-  $("#cu-pass2").onclick = () => { cu.show = c.unsure ? "unsure" : "todo"; cu.sort = "unsure"; store.set("cull.sort", cu.sort); cuRefilter(); if (cu.order.length) cuSetView("one");
+  $("#cu-pass2").onclick = () => { cu.finish = false; cu.show = c.unsure ? "unsure" : "todo"; cu.sort = "unsure"; store.set("cull.sort", cu.sort); cuRefilter(); if (cu.order.length) cuSetView("one");
     toast(c.unsure ? "Your pass: the photos pass 1 was least sure about come first" : "Your pass: what you haven't looked at yet", { small: "P keep · X reject · → next. Your mark replaces pass 1's" }); };
-  $("#cu-pass3").onclick = () => { if (c.reject) cuDeleteRejects(); else cuOut("copy"); };
+  $("#cu-pass3").onclick = cuOpenFinish;
+  $("#cu-fin").onclick = () => c.keep && cuOpenFinish();
   bar.querySelectorAll("[data-view]").forEach((b) => b.onclick = () => cuSetView(b.dataset.view));
   $("#cu-group").onclick = () => { cu.group = !cu.group; store.set("cull.group", cu.group); cu.open.clear(); cuRefilter(); };
   $("#cu-del").onclick = () => c.reject && cuDeleteRejects();
-  $("#cu-out").onclick = (e) => { e.stopPropagation(); if (c.keep) $("#cu-out-menu").hidden = !$("#cu-out-menu").hidden; };
-  bar.querySelectorAll("[data-out]").forEach((b) => b.onclick = () => { $("#cu-out-menu").hidden = true; cuOut(b.dataset.out); });
 }
 
 function cuPaintKeys() {
@@ -384,6 +377,185 @@ function cuSetView(v) {
   cu.gridSig = ""; cuPaintBar(); cuPaintMain(); cuPaintInfo();
   if (v === "grid") cuScrollTo(cu.cur);
 }
+// -- step 3, Finish: one page for everything after culling ------------------------------------------
+// 1 clear out the rejects; 2 what to do with the keepers: crop them for posting (where, how they look,
+// every crop checked with a plain label, the sharpness choice, where they go, one button), copy them
+// as they are, or use them in AllProPhoto.
+const CU_WHERE = [
+  ["instagram", "Instagram post", "4:5 · 1,080 × 1,350"],
+  ["story", "Story or Reel", "9:16 · 1,080 × 1,920"],
+  ["youtube", "YouTube or widescreen", "16:9 · full detail"],
+];
+const CU_WHERE_MORE = [
+  ["original", "Same size as the camera photo", "The crop enlarged back to the photo's full size"],
+  ["ai", "Let AI choose each crop", "Its own shape and framing per photo (rate them with AI first)"],
+];
+const CU_LOOKS = [
+  ["A", "Natural", "Clean color and light, like a pro edit. Most people want this one"],
+  ["C", "Punchy", "A bit more color and contrast"],
+  ["B", "Softer", "Gentler contrast, and the crop a little wider"],
+  ["O", "No edits", "Just the crop, exactly as the camera made it"],
+  ["D", "AI touch-up", "Gemini suggests the light and color; about $0.001–0.002 a photo"],
+];
+const CU_FOLDER = { instagram: "Culled - Instagram 4x5", story: "Culled - Story 9x16", youtube: "Culled - YouTube 16x9", original: "Culled - Original size", ai: "Culled - Best crop" };
+const cuFin = () => cu.fin || (cu.fin = { what: store.get("cull.finWhat", "crop"), looks: new Set(store.get("cull.looks", ["A"])),
+  fit: store.get("cull.fit", "widen"), out: new Set(), folder: {}, more: false });
+
+function cuCenterBox(p, sizeKey) {
+  const full = p.full || p.size || [3, 2];
+  const a = sizeKey === "story" ? 9 / 16 : sizeKey === "youtube" ? 16 / 9 : sizeKey === "instagram" ? 4 / 5 : full[0] / full[1];
+  const r = full[0] / full[1];
+  const w = r > a ? a / r : 1, h = r > a ? 1 : r / a;
+  return [(1 - w) / 2, (1 - h) / 2, (1 + w) / 2, (1 + h) / 2];
+}
+/* What the crop for this keeper will be, and a plain label saying why. */
+function cuPlan(p, sizeKey, fit) {
+  const mine = p.crop && !Array.isArray(p.crop) ? p.crop[sizeKey] : (Array.isArray(p.crop) ? p.crop : null);
+  let box, kind = mine ? "yours" : "action";
+  if (sizeKey === "ai" && !mine) {
+    if (p.ai?.crop) { box = p.ai.crop; kind = "ai"; }
+    else { box = p.crops?.best; kind = box ? "noai" : "none"; }
+  } else box = mine || p.crops?.[CU_SHAPE[sizeKey]];
+  if (!box) { box = cuCenterBox(p, sizeKey); kind = "none"; }
+  let q = cuQual(p, sizeKey, box), f = q ? q.f : 1, fixed = "";
+  if (f > 1.01 && fit === "widen") {
+    const wide = cuWidened(p, sizeKey, box), wq = cuQual(p, sizeKey, wide);
+    box = wide; fixed = wq && wq.f > 1.01 ? "softer" : "widened"; f = wq ? wq.f : 1;
+  } else if (f > 1.01) fixed = fit === "native" ? "small" : "softer";
+  const whole = (box[2] - box[0]) * (box[3] - box[1]) > 0.94;
+  const L = {
+    action: ["ok", "Cropped on the action"], yours: ["mine", "Your crop"], ai: ["ok", "AI's crop"],
+    noai: ["warn", "Not rated by AI yet: the app's crop"], none: ["grey", "No players found: centered"],
+  }[kind];
+  let label = L, why = "";
+  if (fixed === "widened") { label = ["ok", whole ? "Whole photo, to stay sharp" : "Widened a little to stay sharp"];
+    why = sizeKey === "original" ? "Same size as the camera can only stay sharp uncropped" : "The crop was zoomed in too far for this size"; }
+  else if (fixed === "softer") label = ["warn", `Softer: enlarged ${f.toFixed(1)}×`];
+  else if (fixed === "small") label = ["grey", `Smaller file: ${q.cw.toLocaleString()} × ${q.ch.toLocaleString()} px`];
+  else if (whole && kind !== "none") label = ["grey", "Whole photo: already framed well"];
+  return { box, label, why, f, kind, needsFit: q && q.f > 1.01 };
+}
+
+function cuFinishIds() {
+  return [...cu.photos.values()].filter((p) => alive(p) && flagOf(p) === "keep").sort((a, b) => (a.t ?? 0) - (b.t ?? 0) || a.id - b.id).map((p) => p.id);
+}
+function cuOpenFinish() {
+  cu.finish = true; cu.guide = false; cu.fromFinish = null; cuFin();
+  $("#cu-grid").hidden = true; cuPaintAll();
+}
+function cuCloseFinish() { cu.finish = false; cu.fromFinish = null; cuPaintAll(); if (cu.view === "grid") { cu.gridSig = ""; cuPaintGrid(); } }
+
+function cuPaintFinish(one) {
+  const sh = cuShoot(), F = cuFin();
+  const [c] = cuCounts();
+  const all = cuFinishIds(), ids = all.filter((id) => !F.out.has(id));
+  const size = cuSizeKey();
+  const job = sh.job && (sh.job.what === "edit" || sh.job.what === "copy") ? sh.job : null;
+  const plans = F.what === "crop" ? all.map((id) => [id, cuPlan(cuP(id), size, F.fit)]) : [];
+  const enlargedN = plans.filter(([id, pl]) => !F.out.has(id) && pl.needsFit).length;
+  const unrated = size === "ai" ? ids.filter((id) => !cuP(id).ai?.crop).length : 0;
+  const folder = F.folder[F.what === "copy" ? "copy" : size] || (F.what === "copy" ? "Picks" : CU_FOLDER[size]);
+  const where = (sh.folders[0] || "").split("/").filter(Boolean).pop() || "your photos";
+  const looks = [...F.looks].filter((k) => k !== "D" || cu.ai);
+  const tile = (k, ic, t, s) => `<button class="cu-what${F.what === k ? " on" : ""}" data-what="${k}">${icon(ic)}<b>${t}</b><span>${s}</span></button>`;
+  const chip = (lab) => `<span class="cu-lab ${lab[0]}">${esc(lab[1])}</span>`;
+  const keepScroll = one.querySelector(".cu-fin")?.scrollTop || 0;  // (a redraw never jumps you back to the top)
+  const counts = {};
+  plans.forEach(([id, pl]) => { if (!F.out.has(id)) counts[pl.label[1]] = [pl.label[0], (counts[pl.label[1]]?.[1] || 0) + 1]; });
+  one.innerHTML = `<div class="cu-fin">
+    <header class="cu-fin-h"><div><h1>Finish</h1><p>${plural(c.keep, "keeper")} · ${plural(c.reject, "reject")}</p></div>
+      <button class="btn ghost" id="fin-back">${icon("left")} Back to the photos</button></header>
+
+    <section class="cu-sec"><h2><span class="n">1</span> Clear out the rejects</h2>
+      ${c.reject ? `<p>${plural(c.reject, "photo")} marked reject (by you or the app). Deleting moves ${c.reject === 1 ? "it" : "them"} to the Trash, with their RAW files: you can undo, or take ${c.reject === 1 ? "it" : "them"} back out of the Trash.</p>
+        <div class="cu-row"><button class="btn" id="fin-look">${icon("eye")} Look at them first</button><button class="btn danger" id="fin-del">${icon("trash")} Delete ${plural(c.reject, "reject")}</button></div>`
+      : `<p class="cu-done-t">${icon("check")} No rejects left. Nice.</p>`}</section>
+
+    <section class="cu-sec"><h2><span class="n">2</span> What do you want to do with your ${plural(ids.length, "keeper")}?</h2>
+      <div class="cu-whats">${tile("crop", "crop", "Crop them for posting", "Instagram, Story or YouTube, cropped on the action and edited")}
+        ${tile("copy", "copy", "Copy them as they are", "The original files (and RAW), untouched, into one folder")}
+        ${tile("use", "layers", "Use them in AllProPhoto", "Make looks, posters and reels from them")}</div>
+
+    ${F.what === "crop" ? `
+      <div class="cu-q-h"><b>Where will they be posted?</b></div>
+      <div class="cu-wheres">${CU_WHERE.map(([k, t, s]) => `<button class="cu-where${size === k ? " on" : ""}" data-where="${k}"><b>${t}</b><span>${s}</span></button>`).join("")}</div>
+      <button class="cu-more" id="fin-more">${F.more || CU_WHERE_MORE.some(([k]) => k === size) ? "Fewer choices" : "More choices"} ${icon("chev")}</button>
+      ${F.more || CU_WHERE_MORE.some(([k]) => k === size) ? `<div class="cu-wheres more">${CU_WHERE_MORE.map(([k, t, s]) => `<button class="cu-where${size === k ? " on" : ""}" data-where="${k}"><b>${t}</b><span>${s}</span></button>`).join("")}</div>` : ""}
+      ${size === "ai" && unrated ? `<div class="cu-note warn">${icon("info")}<span>${plural(unrated, "keeper")} ${unrated === 1 ? "hasn't" : "haven't"} been rated by AI yet, so ${unrated === 1 ? "it uses" : "they use"} the app's crop. <button class="btn small" id="fin-rate">Rate them with AI</button></span></div>` : ""}
+
+      <div class="cu-q-h"><b>How should they look?</b><small>Pick one or more: you get one picture of each</small></div>
+      <div class="cu-looks">${CU_LOOKS.map(([k, t, s]) => `<label class="cu-look${F.looks.has(k) ? " on" : ""}${k === "D" && !cu.ai ? " dis" : ""}" title="${esc(k === "D" && !cu.ai ? "Needs a Gemini key (add it to ~/.zshrc)" : s)}"><input type="checkbox" data-look="${k}" ${F.looks.has(k) ? "checked" : ""} ${k === "D" && !cu.ai ? "disabled" : ""}><b>${t}</b><span>${s}</span></label>`).join("")}</div>
+
+      <div class="cu-q-h"><b>Check your crops</b><small>Click a photo to change its crop · × to leave it out</small></div>
+      <div class="cu-sum">${Object.entries(counts).map(([t, [k, n]]) => `<span class="cu-lab ${k}">${n} · ${esc(t)}</span>`).join("")}</div>
+      <div class="cu-crops">${plans.map(([id, pl]) => { const p = cuP(id), b = pl.box, out = F.out.has(id);
+        return `<div class="cu-cc${out ? " out" : ""}" data-cc="${id}" title="${esc(p.name)}${pl.why ? ": " + esc(pl.why) : ""}">
+          <div class="im"><img src="/img/cull/${cu.sel}/${id}/thumb.jpg" alt="" loading="lazy">
+            <span class="cu-cbox" style="left:${b[0] * 100}%;top:${b[1] * 100}%;width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%"></span></div>
+          ${out ? `<span class="cu-lab grey">Left out</span>` : chip(pl.label)}
+          <button class="x" data-out="${id}" title="${out ? "Put it back in" : "Leave this one out"}">${icon(out ? "plus" : "x")}</button></div>`; }).join("")}</div>
+
+      ${enlargedN ? `<div class="cu-q-h"><b>${plural(enlargedN, "crop is", "crops are")} zoomed in further than ${size === "original" ? "the camera size" : "this size"} can hold</b><small>${size === "original" ? "Same size as the camera always enlarges a crop" : "Making them bigger would make them softer"}</small></div>
+        <div class="cu-fits">${[["widen", "Widen them just enough to stay sharp", "Recommended: no quality lost"], ["native", "Keep their own pixels", "A smaller picture, never enlarged"], ["enlarge", "Enlarge them anyway", "Full size, but softer"]]
+          .map(([k, t, s]) => `<label class="cu-fit2${F.fit === k ? " on" : ""}"><input type="radio" name="fin-fit" value="${k}" ${F.fit === k ? "checked" : ""}><b>${t}</b><span>${s}</span></label>`).join("")}</div>` : ""}
+
+      <div class="cu-q-h"><b>Where they go</b></div>
+      <div class="cu-dest">${icon("folder")}<span>A new folder next to your photos in “${esc(where)}”:</span><input id="fin-folder" value="${esc(folder)}" spellcheck="false"></div>
+      <div class="cu-make">${job?.state === "now" ? cuJobBar(job) : `<button class="btn primary big" id="fin-go" ${off(!ids.length || !looks.length, !ids.length ? "No keepers to make" : "Choose how they should look")}>
+          ${icon("crop")} Make ${plural(ids.length * Math.max(1, looks.length), "picture")}</button><small>${plural(ids.length, "keeper")} × ${plural(looks.length, "look")}. Your originals are never changed.</small>`}</div>
+      ${job && job.state !== "now" && job.what === "edit" ? cuJobDone(job) : ""}` : ""}
+
+    ${F.what === "copy" ? `
+      <div class="cu-dest">${icon("folder")}<span>A new folder next to your photos in “${esc(where)}”:</span><input id="fin-folder" value="${esc(folder)}" spellcheck="false"></div>
+      <div class="cu-make">${job?.state === "now" ? cuJobBar(job) : `<button class="btn primary big" id="fin-go" ${off(!ids.length, "No keepers")}>${icon("copy")} Copy ${plural(ids.length, "photo")}</button><small>Exactly as they are, with their RAW files. Nothing is changed or moved.</small>`}</div>
+      ${job && job.state !== "now" && job.what === "copy" ? cuJobDone(job) : ""}` : ""}
+
+    ${F.what === "use" ? `<div class="cu-uses">
+      <button class="cu-use2" data-send="looks">${icon("wand")}<b>Make looks</b><span>Your ${plural(ids.length, "keeper")} go into the Looks tab: make looks, posters and team posters from them</span></button>
+      <button class="cu-use2" data-send="reel">${icon("film")}<b>Make a reel</b><span>They go into Looks; make a look of each, then build the Instagram reel</span></button></div>` : ""}
+    </section></div>`;
+  paintIcons(one);
+  one.querySelector(".cu-fin").scrollTop = keepScroll;
+  if (cu.finScrollTo) { const el = one.querySelector(cu.finScrollTo); cu.finScrollTo = null; el?.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  $("#fin-back", one).onclick = cuCloseFinish;
+  $("#fin-del", one)?.addEventListener("click", cuDeleteRejects);
+  $("#fin-look", one)?.addEventListener("click", () => { cu.finish = false; cu.show = "reject"; cu.sort = "score"; cu.issues.clear(); cuRefilter(); cuSetView("grid");
+    toast("The rejects, the ones the app liked best first", { small: "P keeps one. Back to Finish with the 3 button at the top" }); });
+  one.querySelectorAll("[data-what]").forEach((b) => b.onclick = () => { F.what = b.dataset.what; store.set("cull.finWhat", F.what); cuPaintFinish(one); });
+  one.querySelectorAll("[data-where]").forEach((b) => b.onclick = () => { cuSetSize(b.dataset.where); cuPaintFinish(one); });
+  $("#fin-more", one)?.addEventListener("click", () => { F.more = !(F.more || CU_WHERE_MORE.some(([k]) => k === size)); if (!F.more && CU_WHERE_MORE.some(([k]) => k === size)) cuSetSize("instagram"); cuPaintFinish(one); });
+  $("#fin-rate", one)?.addEventListener("click", () => cuOut("ai", ids));
+  one.querySelectorAll("[data-look]").forEach((x) => x.onchange = () => { x.checked ? F.looks.add(x.dataset.look) : F.looks.delete(x.dataset.look); store.set("cull.looks", [...F.looks]); cuPaintFinish(one); });
+  one.querySelectorAll("input[name=fin-fit]").forEach((x) => x.onchange = () => { F.fit = x.value; store.set("cull.fit", F.fit); cuPaintFinish(one); });
+  one.querySelectorAll("[data-out]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); const id = +b.dataset.out; F.out.has(id) ? F.out.delete(id) : F.out.add(id); cuPaintFinish(one); });
+  one.querySelectorAll("[data-cc]").forEach((el) => el.onclick = () => {
+    cu.cur = +el.dataset.cc; cu.fromFinish = cuSizeKey(); cu.finish = false; cu.cropShow = true; store.set("cull.crop", true);
+    cuSetView("one");
+  });
+  $("#fin-folder", one)?.addEventListener("change", (e) => { F.folder[F.what === "copy" ? "copy" : size] = e.target.value.trim(); });
+  $("#fin-go", one)?.addEventListener("click", async () => {
+    if (!ids.length) return;
+    const name = ($("#fin-folder", one)?.value || "").trim() || folder;
+    if (F.what === "copy") await api(`/api/cull/shoots/${sh.id}/export`, { what: "copy", ids, folder: name });
+    else { if (!looks.length) return; await api(`/api/cull/shoots/${sh.id}/export`, { what: "edit", ids, size, versions: looks.join(""), fit: F.fit, folder: name, crops: Object.fromEntries(plans.filter(([id]) => !F.out.has(id)).map(([id, pl]) => [id, pl.box])) }); }
+    cu.finScrollTo = ".cu-make"; await cuState(); cuPaintFinish(one); cuPoll();
+  });
+  one.querySelectorAll("[data-send]").forEach((b) => b.onclick = () => cuOut(b.dataset.send, ids));
+  one.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => api("/api/reveal", { path: b.dataset.open }));
+  $("#fin-again", one)?.addEventListener("click", () => { sh.job = null; cuPaintFinish(one); });
+}
+function cuJobBar(j) {
+  const pct = j.total ? Math.round(j.done / j.total * 100) : 0;
+  return `<div class="cu-prog2"><b>${j.what === "copy" ? "Copying" : "Making"} ${j.done} of ${j.total}…</b><i><u style="width:${pct}%"></u></i><small>You can keep culling meanwhile</small></div>`;
+}
+function cuJobDone(j) {
+  if (j.state === "failed") return `<div class="cu-note bad">${icon("info")}<span>It stopped: ${esc(j.error || "")}</span></div>`;
+  const f = j.folder || "";
+  return `<div class="cu-done">${icon("check")}<div><b>Done: ${plural(j.done, j.what === "copy" ? "photo" : "keeper")} ${j.what === "copy" ? "copied" : "made"}</b>
+    <span>${esc(f.replace(/^\/Users\/[^/]+/, "~"))}</span></div><button class="btn primary" data-open="${esc(f)}">${icon("folder")} Open the folder</button>
+    ${j.what === "edit" ? `<button class="btn ghost" id="fin-again">Make another size</button>` : ""}</div>`;
+}
+
 // -- the start page: the three things culling does, and how ------------------------------------------
 const CU_THREE = [
   ["keep", "Find the keepers in minutes", "The app goes through the whole game for you and marks the best frame of every moment: sharp on the player, eyes open, the ball in play. Each mark says why."],
@@ -411,8 +583,9 @@ function cuGuide(one, back) {
 
 function cuPaintMain() {
   const showGuide = cu.guide || !cuShoot();
-  $("#cull").classList.toggle("guiding", showGuide);
+  $("#cull").classList.toggle("guiding", showGuide || !!cu.finish);
   if (showGuide) { $("#cu-grid").hidden = true; const one = $("#cu-one"); one.hidden = false; cuGuide(one, !!cuShoot()); return; }
+  if (cu.finish) { $("#cu-grid").hidden = true; const one = $("#cu-one"); one.hidden = false; cuPaintFinish(one); return; }
   if (cu.view === "grid") { $("#cu-grid").hidden = false; $("#cu-one").hidden = true; cuPaintGrid(); return; }
   if (cu.view === "compare") return cuPaintCompare();
   const one = $("#cu-one"), p = cuP(cu.cur);
@@ -420,7 +593,9 @@ function cuPaintMain() {
   const f = flagOf(p);
   const frames = p.bsize > 1 ? [...cu.photos.values()].filter((q) => alive(q) && q.burst === p.burst).sort((a, b) => (a.t ?? 0) - (b.t ?? 0) || a.id - b.id) : [];
   const sizeKey = cuSizeKey(), box = cuCropOf(p, sizeKey), q = box && cuQual(p, sizeKey, box);
-  one.innerHTML = `<div class="cu-stage${f ? " f-" + f : ""}" id="cu-stage">
+  const fromFin = cu.fromFinish ? `<div class="cu-adjust">${icon("crop")}<span><b>Changing the crop for ${esc((CU_WHERE.concat(CU_WHERE_MORE).find(([k]) => k === cu.fromFinish) || [0, CU_SIZE_NAME[cu.fromFinish]])[1])}</b> · drag it to move, scroll on it to resize · ← → for the next keeper</span><button class="btn primary" id="cu-adjust-done">${icon("check")} Done: back to Finish</button></div>` : "";
+  one.classList.toggle("adjusting", !!fromFin);
+  one.innerHTML = fromFin + `<div class="cu-stage${f ? " f-" + f : ""}" id="cu-stage">
       ${cu.zoom ? `<div class="cu-zoom"><img src="/img/cull/${cu.sel}/${p.id}/zoom.jpg?x=${cu.zoom.x.toFixed(4)}&y=${cu.zoom.y.toFixed(4)}&w=${Math.round(one.clientWidth * devicePixelRatio)}&h=${Math.round((one.clientHeight - 120) * devicePixelRatio)}" alt="">
           <span class="tag">100% · click to look elsewhere · Z or Esc to go back</span></div>`
       : `<div class="cu-pic" id="cu-pic"><img id="cu-img" src="/img/cull/${cu.sel}/${p.id}/view.jpg" alt="" draggable="false">
@@ -433,6 +608,7 @@ function cuPaintMain() {
       <div class="cu-acts"><button class="btn${f === "keep" ? " primary" : ""}" data-mk="keep" title="Keep (P)">${icon("keep")} Keep</button><button class="btn${f === "reject" ? " danger" : ""}" data-mk="reject" title="Reject (X)">${icon("reject")} Reject</button></div></div>`;
   paintIcons(one);
   one.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => cuMark(b.dataset.mk));
+  $("#cu-adjust-done", one)?.addEventListener("click", cuOpenFinish);
   one.querySelectorAll("[data-fr]").forEach((b) => b.onclick = () => { cu.cur = +b.dataset.fr; cuPaintMain(); cuPaintInfo(); cuPaintTimeline(); });
   one.querySelectorAll("[data-face]").forEach((b) => b.onclick = () => { const fc = p.faces[+b.dataset.face]; cu.zoom = { x: (fc.box[0] + fc.box[2]) / 2, y: (fc.box[1] + fc.box[3]) / 2 }; cuPaintMain(); });
   $("#cu-img")?.addEventListener("click", (e) => { const r = e.target.getBoundingClientRect(); cu.zoom = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; cuPaintMain(); });
@@ -455,7 +631,13 @@ function cuPaintMain() {
 const CU_SHAPE = { instagram: "4:5", story: "9:16", youtube: "16:9", original: "wide", ai: "best" };
 const CU_TARGET = { instagram: [1080, 1350], story: [1080, 1920] };
 const CU_SIZE_NAME = { instagram: "Instagram", story: "Story", youtube: "YouTube", original: "Original", ai: "Best crop" };
-const cuSizeKey = () => cuShoot()?.settings?.size || "instagram";
+// the size you chose wins on this screen (a refresh from the server a moment before it's saved can't undo it)
+const cuSizeKey = () => (cu.sizeLocal || {})[cu.sel] || cuShoot()?.settings?.size || "instagram";
+function cuSetSize(k) {
+  const sh = cuShoot(); if (!sh) return;
+  (cu.sizeLocal || (cu.sizeLocal = {}))[sh.id] = k; sh.settings.size = k;
+  api(`/api/cull/shoots/${sh.id}`, { settings: { size: k } }, { method: "PATCH" }).catch(() => {});
+}
 /* Your crop for this size (kept per size), else the automatic one. */
 function cuCropOf(p, sizeKey) {
   const mine = p.crop && !Array.isArray(p.crop) ? p.crop[sizeKey] : p.crop;
@@ -571,7 +753,7 @@ function cuPaintInfo() {
     ${frames.length ? `<p class="cu-burst">${icon("stack")} Burst of ${frames.length} frames${p.best ? " · <b>this is the best</b>" : ""} <a href="#" id="cu-cmp-burst">compare them (C)</a></p>` : ""}
     ${p.ai ? `<div class="cu-ai">${p.ai.error ? `<small class="bad-t">AI: ${esc(p.ai.error)}</small>` : `<b>AI ${p.ai.score}/10</b> ${esc(p.ai.reason)}`}</div>` : ""}
     <h4 class="sub">Crop on the action</h4>
-    <div class="seg small cu-sizes">${["instagram", "story", "youtube", "original"].map((k) => `<button class="${cuSizeKey() === k ? "on" : ""}" data-size="${k}" title="${esc(cu.sizes[k] || k)}">${CU_SIZE_NAME[k]}</button>`).join("")}</div>
+    <p class="cu-for">For <b>${esc((CU_WHERE.concat(CU_WHERE_MORE).find(([k]) => k === cuSizeKey()) || [0, CU_SIZE_NAME[cuSizeKey()]])[1])}</b> · <a href="#" id="cu-for-change">change in Finish</a></p>
     ${(() => { const sk = cuSizeKey(), b = cuCropOf(p, sk), q = b && cuQual(p, sk, b); if (!q) return "";
       const soft = q.f > 1.01, wb = soft ? cuWidened(p, sk, b) : null, wq = wb && cuQual(p, sk, wb);
       return `<p class="cu-q ${soft ? "soft" : "ok"}">${icon(soft ? "info" : "check")}<span>${esc(cuQualText(q))}</span></p>
@@ -592,11 +774,7 @@ function cuPaintInfo() {
   $("#cu-cropshow").onchange = (e) => { cu.cropShow = e.target.checked; store.set("cull.crop", cu.cropShow); if (cu.view !== "one") cuSetView("one"); else cuPaintMain(); };
   $("#cu-crop-reset")?.addEventListener("click", () => Array.isArray(p.crop) ? cuSet([p.id], { crop: null }, "Reset the crop") : cuSaveCrop(p, cuSizeKey(), null, "Reset the crop"));
   $("#cu-widen")?.addEventListener("click", () => { const sk = cuSizeKey(); cuSaveCrop(p, sk, cuWidened(p, sk, cuCropOf(p, sk)), "Widen the crop"); });
-  box.querySelectorAll("[data-size]").forEach((b) => b.onclick = async () => {
-    const sh = cuShoot(); sh.settings.size = b.dataset.size;
-    await api(`/api/cull/shoots/${sh.id}`, { settings: { size: b.dataset.size } }, { method: "PATCH" });
-    cuPaintInfo(); if (cu.view === "one") cuPaintMain();
-  });
+  $("#cu-for-change")?.addEventListener("click", (e) => { e.preventDefault(); cuFin().what = "crop"; cuOpenFinish(); });
   $("#cu-reveal").onclick = () => api("/api/reveal", { path: p.path || "" }).catch(() => {});
 }
 
@@ -692,7 +870,7 @@ function cuDeleteRejects() {
     const r = await api(`/api/cull/shoots/${sh.id}/trash`, { ids });
     ids.forEach((id) => cuP(id).state = "gone");
     cu.hist.push({ label: "Delete rejects", trash: true, token: r.token, ids }); cu.future = [];
-    cuSort(); cuAfterMark();
+    cuSort(); cuAfterMark(); if (cu.finish) cuPaintFinish($("#cu-one"));
     toast(`Moved ${plural(r.moved, "photo")} to the Trash`, { small: `${plural(r.files, "file")}`, action: { label: "Undo", run: (ev) => { ev.target.closest(".toast")?.remove(); cuUndo(); } } });
   };
 }
@@ -700,8 +878,8 @@ function cuKeepers() {
   const ids = cu.picked.size > 1 ? [...cu.picked].filter((id) => flagOf(cuP(id)) === "keep") : [];
   return ids.length ? ids : [...cu.photos.values()].filter((p) => alive(p) && flagOf(p) === "keep").map((p) => p.id);
 }
-async function cuOut(what) {
-  const sh = cuShoot(); const ids = cuKeepers();
+async function cuOut(what, given) {
+  const sh = cuShoot(); const ids = given || cuKeepers();
   if (!ids.length) { toast("No keepers yet"); return; }
   if (what === "looks" || what === "reel") {
     const r = await api(`/api/cull/shoots/${sh.id}/send`, { ids });
@@ -720,53 +898,17 @@ async function cuOut(what) {
     $("#ai-go", m).onclick = async () => { if (!est.calls || !est.key) return; closeModal(); await api(`/api/cull/shoots/${sh.id}/ai`, { ids }); cuJobStart("Rating with AI"); };
     return;
   }
-  if (what === "copy") {
-    const m = modal(`<header><h2>Copy ${plural(ids.length, "keeper")}</h2></header><div class="body">
-        <p style="margin-top:0">The files as they are (JPEG and RAW together), into a folder next to the shoot's photos. Nothing is changed or moved.</p>
-        <label class="cu-field"><span>Folder name</span><input id="cp-name" value="Picks"></label></div>
-      <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="cp-go">Copy</button></footer>`);
-    $("#cp-go", m).onclick = async () => { const folder = $("#cp-name", m).value.trim() || "Picks"; closeModal();
-      await api(`/api/cull/shoots/${sh.id}/export`, { what: "copy", ids, folder }); cuJobStart("Copying the keepers"); };
-    return;
-  }
-  // crop and edit
-  const size = sh.settings.size || "instagram";
-  const m = modal(`<header><h2>Crop and edit ${plural(ids.length, "keeper")}</h2></header><div class="body">
-      <p style="margin-top:0">Each keeper is cropped on the action (yours where you moved the crop) and saved in a new folder. Your originals are never changed.</p>
-      <h4 class="sub">Size</h4><div class="cu-radio">${Object.entries(cu.sizes).map(([k, l]) => `<label><input type="radio" name="ce-size" value="${k}" ${k === size ? "checked" : ""}> ${esc(l)}${k === "ai" ? ` <small class="faint">uses the AI ratings</small>` : ""}</label>`).join("")}</div>
-      <h4 class="sub">Versions of each</h4><div class="cu-radio">${Object.entries(cu.versions).map(([k, l]) => `<label><input type="checkbox" name="ce-v" value="${k}" ${k === "A" ? "checked" : ""}> <b>${k}</b> ${esc(l)}${k === "D" ? ` <small class="faint">Gemini, about $0.001–0.002 a photo</small>` : ""}</label>`).join("")}</div>
-      <div id="ce-q"></div>
-      <p class="faint" id="ce-note"></p></div>
-    <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ce-go">Make them</button></footer>`);
-  let fit = store.get("cull.fit", "widen");
-  const note = () => {
-    const sz = $("input[name=ce-size]:checked", m).value, vs = $$("input[name=ce-v]:checked", m).map((x) => x.value);
-    const qs = ids.map((id) => { const p = cuP(id), b = cuCropOf(p, sz); return b && cuQual(p, sz, b); }).filter(Boolean);
-    const soft = qs.filter((q) => q.f > 1.01), worst = Math.max(1, ...qs.map((q) => q.f));
-    $("#ce-q", m).innerHTML = sz === "youtube" || sz === "ai"
-      ? `<p class="cu-q ok">${icon("check")}<span>Saved at each crop's own size: full detail, nothing enlarged.</span></p>`
-      : !soft.length ? `<p class="cu-q ok">${icon("check")}<span>Every crop has the pixels this size needs: all sharp, nothing enlarged.</span></p>`
-      : `<p class="cu-q soft">${icon("info")}<span><b>${plural(soft.length, "crop")} of ${ids.length}</b> ${soft.length === 1 ? "is" : "are"} zoomed in further than this size can hold (up to ${worst.toFixed(1)}× enlarged, so softer).${sz === "original" ? " Original size always enlarges a crop." : ""}</span></p>
-        <div class="cu-radio cu-fit">${Object.entries(cu.fits || {}).map(([k, l]) => `<label><input type="radio" name="ce-fit" value="${k}" ${k === fit ? "checked" : ""}> ${esc(l)}${k === "widen" ? ` <small class="good-t">recommended: no quality lost</small>` : ""}</label>`).join("")}</div>`;
-    paintIcons($("#ce-q", m));
-    $$("input[name=ce-fit]", m).forEach((r) => r.onchange = () => { fit = r.value; store.set("cull.fit", fit); });
-    const unrated = ids.filter((id) => !cuP(id).ai || cuP(id).ai.error).length;
-    $("#ce-note", m).innerHTML = [`${plural(ids.length * Math.max(1, vs.length), "picture")} to make`,
-      sz === "ai" && unrated ? `<span class="warn-t">${unrated} not rated by AI yet: they use the automatic crop (Ask AI to rate first for its crop)</span>` : "",
-      vs.includes("D") && !cu.ai ? `<span class="bad-t">D needs a Gemini key</span>` : ""].filter(Boolean).join(" · ");
-  };
-  m.addEventListener("change", note); note();
-  $("#ce-go", m).onclick = async () => {
-    const sz = $("input[name=ce-size]:checked", m).value, vs = $$("input[name=ce-v]:checked", m).map((x) => x.value).join("");
-    if (!vs) { toast("Choose at least one version"); return; }
-    closeModal();
-    await api(`/api/cull/shoots/${sh.id}/export`, { what: "edit", ids, size: sz, versions: vs, fit }); cuJobStart("Cropping and editing");
-  };
+  if (what === "copy" || what === "edit") { cuFin().what = what === "copy" ? "copy" : "crop"; cuOpenFinish(); return; }
 }
 let cuJobToast = null, cuJobLabel = "";
 function cuJobStart(label) { cuJobLabel = label; cuJobToast?.close(); cuJobToast = toast(`${label}…`, { sticky: true, spin: true }); cuState().then(() => { cuPoll(); }); }
 function cuJobWatch() {
   const sh = cuShoot(), j = sh?.job;
+  if (cu.finish && j && (j.what === "edit" || j.what === "copy")) {
+    const sig = `${j.what}|${j.started}|${j.state}|${j.done}`;
+    if (sig !== cu.finSig) { cu.finSig = sig; if (j.state !== "now") cu.finScrollTo = ".cu-done"; cuPaintFinish($("#cu-one")); if (j.state !== "now") cuState().then(cuPaintSide); }
+    return;
+  }
   if (!j || !cuJobToast) return;
   if (j.state === "now") cuJobToast.update(`${cuJobLabel}… ${j.done} of ${j.total}`, j.what === "import" ? "Pass 1 starts on each photo as it arrives" : "", j.total ? j.done / j.total : 0);
   else {
@@ -822,7 +964,9 @@ function cullKey(e) {
   if (st.mode !== "cull" || modalOpen()) return false;
   if (e.target.closest?.("input, textarea, select")) return false;
   const k = e.key.toLowerCase(), meta = e.metaKey || e.ctrlKey;
-  if (meta && k === "z") { e.preventDefault(); cuUndo(e.shiftKey); return true; }
+  if (meta && k === "z") { e.preventDefault(); cuUndo(e.shiftKey).then(() => cu.finish && cuPaintFinish($("#cu-one"))); return true; }
+  if (cu.finish) { if (k === "escape") { cuCloseFinish(); return true; } return false; }
+  if (k === "escape" && cu.fromFinish && !cu.zoom) { cuOpenFinish(); return true; }
   if (meta && k === "a") { e.preventDefault(); cu.order.forEach((id) => cu.picked.add(id)); cu.gridSig = ""; cuPaintGrid(); cuPaintBar(); return true; }
   if (meta || e.altKey) return false;
   const cols = cu.view === "grid" ? cuGeom().cols : 1;

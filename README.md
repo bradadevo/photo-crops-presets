@@ -462,14 +462,22 @@ minute, and only what is on screen is drawn).
    stars, `←` `→` next, `Space` one big photo, `Z` 100% (on the face), `C` compare a burst or your
    selection side by side, `G` gallery, `⌘Z` undo. Your marks always win over pass 1's (dashed marks are
    pass 1's, solid ones yours), and teach it your taste for the next game.
-3. **Finish.** **Delete rejects** moves them (JPEG and RAW together) to the Trash, with undo, after an
-   offer to take a second look at the rejects pass 1 liked best. **Keepers**: copy them to a Picks
-   folder, crop and edit them (Instagram 4:5, Story 9:16, YouTube 16:9, original size; versions O crop
-   only, A natural, B wider and softer, C punchy), or send them to Looks / Reel.
+3. **Finish** (one page, top to bottom):
+   1. **Clear out the rejects**: look at them first, or delete them (JPEG and RAW together go to the
+      Trash, with undo).
+   2. **What to do with the keepers**: **Crop them for posting**, **Copy them as they are** (a Picks
+      folder) or **Use them in AllProPhoto** (Looks, Reel). For cropping, on the same page: where
+      they'll be posted (Instagram post 4:5, Story or Reel 9:16, YouTube 16:9; more choices: same size
+      as the camera photo, or AI choosing each crop), how they should look (Natural, Punchy, Softer, No
+      edits, AI touch-up: one picture of each), **Check your crops** (every keeper with its crop drawn
+      on it and a plain label: cropped on the action, your crop, widened to stay sharp, whole photo
+      and why, no players found; click one to change it, × to leave it out), the sharpness choice when
+      a crop is zoomed in too far, the folder, and one **Make** button with its progress and an
+      **Open the folder** when done. Files end in the look's name (`DSC01234_natural.jpg`).
 
-Every keeper has a crop on the action in each shape (drag it to move, scroll to resize, `R` to show
-it). Gemini is used only when you ask: **Ask AI to rate** (a score, a reason and its own best crop,
-for the "Best crop" size) and the D version (its suggested adjustments). The cost shows first.
+You can also move a crop from the big photo (`R` shows it: drag to move it, scroll to resize; its
+pixels show on it, amber when it would be enlarged). Gemini is used only when you ask (rating keepers
+for the AI's own crops, the AI touch-up), and the cost shows first.
 The timeline across the top is the whole game: tall bars are the big moments.
 
 ### Tools: preset editor, Lightroom presets, assets
