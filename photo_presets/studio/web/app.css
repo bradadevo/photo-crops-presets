@@ -1361,3 +1361,29 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .frame.fixing { cursor: crosshair; }
 #viewer.has-cutbar { padding-bottom: 190px !important; }
 #viewer.has-cutbar .cut-bar { bottom: 74px; width: min(940px, calc(100% - 32px)); max-width: none; justify-content: center; }
+
+/* fonts and turning: any word in any font, any word or piece at any angle */
+.font-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 2px 0 10px; max-height: 214px; overflow-y: auto; padding-right: 2px; }
+.font-grid button, .section .font-grid button { background: var(--panel-2, rgba(255,255,255,.05)); border: 1px solid transparent; color: var(--text); border-radius: 7px;
+  padding: 6px 8px; font-size: 15px; line-height: 1.15; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.font-grid button:hover { border-color: rgba(255,255,255,.25); }
+.font-grid button.on, .section .font-grid button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.font-grid button.auto { font-size: 12px; font-weight: 600; color: var(--muted, #aab); }
+.angle-ctl { margin: 4px 0 10px; }
+.angle-ctl .angle-quick button { font-size: 11.5px; padding: 4px 2px; }
+.pc-r { position: absolute; left: 50%; top: -30px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #fff;
+  border: 2px solid var(--accent); cursor: grab; box-shadow: 0 1px 4px rgba(0,0,0,.5); pointer-events: auto; z-index: 3; }
+.pc-r::after { content: ""; position: absolute; left: 50%; top: 12px; width: 1.5px; height: 16px; margin-left: -.75px; background: var(--accent); }
+.pc-r:active { cursor: grabbing; }
+.tx .pc-r { top: -34px; font-size: 0; }
+.turn-tip { position: fixed; transform: translateX(-50%); background: rgba(10,12,16,.9); color: #fff; font: 600 12px/1 var(--font);
+  padding: 5px 8px; border-radius: 6px; pointer-events: none; z-index: 9999; }
+.aa-btn { flex: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: transparent;
+  color: var(--text); font: 700 13px/1 Georgia, serif; cursor: pointer; }
+.aa-btn:hover { border-color: rgba(255,255,255,.4); }
+.aa-btn.on { border-color: var(--accent); color: var(--accent); }
+.aa-btn.set:not(.on) { background: rgba(255,255,255,.08); }
+.word-style { margin: 6px 0 4px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+.pc-r.below { top: auto; bottom: -30px; }
+.pc-r.below::after { top: auto; bottom: 12px; }
+.tx .pc-r.below { top: auto; bottom: -34px; }

@@ -16,6 +16,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from photo_presets import fonts
+
 FONT = "/System/Library/Fonts/Avenir Next.ttc"
 HEAVY, BOLD, DEMI, MEDIUM = 8, 0, 2, 5
 TEMPLATES = {
@@ -102,6 +104,10 @@ def clean(p: dict | None) -> dict | None:
                       "s": round(float(np.clip(float(m.get("s", 1)), 0.3, 4)), 3)}
             except (TypeError, ValueError):
                 continue
+            if fonts.angle_ok(m.get("r", 0)):
+                mv["r"] = fonts.angle_ok(m["r"])  # turned to any angle (degrees, clockwise)
+            if fonts.name_ok(m.get("f")):
+                mv["f"] = m["f"]  # in a font of your choice
             if mv != {"x": 0, "y": 0, "s": 1}:
                 moves[k] = mv
     if moves:
@@ -234,6 +240,12 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
     if not text:
         return
     move = (getattr(_NOTE, "moves", None) or {}).get(key)
+    if move and move.get("f"):  # your font, as wide as the layout's (not much taller)
+        own = fonts.load(move["f"], font.size)
+        if own is not None:
+            was, now = font.getlength(text), own.getlength(text)
+            k = min(1.25, was / now) if now > 0 and was > 0 else 1.0
+            font = own.font_variant(size=max(6, int(font.size * k))) if abs(k - 1) > 0.02 else own
     if move:  # moved or resized by you on the picture (shares of the poster; its size times s)
         W, H = d.im.size
         xy = (xy[0] + move.get("x", 0) * W, xy[1] + move.get("y", 0) * H)
@@ -249,10 +261,18 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
             kw["stroke_fill"] = rgb + (kw["stroke_fill"][3] if len(kw["stroke_fill"]) == 4 else 255,)
         else:
             kw["fill"] = rgb + ((fill[3],) if len(fill) == 4 else (255,))
-    d.text(xy, text, font=font, **kw)
+    box = d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))
+    angle = (move or {}).get("r", 0)
+    image = getattr(d, "_image", None)
+    if angle and image is not None and image.mode == "RGBA":  # turned around its middle
+        lay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        ImageDraw.Draw(lay).text(xy, text, font=font, **kw)
+        image.alpha_composite(fonts.turned(lay, angle, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)))
+    else:
+        d.text(xy, text, font=font, **kw)
     boxes = getattr(_NOTE, "boxes", None)
     if boxes is not None:
-        boxes.append((key, d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))))
+        boxes.append((key, box))
 
 
 def words(p: dict, has_logo: bool = False, logo_img: Image.Image | None = None) -> list[dict]:
@@ -268,7 +288,10 @@ def words(p: dict, has_logo: bool = False, logo_img: Image.Image | None = None) 
         compose(np.zeros((H, W, 3), np.float32), None, p, logo)
     finally:
         _NOTE.boxes = None
-    return [{"key": k, "x0": b[0] / W, "y0": b[1] / H, "x1": b[2] / W, "y1": b[3] / H} for k, b in found]
+    turn = {k: m.get("r", 0) for k, m in (p.get("moves") or {}).items()}
+    turn |= {f"el:{e['id']}": e.get("angle", 0) for e in (p.get("elements") or p.get("extras") or [])}
+    return [{"key": k, "x0": b[0] / W, "y0": b[1] / H, "x1": b[2] / W, "y1": b[3] / H} | ({"r": turn[k]} if turn.get(k) else {})
+            for k, b in found]
 
 
 def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos=None) -> np.ndarray:

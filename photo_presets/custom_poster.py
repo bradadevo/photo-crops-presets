@@ -9,6 +9,8 @@ you like) lets words read; then the pieces, in order:
 - rule: a thin line
 - logo: one of your logos
 
+Any piece but the photo card turns to any angle (degrees, clockwise); text can be in any of fonts.FONTS.
+
 Any piece can sit behind the players (they stand in front of it: the "pop-out"), or in front.
 Each is placed by its middle (shares of the poster) and sized in the poster's unit (see
 poster._unit), so it fits any shape. Drawn here for the preview and the export alike.
@@ -20,6 +22,8 @@ import re
 
 import numpy as np
 from PIL import Image, ImageDraw
+
+from photo_presets import fonts
 
 TYPES = ("text", "badge", "box", "rule", "logo", "card", "stripes")
 TEXT_STYLES = ("heavy", "bold", "clean", "spaced", "outline", "banner")
@@ -45,9 +49,13 @@ def clean(elements) -> list[dict]:
         t = e["type"]
         c = {"id": re.sub(r"[^a-z0-9]", "", str(e.get("id") or f"e{i}").lower())[:12] or f"e{i}", "type": t,
              "x": _num(e.get("x"), -0.2, 1.2, 0.5), "y": _num(e.get("y"), -0.2, 1.2, 0.5), "behind": bool(e.get("behind"))}
+        if t != "card" and fonts.angle_ok(e.get("angle", 0)):
+            c["angle"] = fonts.angle_ok(e["angle"])
         if t == "text":
             c.update(text=str(e.get("text", ""))[:60], style=e.get("style") if e.get("style") in TEXT_STYLES else "bold",
                      size=_num(e.get("size"), 0.01, 0.5, 0.06), color=_hex(e.get("color"), "#ffffff"))
+            if fonts.name_ok(e.get("font")):
+                c["font"] = e["font"]
         elif t == "badge":
             c.update(text=str(e.get("text", "7"))[:4], size=_num(e.get("size"), 0.02, 0.3, 0.07),
                      color=_hex(e.get("color"), ""), ink=_hex(e.get("ink"), "#ffffff"))
@@ -111,6 +119,11 @@ def _pieces(out, pic, m, els, W, H, u, color, logos, over, shadowed, say, font, 
 
 
 def _piece(lay: Image.Image, e: dict, W: int, H: int, u: float, team: tuple, logos, say, font, boxes) -> None:
+    if e.get("angle"):  # drawn on its own, then turned around its middle
+        own = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        _piece(own, {**e, "angle": 0}, W, H, u, team, logos, say, font, boxes)
+        lay.alpha_composite(fonts.turned(own, e["angle"], (e["x"] * W, e["y"] * H)))
+        return
     d = ImageDraw.Draw(lay)
     cx, cy = e["x"] * W, e["y"] * H
     key = f"el:{e['id']}"
@@ -123,7 +136,7 @@ def _piece(lay: Image.Image, e: dict, W: int, H: int, u: float, team: tuple, log
         if style in ("heavy", "bold", "spaced", "outline", "banner"):
             text = text.upper()
         idx = {"heavy": 8, "bold": 0, "clean": 2, "spaced": 5, "outline": 8, "banner": 0}[style]
-        f = font(idx, px)
+        f = fonts.load(e.get("font"), px) or font(idx, px)
         if style == "spaced":
             text = " ".join(text)  # (hair spaces: the letters set apart)
         if style == "banner" and text:

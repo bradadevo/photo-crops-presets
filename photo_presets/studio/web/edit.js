@@ -157,6 +157,64 @@ const SLIDER_TIPS = {
 };
 const TEXT_STYLES = [["clean", "Clean"], ["bold", "Bold"], ["spaced", "Spaced"], ["banner", "Banner"]];
 const TEXT_COLORS = ["#ffffff", "#111111", "#f5c443", "#1f2a44", "#e63946", "#86d0d8"];
+/* The fonts any word can be set in (fonts.py), each shown in its own face, as it's exported */
+const FONTS = [["avenir-heavy", "Avenir Heavy"], ["avenir-bold", "Avenir Bold"], ["avenir-light", "Avenir Light"], ["condensed", "Condensed"],
+  ["sport-italic", "Sport Italic"], ["futura", "Futura"], ["futura-tall", "Futura Tall"], ["impact", "Impact"], ["din", "DIN Condensed"],
+  ["gill-light", "Gill Sans Light"], ["rockwell", "Varsity Slab"], ["copperplate", "Copperplate"], ["didot", "Didot"], ["bodoni", "Bodoni"],
+  ["baskerville", "Baskerville Italic"], ["script", "Script"], ["brush", "Brush Script"]];
+(() => {
+  const css = document.createElement("style");
+  css.textContent = FONTS.map(([k]) => `@font-face{font-family:"app-${k}";src:url("/font/${k}.ttf") format("truetype");font-display:swap}`).join("");
+  document.head.appendChild(css);
+})();
+const fontCss = (k) => (k ? `font-family:'app-${k}';font-weight:normal;font-style:normal;` : "");
+/* A font picker: data-font-pick on the grid, each button's data-v the font ("" for the style's own) */
+const fontPicker = (cur, auto, attr = "") => `<label class="sub-label">Font</label><div class="font-grid" data-font-pick ${attr}>
+  <button data-v="" class="auto${cur ? "" : " on"}" title="${esc(auto)}">${esc(auto)}</button>${FONTS.map(([k, l]) => `<button data-v="${k}" class="${cur === k ? "on" : ""}" style="${fontCss(k)}">${esc(l)}</button>`).join("")}</div>`;
+/* Turning a word or a piece: a slider (double-click: level) and quick turns */
+const angleControl = (v, attr = "") => `<div class="angle-ctl" ${attr}><div class="slider"><label title="Turn it to any angle · on the picture, drag its round handle (hold Shift for 15° steps) · double-click to level">Angle</label><output>${Math.round(v || 0)}°</output>
+  <input type="range" data-angle min="-180" max="180" step="1" value="${v || 0}"></div>
+  <div class="seg full small angle-quick">${[[-90, "↺ 90°"], [-15, "↺ 15°"], [0, "Level"], [15, "↻ 15°"], [90, "↻ 90°"]].map(([d, l]) => `<button data-turn="${d}" title="${d ? `Turn ${Math.abs(d)}° ${d > 0 ? "clockwise" : "counterclockwise"}` : "Straight again"}">${l}</button>`).join("")}</div></div>`;
+const normAngle = (a) => Math.round((((a + 180) % 360) + 360) % 360 - 180);
+/* Binds an angleControl in root: live(a) while sliding, commit(a) when let go or a quick turn is clicked */
+function bindAngle(root, get, live, commit) {
+  root?.querySelectorAll(".angle-ctl").forEach((box) => {
+    const r = box.querySelector("[data-angle]"), out = r.previousElementSibling;
+    r.oninput = () => { out.textContent = `${r.value}°`; live?.(+r.value); };
+    r.onchange = () => commit(+r.value);
+    r.ondblclick = () => commit(0);
+    box.querySelectorAll("[data-turn]").forEach((b) => b.onclick = () => commit(+b.dataset.turn ? normAngle(get() + +b.dataset.turn) : 0));
+  });
+}
+/* Dragging a round handle turns el around its middle: live(a) as it turns, done(a) when let go.
+   It snaps level (and to every 45°) when close; Shift turns in 15° steps. */
+function rotateDrag(el, e, start, live, done) {
+  e.preventDefault(); e.stopPropagation();
+  const b = el.getBoundingClientRect(), cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+  const a0 = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI;
+  let a = start;
+  const h = e.target;
+  h.setPointerCapture(e.pointerId);
+  h.onpointermove = (m) => {
+    a = normAngle(start + Math.atan2(m.clientY - cy, m.clientX - cx) * 180 / Math.PI - a0);
+    if (m.shiftKey) a = normAngle(Math.round(a / 15) * 15);
+    else { const n = Math.round(a / 45) * 45; if (Math.abs(a - n) < 3) a = normAngle(n); }
+    live(a);
+    showTurnTip(el, `${a}°`);
+  };
+  h.onpointerup = () => { h.onpointermove = h.onpointerup = null; hideTurnTip(); if (a !== start) done(a); };
+}
+let turnTipEl = null;
+function showTurnTip(el, text) {
+  turnTipEl ||= Object.assign(document.createElement("div"), { className: "turn-tip" });
+  if (!turnTipEl.isConnected) document.body.appendChild(turnTipEl);
+  const b = el.getBoundingClientRect();
+  turnTipEl.textContent = text;
+  turnTipEl.style.left = b.left + b.width / 2 + "px"; turnTipEl.style.top = Math.max(8, b.top - 34) + "px";
+}
+function hideTurnTip() { turnTipEl?.remove(); }
+/* The round handle that turns a word or piece: above it, or below it when it is at the very top */
+const turnHandle = (top) => `<span class="pc-r${top < 0.08 ? " below" : ""}" title="Drag to turn it · Shift: 15° steps"></span>`;
 const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
 
 let editSig = "";
@@ -190,6 +248,8 @@ function renderEdit(cur) {
       <div class="item-head"><textarea class="field text-in" rows="1" data-ti="${i}" placeholder="Type here">${esc(t.text)}</textarea><button class="icon-btn" data-del-text="${i}" title="Remove this text">${icon("trash")}</button></div>
       ${st.textSel === i ? `<div class="seg full small" data-style-of="${i}">${TEXT_STYLES.map(([v, l]) => `<button data-v="${v}" class="${t.style === v ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="slider"><label>Size</label><output>${Math.round(t.size * 100)}</output><input type="range" data-size-of="${i}" min="0.02" max="0.2" step="0.005" value="${t.size}"></div>
+      ${fontPicker(t.font, "Style's own", `data-font-of="${i}"`)}
+      ${angleControl(t.angle, `data-angle-of="${i}"`)}
       <div class="swatches" data-color-of="${i}">${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>` : ""}
       </div>`).join("")}</div>` : "",
     logo: st.tool === "logo" || (e.logos || []).length ? logoSection(e) : "",
@@ -355,6 +415,16 @@ function bindEditPane(cur, pane) {
     const i = +b.parentElement.dataset.styleOf;
     changeEdits(slotById(cur.id), (e) => { e.texts[i].style = b.dataset.v; });
   });
+  pane.querySelectorAll("[data-font-of] button").forEach((b) => b.onclick = () => {
+    const i = +b.parentElement.dataset.fontOf;
+    changeEdits(slotById(cur.id), (e) => { if (b.dataset.v) e.texts[i].font = b.dataset.v; else delete e.texts[i].font; });
+  });
+  pane.querySelectorAll("[data-angle-of]").forEach((box) => {
+    const i = +box.dataset.angleOf;
+    bindAngle(box.parentElement, () => slotById(cur.id).edits.texts[i].angle || 0,
+      (a) => { const el = $(`#texts .tx[data-i="${i}"]`); if (el) el.style.transform = `translate(-50%, -50%) rotate(${a}deg)`; },
+      (a) => changeEdits(slotById(cur.id), (e) => { if (a) e.texts[i].angle = a; else delete e.texts[i].angle; }));
+  });
   pane.querySelectorAll("[data-color-of] button").forEach((b) => b.onclick = () => {
     const i = +b.parentElement.dataset.colorOf;
     changeEdits(slotById(cur.id), (e) => { e.texts[i].color = b.dataset.v; });
@@ -475,7 +545,7 @@ function paintTexts(cur) {
   if (!box) return;
   const texts = cur.edits?.texts || [];
   box.innerHTML = texts.map((t, i) => `<div class="tx tx-${t.style}${st.tool === "text" && st.textSel === i ? " sel" : ""}" data-i="${i}"
-    style="left:${t.x * 100}%;top:${t.y * 100}%;font-size:calc(var(--fw) * ${t.size});color:${esc(t.color)}">${esc(t.text)}</div>`).join("")
+    style="left:${t.x * 100}%;top:${t.y * 100}%;font-size:calc(var(--fw) * ${t.size});color:${esc(t.color)};${fontCss(t.font)}${t.angle ? `transform:translate(-50%, -50%) rotate(${t.angle}deg);` : ""}">${esc(t.text)}${st.tool === "text" && st.textSel === i ? turnHandle(t.y - t.size) : ""}</div>`).join("")
     + (cur.edits?.logos || []).map((l, i) => `<img class="lg${st.tool === "logo" && st.logoSel === i ? " sel" : ""}" data-li="${i}" alt="" draggable="false"
       src="/img/logo/${enc(l.id)}/${l.color === "auto" ? autoColor(l) : l.color}.png" style="left:${l.x * 100}%;top:${l.y * 100}%;width:${l.size * 100}%;opacity:${l.opacity}">`).join("");
 }
@@ -523,6 +593,16 @@ function bindPicks(cur) {
     f.addEventListener("dblclick", () => clearTimeout(wait));
   }
 }
+/* A layout word's own place, size, font and angle (the poster's moves) */
+function setMove(cur, k, fn) {
+  changeEdits(slotById(cur.id), (ed) => {
+    const m = { x: 0, y: 0, s: 1, ...((ed.poster.moves || {})[k] || {}) };
+    fn(m);
+    if (!m.r) delete m.r;
+    if (!m.f) delete m.f;
+    ed.poster.moves = { ...(ed.poster.moves || {}), [k]: m };
+  });
+}
 /* The poster's words on the picture: click one to type over it (its box in the panel opens, selected). */
 let wordsKey = "", wordsList = [], wordsTurn = 0;
 async function paintWords(cur) {
@@ -545,7 +625,7 @@ async function paintWords(cur) {
   const live = st.tool === "poster";
   box.innerHTML = wordsList.filter((w) => !w.key.startsWith("el:")).map((w) => w.key === "logo"
     ? `<div class="pc pc-logo${st.pieceSel === "logo" ? " sel" : ""}" data-pc="logo" title="Drag the logo anywhere · its corner resizes it · Delete takes it off" style="${place(w)}">${live ? `<span class="pc-h"></span>` : ""}</div>`
-    : `<div class="pc pc-word${st.pieceSel === "w:" + w.key ? " sel" : ""}" data-pc="w:${w.key}" data-pk="${w.key}" role="button" aria-label="${esc(label(w.key))}: click to type, drag to move" style="${place(w)}">${live && st.pieceSel === "w:" + w.key ? `<span class="pc-h"></span>` : ""}</div>`).join("");
+    : `<div class="pc pc-word${st.pieceSel === "w:" + w.key ? " sel" : ""}" data-pc="w:${w.key}" data-pk="${w.key}" role="button" aria-label="${esc(label(w.key))}: click to type, drag to move, its round handle turns it" style="${place(w)}${w.r ? `;rotate:${w.r}deg` : ""}">${live && st.pieceSel === "w:" + w.key ? `<span class="pc-h"></span>${turnHandle(w.y0)}` : ""}</div>`).join("");
   f.appendChild(box);
   // a word: click to type it, drag to move it, its corner to make it bigger or smaller
   box.querySelectorAll(".pc-word").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
@@ -559,12 +639,13 @@ async function paintWords(cur) {
       } else { m.x += dx / r.width; m.y += dy / r.height; }
       ed.poster.moves = { ...(ed.poster.moves || {}), [k]: m };
     });
-  }, () => {  // only a click: its box in the panel, ready to type
+  }, () => {  // only a click: its box in the panel (and its style), ready to type
     const k = el.dataset.pk;
     st.focusField = { k, until: Date.now() + 2500 };
+    if (st.stylePk !== k) { st.stylePk = k; st.colorPk = null; if (st.tool === "poster") { editSig = ""; renderTabs(); } }
     if (st.tool !== "poster") openPart(cur, "poster");
     focusPosterField(k);
-  }));
+  }, (a) => setMove(cur, el.dataset.pk, (m) => { m.r = a; })));
   paintPieces(cur, f, wordsList);  // (pieces added on top of the layout: stripes, text…)
   box.querySelectorAll(".pc-logo").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
     const w = wordsList.find((x) => x.key === "logo");
@@ -609,7 +690,12 @@ function bindTexts(cur) {
     if (!el || st.tool !== "text") return;
     e.preventDefault();
     const i = +el.dataset.i, r = f.getBoundingClientRect();
-    if (st.textSel !== i) { st.textSel = i; editSig = ""; renderTabs(); box.querySelectorAll(".tx").forEach((x) => x.classList.toggle("sel", +x.dataset.i === i)); }
+    if (e.target.closest(".pc-r")) {  // its round handle: turn it
+      const a0 = slotById(cur.id).edits.texts[i].angle || 0;
+      return rotateDrag(el, e, a0, (a) => { el.style.transform = `translate(-50%, -50%) rotate(${a}deg)`; },
+        (a) => changeEdits(slotById(cur.id), (ed) => { if (a) ed.texts[i].angle = a; else delete ed.texts[i].angle; }));
+    }
+    if (st.textSel !== i) { st.textSel = i; editSig = ""; renderTabs(); box.querySelectorAll(".tx").forEach((x) => x.classList.toggle("sel", +x.dataset.i === i)); box.querySelectorAll(".pc-r").forEach((x) => x.remove()); const tt = slotById(cur.id).edits.texts[i]; el.insertAdjacentHTML("beforeend", turnHandle(tt.y - tt.size)); }
     const s0 = slotById(cur.id), t0 = s0.edits.texts[i];
     const start = { x: e.clientX, y: e.clientY, tx: t0.x, ty: t0.y };
     let moved = false, pos = { x: t0.x, y: t0.y };
@@ -708,7 +794,12 @@ function posterSection(e) {
         <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
       ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><div class="fld-row"><input class="field poster-in" data-pk="${k}" value="${esc(p[k] ?? "")}" placeholder="(left off the poster)">
         ${k === "away_score" ? "" : `<button class="color-dot${p.colors?.[k] ? "" : " auto"}" data-color-pk="${k}" style="${p.colors?.[k] ? `background:${p.colors[k]}` : ""}" title="Its color" aria-label="Color of ${esc(l)}"></button>`}
+        ${k === "away_score" ? "" : `<button class="aa-btn${st.stylePk === k ? " on" : ""}${p.moves?.[k]?.f || p.moves?.[k]?.r ? " set" : ""}" data-style-pk="${k}" title="Its font, size and angle" aria-label="Style of ${esc(l)}">Aa</button>`}
         <button class="icon-btn" data-clear-pk="${k}" title="Take this off the poster" ${off(!(p[k] ?? ""), "It's already off the poster: type in the box to put it back.")}>${icon("x")}</button></div>
+        ${st.stylePk === k ? `<div class="word-style" data-word-style="${k}">
+          <div class="slider"><label title="Or drag its corner on the picture">Size</label><output>${Math.round((p.moves?.[k]?.s || 1) * 100)}%</output><input type="range" data-word-size min="0.3" max="4" step="0.05" value="${p.moves?.[k]?.s || 1}"></div>
+          ${fontPicker(p.moves?.[k]?.f, "Layout's own")}${angleControl(p.moves?.[k]?.r)}
+          <p class="notes">Drag it on the picture to place it; its round handle turns it.</p></div>` : ""}
         ${st.colorPk === k ? `<div class="swatches word-colors" data-word-colors="${k}"><button data-v="" class="auto${p.colors?.[k] ? "" : " on"}" title="As the layout has it" aria-label="As the layout has it">A</button>${WORD_COLORS.map((c) => `<button data-v="${c}" class="${p.colors?.[k] === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}
           <label class="pick-own" title="Any color"><input type="color" data-own-color="${k}" value="${p.colors?.[k] || "#ffffff"}"></label></div>` : ""}</div>`).join("")}
       <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
@@ -790,6 +881,19 @@ function bindPosterSection(cur, pane) {
   });
   pane.querySelectorAll("[data-color-pk]").forEach((b) => b.onclick = () => {  // its palette opens under it
     st.colorPk = st.colorPk === b.dataset.colorPk ? null : b.dataset.colorPk; editSig = ""; renderTabs();
+  });
+  pane.querySelectorAll("[data-style-pk]").forEach((b) => b.onclick = () => {  // its font, size and angle open under it
+    st.stylePk = st.stylePk === b.dataset.stylePk ? null : b.dataset.stylePk; st.colorPk = null; editSig = ""; renderTabs();
+  });
+  pane.querySelectorAll("[data-word-style]").forEach((box) => {
+    const k = box.dataset.wordStyle, mv = () => s0().edits.poster?.moves?.[k] || {};
+    const word = () => document.querySelector(`.pc-word[data-pk="${k}"]`);
+    box.querySelectorAll("[data-font-pick] button").forEach((b) => b.onclick = () => setMove(cur, k, (m) => { m.f = b.dataset.v; }));
+    const size = box.querySelector("[data-word-size]");
+    size.oninput = () => { size.previousElementSibling.textContent = `${Math.round(size.value * 100)}%`; };
+    size.onchange = () => setMove(cur, k, (m) => { m.s = +size.value; });  // (grown from where the layout anchors it)
+    size.ondblclick = () => setMove(cur, k, (m) => { m.s = 1; });
+    bindAngle(box, () => mv().r || 0, (a) => { const el = word(); if (el) el.style.rotate = `${a}deg`; }, (a) => setMove(cur, k, (m) => { m.r = a; }));
   });
   const wordColor = (k, c) => set((p) => { p.colors ||= {}; if (c) p.colors[k] = c; else delete p.colors[k]; });
   pane.querySelectorAll("[data-word-colors] button").forEach((b) => b.onclick = () => wordColor(b.parentElement.dataset.wordColors, b.dataset.v));

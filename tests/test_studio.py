@@ -124,3 +124,16 @@ def test_the_page_is_the_one_the_app_started_with(client):
     r = client.get("/static/app.js")
     assert r.status_code == 200 and r.content == server.PAGE["app.js"]
     assert client.get("/static/nope.js").status_code == 404
+
+
+def test_page_scripts_do_not_declare_the_same_name_twice():
+    """The page's scripts share one scope: a name declared in two of them stops the page loading."""
+    import re
+    from collections import Counter
+    from pathlib import Path
+    web = Path(__file__).parents[1] / "photo_presets/studio/web"
+    names = Counter()
+    for f in web.glob("*.js"):
+        for n in set(re.findall(r"^(?:const|let|var|function|async function|class) ([A-Za-z_$][\w$]*)", f.read_text(), re.M)):
+            names[n] += 1
+    assert [n for n, c in names.items() if c > 1] == []

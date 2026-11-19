@@ -48,12 +48,15 @@ function pieceMenu(e, cur, id) {
   if (!p) return;
   st.pieceSel = id;
   const [back, front] = pieceEnds(p, id), behindOk = canBehind(p);
+  const it0 = (p[PK(p)] || []).find((x) => x.id === id);
   const items = [["front", "Bring to front", "In front of everything", front], ["forward", "Bring forward", "One step toward the front", front],
     ["backward", "Send backward", behindOk ? "One step back (behind the players, after your other pieces)" : "One step back", back],
     ["back", "Send to back", behindOk ? "Behind everything, the players too" : "Behind your other pieces", back]];
   const m = document.createElement("div");
   m.className = "menu ctx-menu";
   m.innerHTML = items.map(([k, l, sub, no]) => `<button data-layer="${k}" ${no ? "disabled" : ""}><span>${l}</span><small>${sub}</small></button>`).join("")
+    + (it0?.type === "card" ? "" : `<hr><button data-turn="90"><span>Turn 90° ↻</span><small>Stand it up the other way</small></button><button data-turn="-90"><span>Turn 90° ↺</span></button>
+      <button data-turn="0" ${it0?.angle ? "" : "disabled"}><span>Make it level</span></button>`)
     + `<hr><button data-ctx="dup"><span>Duplicate</span></button><button data-ctx="del"><span>Delete</span></button>`;
   document.body.appendChild(m);
   const r = m.getBoundingClientRect();
@@ -68,6 +71,7 @@ function pieceMenu(e, cur, id) {
     edit((pp) => { layerPiece(pp, id, b.dataset.layer); });
     if (said) toast(said);
   });
+  m.querySelectorAll("[data-turn]").forEach((b) => b.onclick = () => { close(); editSig = ""; setAngle(cur, id, +b.dataset.turn ? normAngle((it0?.angle || 0) + +b.dataset.turn) : 0); });
   m.querySelector('[data-ctx="dup"]').onclick = () => {
     const nid = newId();
     edit((pp) => { const el = pp[PK(pp)].find((x) => x.id === id); if (el) pp[PK(pp)].push({ ...clone(el), id: nid, x: Math.min(0.95, el.x + 0.04), y: Math.min(0.95, el.y + 0.04) }); });
@@ -123,7 +127,7 @@ function customSection(p) {
     props = `<div class="piece-props"><div class="fld"><label>${esc(PIECE_NAMES[t])}</label>
       ${t === "text" ? `<textarea class="field" rows="1" data-prop-text placeholder="Type here">${esc(sel.text)}</textarea>
         <div class="seg full small" data-prop-style>${PIECE_STYLES.map(([v, l]) => `<button data-v="${v}" class="${sel.style === v ? "on" : ""}">${l}</button>`).join("")}</div>
-        ${sl("size", "Size", 0.015, 0.4, 0.005, sel.size)}${colors("color", sel.color)}` : ""}
+        ${sl("size", "Size", 0.015, 0.4, 0.005, sel.size)}${colors("color", sel.color)}${fontPicker(sel.font, "Style's own")}` : ""}
       ${t === "badge" ? `<input class="field" data-prop-text value="${esc(sel.text)}" maxlength="4" placeholder="Number">
         ${sl("size", "Size", 0.03, 0.25, 0.005, sel.size)}<label class="sub-label">Circle</label>${colors("color", sel.color, "Team color")}<label class="sub-label">Number</label>${colors("ink", sel.ink)}` : ""}
       ${t === "box" ? `${sl("w", "Width", 0.05, 1.1, 0.01, sel.w)}${sl("h", "Height", 0.01, 1, 0.005, sel.h)}${sl("opacity", "Strength", 0.05, 1, 0.05, sel.opacity, "%")}
@@ -138,6 +142,7 @@ function customSection(p) {
         ${sl("w", "Width", 0.01, 1.2, 0.01, sel.w)}${sl("h", "Height", 0.005, 1.2, 0.005, sel.h)}${sl("opacity", "Strength", 0.05, 1, 0.05, sel.opacity, "%")}` : ""}
       ${t === "card" ? `${sl("w", "Width", 0.2, 1, 0.01, sel.w)}${sl("h", "Height", 0.2, 1, 0.01, sel.h)}${toggle("border", "White edge")}
         <p class="notes">The photo sits in the card, the player breaking out of its top. Drag the photo in it to move it; Photo zoom is above.</p>` : ""}
+      ${t === "card" ? "" : angleControl(sel.angle)}
       ${t === "card" || p.template === "spotlight" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
       <div class="inline piece-acts"><button class="btn" data-piece-dup>${icon("copy")} Duplicate</button><button class="btn ghost" data-piece-del>${icon("trash")} Delete</button></div>
       </div></div>`;
@@ -238,18 +243,29 @@ function bindCustom(cur, pane, set) {
   box.querySelectorAll("[data-prop-own]").forEach((inp) => inp.onchange = () => piece((el) => setColor(el, inp.dataset.propOwn, inp.value)));
   box.querySelectorAll("[data-prop-check]").forEach((c) => c.onchange = () => piece((el) => { el[c.dataset.propCheck] = c.checked; }));
   box.querySelectorAll("[data-prop-logo] button").forEach((b) => b.onclick = () => piece((el) => { el.logo = b.dataset.v; }));
+  box.querySelectorAll("[data-font-pick] button").forEach((b) => b.onclick = () => piece((el) => { if (b.dataset.v) el.font = b.dataset.v; else delete el.font; }));
+  const id = st.pieceSel;
+  bindAngle(box.querySelector(".piece-props"), () => (s0().edits.poster?.[PK(s0().edits.poster)] || []).find((x) => x.id === id)?.angle || 0,
+    (a) => { const el = document.querySelector(`.pieces-layer .pc[data-pc="${id}"]`); if (el) el.style.rotate = `${a}deg`; },
+    (a) => setAngle(cur, id, a));
 }
 
 /* Dragging something on the poster: moved (snapping to the middle) or, by its corner, resized. When let
    go, done(dx, dy, resized, kx, ky, frame box) in screen pixels; nothing if it was only a click. */
-function dragPiece(el, f, cur, done, clicked) {
+function dragPiece(el, f, cur, done, clicked, turned) {
   el.onpointerdown = (e) => {
+    if (e.button === 2 || e.ctrlKey) return;  // (right-click: its menu)
     e.preventDefault(); e.stopPropagation();
     if (st.tool !== "poster") { if (el.dataset.pc) st.pieceSel = el.dataset.pc; if (clicked) clicked(); else openPart(cur, "poster"); return; }
+    if (turned && e.target.closest(".pc-r")) {  // its round handle: turn it
+      return rotateDrag(el, e, parseFloat(el.style.rotate) || 0, (a) => { el.style.rotate = `${a}deg`; }, turned);
+    }
     if (el.dataset.pc && st.pieceSel !== el.dataset.pc) {  // chosen: Delete takes it off, the panel shows it
       st.pieceSel = el.dataset.pc;
       f.querySelectorAll(".pc").forEach((x) => x.classList.toggle("sel", x === el));
+      f.querySelectorAll(".pc-r").forEach((x) => x.remove());
       if (!el.querySelector(".pc-h")) el.insertAdjacentHTML("beforeend", `<span class="pc-h"></span>`);
+      if (turned) el.insertAdjacentHTML("beforeend", turnHandle(el.offsetTop / f.offsetHeight));
     }
     const resize = !!e.target.closest(".pc-h");
     const r = f.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
@@ -279,8 +295,9 @@ function paintPieces(cur, f, boxes) {
   layer.className = "pwords pieces-layer" + (st.tool === "poster" ? " live" : "");
   layer.innerHTML = boxes.filter((w) => w.key.startsWith("el:")).map((w) => {
     const id = w.key.slice(3), on = id === st.pieceSel;
-    return `<div class="pc${on ? " sel" : ""}" data-pc="${id}" style="left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%">
-      ${on ? `<span class="pc-h" data-pc-h="${id}" title="Drag to make it bigger or smaller"></span>` : ""}</div>`;
+    const turns = (p?.[PK(p)] || []).find((x) => x.id === id)?.type !== "card";
+    return `<div class="pc${on ? " sel" : ""}" data-pc="${id}" style="left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%${w.r ? `;rotate:${w.r}deg` : ""}">
+      ${on ? `<span class="pc-h" data-pc-h="${id}" title="Drag to make it bigger or smaller"></span>${turns ? turnHandle(w.y0) : ""}` : ""}</div>`;
   }).join("");
   f.appendChild(layer);
   layer.querySelectorAll(".pc").forEach((el) => el.oncontextmenu = (e) => pieceMenu(e, slotById(cur.id), el.dataset.pc));
@@ -289,6 +306,9 @@ function paintPieces(cur, f, boxes) {
     e.preventDefault(); e.stopPropagation();
     const id = el.dataset.pc, resize = !!e.target.closest(".pc-h");
     if (st.tool !== "poster") { st.pieceSel = id; openPart(cur, "poster"); return; }
+    if (e.target.closest(".pc-r")) {  // its round handle: turn it to any angle
+      return rotateDrag(el, e, parseFloat(el.style.rotate) || 0, (a) => { el.style.rotate = `${a}deg`; }, (a) => setAngle(cur, id, a));
+    }
     if (st.pieceSel !== id) { st.pieceSel = id; editSig = ""; renderTabs(); layer.querySelectorAll(".pc").forEach((x) => x.classList.toggle("sel", x.dataset.pc === id)); }
     const r = f.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
     let moved = false, dx = 0, dy = 0;
@@ -317,6 +337,13 @@ function paintPieces(cur, f, boxes) {
         if (it.type === "box" || it.type === "card" || it.type === "stripes") { it.w *= kx; it.h *= ky; } else if (it.type === "rule") { it.w *= kx; } else { it.size *= k; }
       }, { keepPane: false });
     };
+  });
+}
+
+function setAngle(cur, id, a) {
+  changeEdits(slotById(cur.id), (ed) => {
+    const it = (ed.poster?.[PK(ed.poster)] || []).find((x) => x.id === id);
+    if (it) { if (a) it.angle = a; else delete it.angle; }
   });
 }
 

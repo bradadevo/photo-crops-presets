@@ -155,3 +155,57 @@ def test_a_piece_added_to_a_layout_can_go_behind_the_player():
     assert mid[0] > 0.8 and mid[1] < 0.2  # on top: red over the player
     assert behind[h // 2, w // 2][0] < 0.7  # behind: the player shows in front
     assert behind[h // 2, w // 10][0] > 0.8 and side[0] > 0.8  # beside the player: the stripe either way
+
+
+# -- any word in any font, any word or piece at any angle -------------------------------------------
+
+def test_fonts_all_load_and_match_the_page():
+    import re
+    from pathlib import Path
+    from photo_presets import fonts
+    for k in fonts.FONTS:
+        assert fonts.load(k, 40) is not None, k
+        assert fonts.font_file(k)[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true"), k
+    js = (Path(fonts.__file__).parent / "studio/web/edit.js").read_text()
+    block = js[js.index("const FONTS = ["):js.index("]];", js.index("const FONTS = [")) + 3]
+    assert re.findall(r'\["([a-z-]+)", "([^"]+)"\]', block) == [(k, v[0]) for k, v in fonts.FONTS.items()]
+    assert fonts.angle_ok(190) == -170 and fonts.angle_ok("x") == 0 and fonts.load("nope", 20) is None
+
+
+def test_layout_word_font_and_angle():
+    from photo_presets import poster
+    p = poster.clean({"template": "gameday", "moves": {"title": {"r": 30, "f": "script"}, "line": {"f": "comic"}}})
+    assert p["moves"] == {"title": {"x": 0, "y": 0, "s": 1, "r": 30.0, "f": "script"}}  # (no such font: dropped)
+    w = {x["key"]: x for x in poster.words(p)}
+    assert w["title"]["r"] == 30.0 and "r" not in w["line"]
+    arr = np.full((500, 400, 3), 0.4, np.float32)
+    flat = poster.compose(arr, None, poster.clean({"template": "gameday"}))
+    turned = poster.compose(arr, None, p)
+    assert np.abs(flat - turned).mean() > 0.003
+
+
+def test_custom_piece_angle_and_font():
+    from photo_presets import custom_poster, poster
+    els = custom_poster.clean([{"type": "stripes", "angle": 45, "x": 0.5, "y": 0.5, "w": 0.6, "h": 0.1},
+                               {"type": "text", "text": "HI", "font": "impact", "angle": -90},
+                               {"type": "card", "angle": 20}])
+    assert els[0]["angle"] == 45 and els[1]["font"] == "impact" and els[1]["angle"] == -90 and "angle" not in els[2]
+    arr = np.full((500, 400, 3), 0.4, np.float32)
+    base = {"template": "custom", "fade_top": 0, "fade_bottom": 0}
+    flat = poster.compose(arr, None, poster.clean({**base, "elements": [{**els[0], "angle": 0}]}))
+    diag = poster.compose(arr, None, poster.clean({**base, "elements": [els[0]]}))
+    H, W = flat.shape[:2]
+    # a diagonal band: it reaches above and below where the flat one sits, in its middle column
+    col = lambda img: np.abs(img[:, W // 2 - 60] - 0.4).sum(1) > 0.05
+    assert col(diag).sum() > col(flat).sum() * 1.2
+    assert poster.words(poster.clean({**base, "elements": [els[0]]}))[0]["r"] == 45
+
+
+def test_photo_text_font_and_angle():
+    from photo_presets import edits
+    e = edits.clean({"texts": [{"text": "GO", "font": "didot", "angle": 400, "size": 0.1}, {"text": "x", "font": "bad"}]})
+    assert e["texts"][0]["font"] == "didot" and e["texts"][0]["angle"] == 40 and "font" not in e["texts"][1]
+    arr = np.zeros((300, 300, 3), np.float32)
+    a = edits.draw_texts(arr, [{**e["texts"][0], "angle": 0}])
+    b = edits.draw_texts(arr, e["texts"][:1])
+    assert a.max() > 0.5 and b.max() > 0.5 and not np.allclose(a, b)

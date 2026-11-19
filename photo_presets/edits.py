@@ -23,6 +23,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from photo_presets import fonts
+
 FONT = "/System/Library/Fonts/Avenir Next.ttc"
 FACES = {"bold": 8, "clean": 2, "spaced": 5, "banner": 0}  # Heavy, Demi Bold, Medium, Bold
 TRACKING = {"bold": 0.04, "clean": 0.0, "spaced": 0.28, "banner": 0.06}  # letter spacing, in em
@@ -150,7 +152,7 @@ def text_layer(size: tuple[int, int], t: dict) -> Image.Image:
         words = words.upper()
     lines = words.split("\n") or [""]
     px = max(6, int(float(t.get("size", 0.06)) * w))
-    font = _font(style, px)
+    font = fonts.load(t.get("font"), px) or _font(style, px)
     track = TRACKING.get(style, 0.0) * px
     line_h = px * 1.15
     widths = [_line_width(font, line, track) for line in lines]
@@ -176,6 +178,8 @@ def text_layer(size: tuple[int, int], t: dict) -> Image.Image:
                 x += font.getlength(ch) + track
         else:
             d.text((x, y), line, font=font, fill=color, anchor="la")
+    if t.get("angle"):  # turned around its middle (the shadow still falls straight down)
+        layer, ink = (fonts.turned(x, float(t["angle"]), (cx, cy)) for x in (layer, ink))
     if style != "banner":  # a soft shadow so it reads on any picture
         alpha = ink.getchannel("A").filter(ImageFilter.GaussianBlur(px * 0.12))
         shadow = Image.new("RGBA", size, (0, 0, 0, 0))
@@ -302,5 +306,8 @@ def clean(edits: dict | None) -> dict:
         out["texts"] = [{"text": str(t.get("text", ""))[:200], "x": float(t.get("x", 0.5)), "y": float(t.get("y", 0.5)),
                          "size": float(np.clip(float(t.get("size", 0.06)), 0.01, 0.4)),
                          "style": t.get("style") if t.get("style") in FACES else "clean",
-                         "color": str(t.get("color", "#ffffff"))[:9]} for t in e["texts"]][:8]
+                         "color": str(t.get("color", "#ffffff"))[:9]}
+                        | ({"font": t["font"]} if fonts.name_ok(t.get("font")) else {})
+                        | ({"angle": fonts.angle_ok(t["angle"])} if fonts.angle_ok(t.get("angle", 0)) else {})
+                        for t in e["texts"]][:8]
     return out

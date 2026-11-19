@@ -702,6 +702,16 @@ def static(name: str):
                     headers={"Cache-Control": "no-store"})
 
 
+@app.get("/font/{key}.ttf")
+def font_file(key: str):
+    """One of the fonts words can be set in, for the page to show it as it's exported."""
+    from photo_presets import fonts
+    data = fonts.font_file(key)
+    if data is None:
+        raise HTTPException(404)
+    return Response(data, media_type="font/ttf", headers={"Cache-Control": "max-age=86400"})
+
+
 @app.post("/api/restart")
 def restart():
     """Restarts the app with the newer version (the looks are saved first, and come back)."""
