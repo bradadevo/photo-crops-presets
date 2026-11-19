@@ -539,7 +539,7 @@ async function paintWords(cur) {
   const place = (w) => `left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%`;
   box.classList.add("pieces-layer");
   const live = st.tool === "poster";
-  box.innerHTML = wordsList.map((w) => w.key === "logo"
+  box.innerHTML = wordsList.filter((w) => !w.key.startsWith("el:")).map((w) => w.key === "logo"
     ? `<div class="pc pc-logo${st.pieceSel === "logo" ? " sel" : ""}" data-pc="logo" title="Drag the logo anywhere · its corner resizes it · Delete takes it off" style="${place(w)}">${live ? `<span class="pc-h"></span>` : ""}</div>`
     : `<div class="pc pc-word${st.pieceSel === "w:" + w.key ? " sel" : ""}" data-pc="w:${w.key}" data-pk="${w.key}" role="button" aria-label="${esc(label(w.key))}: click to type, drag to move" style="${place(w)}">${live && st.pieceSel === "w:" + w.key ? `<span class="pc-h"></span>` : ""}</div>`).join("");
   f.appendChild(box);

@@ -14,6 +14,68 @@ const STRIPE_SETS = [["Red · Blue", ["#c8102e", "#0b3d91"]], ["Red · White · 
   ["Sky · White · Navy", ["#7dd3fc", "#ffffff", "#1f2a44"]], ["Team · White", ["team", "#ffffff"]], ["Team · Gold", ["team", "#d4af37"]]];
 const PIECE_STYLES = [["heavy", "Heavy"], ["bold", "Bold"], ["clean", "Clean"], ["spaced", "Spaced"], ["outline", "Outline"], ["banner", "Banner"]];
 const newId = () => "p" + Math.random().toString(36).slice(2, 8);
+/* The poster's pieces from back to front: those behind the players, the players, those in front.
+   (Spotlight's players are in its card: there, the pieces are only ordered among themselves.) */
+const canBehind = (p) => p?.template !== "spotlight";
+function pieceStack(p) {
+  const els = p?.[PK(p)] || [];
+  if (!canBehind(p)) return els.map((e) => e.id);
+  return [...els.filter((e) => e.behind).map((e) => e.id), "PLAYERS", ...els.filter((e) => !e.behind).map((e) => e.id)];
+}
+/* Moves a piece: "forward", "backward", "front" (in front of everything) or "back" (behind everything,
+   the players too). Returns where it ended up, in words, or null when it couldn't move. */
+function layerPiece(p, id, how) {
+  const stack = pieceStack(p), i = stack.indexOf(id);
+  if (i < 0) return null;
+  const j = { forward: i + 1, backward: i - 1, front: stack.length - 1, back: 0 }[how];
+  if (j < 0 || j >= stack.length || j === i) return null;
+  stack.splice(i, 1); stack.splice(j, 0, id);
+  const els = p[PK(p)], players = stack.indexOf("PLAYERS");
+  p[PK(p)] = stack.filter((x) => x !== "PLAYERS").map((x) => els.find((e) => e.id === x));
+  if (players >= 0) p[PK(p)].forEach((e) => { e.behind = stack.indexOf(e.id) < players; });
+  const el = p[PK(p)].find((e) => e.id === id);
+  return players < 0 ? "Moved" : el.behind ? "Behind the players" : "In front of the players";
+}
+function pieceEnds(p, id) {  // [at the very back, at the very front]
+  const stack = pieceStack(p), i = stack.indexOf(id);
+  return [i === 0, i === stack.length - 1];
+}
+/* Right-click on a piece: move it forward or back, duplicate or delete it. */
+function pieceMenu(e, cur, id) {
+  e.preventDefault(); e.stopPropagation();
+  closeMenus(); document.querySelector(".ctx-menu")?.remove();
+  const p = cur.edits?.poster;
+  if (!p) return;
+  st.pieceSel = id;
+  const [back, front] = pieceEnds(p, id), behindOk = canBehind(p);
+  const items = [["front", "Bring to front", "In front of everything", front], ["forward", "Bring forward", "One step toward the front", front],
+    ["backward", "Send backward", behindOk ? "One step back (behind the players, after your other pieces)" : "One step back", back],
+    ["back", "Send to back", behindOk ? "Behind everything, the players too" : "Behind your other pieces", back]];
+  const m = document.createElement("div");
+  m.className = "menu ctx-menu";
+  m.innerHTML = items.map(([k, l, sub, no]) => `<button data-layer="${k}" ${no ? "disabled" : ""}><span>${l}</span><small>${sub}</small></button>`).join("")
+    + `<hr><button data-ctx="dup"><span>Duplicate</span></button><button data-ctx="del"><span>Delete</span></button>`;
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + "px";
+  m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + "px";
+  const close = () => { m.remove(); document.removeEventListener("pointerdown", away, true); };
+  const away = (ev) => { if (!m.contains(ev.target)) close(); };
+  setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+  const edit = (fn) => { close(); editSig = ""; changeEdits(slotById(cur.id), (ed) => fn(ed.poster)); };
+  m.querySelectorAll("[data-layer]").forEach((b) => b.onclick = () => {
+    const said = layerPiece(clone(p), id, b.dataset.layer);  // (where it ends up, said at once)
+    edit((pp) => { layerPiece(pp, id, b.dataset.layer); });
+    if (said) toast(said);
+  });
+  m.querySelector('[data-ctx="dup"]').onclick = () => {
+    const nid = newId();
+    edit((pp) => { const el = pp[PK(pp)].find((x) => x.id === id); if (el) pp[PK(pp)].push({ ...clone(el), id: nid, x: Math.min(0.95, el.x + 0.04), y: Math.min(0.95, el.y + 0.04) }); });
+    st.pieceSel = nid;
+  };
+  m.querySelector('[data-ctx="del"]').onclick = () => { st.pieceSel = null; edit((pp) => { pp[PK(pp)] = pp[PK(pp)].filter((x) => x.id !== id); }); };
+  document.addEventListener("keydown", function esc(k) { if (k.key === "Escape") { close(); document.removeEventListener("keydown", esc); } });
+}
 
 /* What "Add" puts on the poster (some add several pieces: a score banner is a panel and its words). */
 function piecesToAdd(kind, p) {
@@ -86,8 +148,8 @@ function customSection(p) {
     <div class="fld"><label>Stripes <small class="faint">· across the top; drag them anywhere</small></label><div class="stripe-sets">${STRIPE_SETS.map(([l, cs], i) => `<button data-stripe-set="${i}" title="${esc(l)}">${cs.map((c) => `<i style="background:${c === "team" ? p.color || "#1f2a44" : c}"></i>`).join("")}</button>`).join("")}</div></div>
     ${els.length ? `<div class="pieces">${els.map((el, i) => `<div class="piece-row${el.id === st.pieceSel ? " on" : ""}" data-piece="${el.id}">
       <button class="pick" data-pick-piece="${el.id}"><span class="kind">${esc(PIECE_NAMES[el.type])}</span>${el.type === "text" || el.type === "badge" ? `<span class="what">${esc(pieceLabel(el))}</span>` : el.type === "stripes" ? pieceLabel(el) : ""}${el.behind ? `<span class="behind" title="Behind the players">behind</span>` : ""}</button>
-      ${els.length > 1 ? `<button class="icon-btn" data-piece-up="${el.id}" title="Bring forward: in front of your other pieces" ${off(i === els.length - 1, "It's already on top of your other pieces. To put it behind the player, turn on Behind the players below.")}>▲</button>
-      <button class="icon-btn" data-piece-down="${el.id}" title="Send back: behind your other pieces" ${off(i === 0, "It's already under your other pieces. To put it behind the player, turn on Behind the players below.")}>▼</button>` : ""}
+      <button class="icon-btn" data-piece-up="${el.id}" title="Bring forward${canBehind(p) && el.behind ? " (in front of the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[1], "It's already at the very front.")}>▲</button>
+      <button class="icon-btn" data-piece-down="${el.id}" title="Send back${canBehind(p) && !el.behind ? " (behind the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[0], canBehind(p) ? "It's already at the very back, behind the players." : "It's already behind your other pieces.")}>▼</button>
       <button class="icon-btn" data-piece-x="${el.id}" title="Delete">${icon("x")}</button></div>`).join("")}</div>` : `<p class="notes">Nothing on it yet: add a title, a score banner, your logo…</p>`}
     ${props}
     ${custom ? "" : "<!--"}${sl("fade_top", "Dark fade at the top", 0, 0.9, 0.05, p.fade_top ?? 0.35, "%").replace('data-prop="fade_top"', 'data-fade="fade_top"')}
@@ -117,11 +179,12 @@ function bindCustom(cur, pane, set) {
   box.querySelectorAll("[data-pick-piece]").forEach((b) => b.onclick = () => {
     st.pieceSel = st.pieceSel === b.dataset.pickPiece ? null : b.dataset.pickPiece; editSig = ""; renderTabs(); paintWords(s0());
   });
-  const move = (id, by) => set((p) => {
-    const i = p[PK(p)].findIndex((x) => x.id === id), j = i + by;
-    if (i < 0 || j < 0 || j >= p[PK(p)].length) return;
-    [p[PK(p)][i], p[PK(p)][j]] = [p[PK(p)][j], p[PK(p)][i]];
-  });
+  const move = (id, by) => {
+    const how = by > 0 ? "forward" : "backward", said = layerPiece(clone(s0().edits.poster), id, how);
+    set((p) => { layerPiece(p, id, how); });
+    if (said) toast(said);
+  };
+  box.querySelectorAll("[data-piece]").forEach((row) => row.oncontextmenu = (e) => pieceMenu(e, s0(), row.dataset.piece));
   box.querySelectorAll("[data-piece-up]").forEach((b) => b.onclick = () => move(b.dataset.pieceUp, 1));
   box.querySelectorAll("[data-piece-down]").forEach((b) => b.onclick = () => move(b.dataset.pieceDown, -1));
   box.querySelectorAll("[data-piece-x]").forEach((b) => b.onclick = () => {
@@ -220,7 +283,9 @@ function paintPieces(cur, f, boxes) {
       ${on ? `<span class="pc-h" data-pc-h="${id}" title="Drag to make it bigger or smaller"></span>` : ""}</div>`;
   }).join("");
   f.appendChild(layer);
+  layer.querySelectorAll(".pc").forEach((el) => el.oncontextmenu = (e) => pieceMenu(e, slotById(cur.id), el.dataset.pc));
   layer.querySelectorAll(".pc").forEach((el) => el.onpointerdown = (e) => {
+    if (e.button === 2 || e.ctrlKey) return;  // (right-click: its menu)
     e.preventDefault(); e.stopPropagation();
     const id = el.dataset.pc, resize = !!e.target.closest(".pc-h");
     if (st.tool !== "poster") { st.pieceSel = id; openPart(cur, "poster"); return; }
