@@ -205,3 +205,28 @@ def test_edited_copies_dont_raise_the_sharpness_bar():
     r = rank.rank(items)
     assert r["1"].parts["sharp"] > 0.6  # a camera photo judged against its own kind
     assert r[str(len(items) - 1)].parts["sharp"] > 0.8  # the lone crop
+
+
+def test_narrow_photo_keeps_the_player_whole_on_a_border(tmp_path):
+    """A photo too narrow for 4:5 to hold the player with room (a tall screenshot): the player whole,
+    head and feet with room, on a soft border, never trimmed."""
+    from PIL import Image
+    import numpy as np
+    from photo_presets.cull import export
+    img = Image.new("RGB", (1320, 2868), (40, 120, 40))
+    px = img.load()
+    for x in range(400, 900):  # the player: red head at the top, blue feet at the bottom of them
+        for y in range(953, 990):
+            px[x, y] = (255, 0, 0)
+        for y in range(2600, 2637):
+            px[x, y] = (0, 0, 255)
+    src = tmp_path / "keeper.png"
+    img.save(src)
+    m = {"crops": {"4:5": (0.0, 0.338, 1.0, 0.913)}, "subject": (0.26, 0.3325, 0.85, 0.919),
+         "border": {"4:5": (0.0, 0.272, 1.0, 0.941)}, "full": (1320, 2868)}
+    out = np.asarray(Image.open(export.edit_one(src, m, "instagram", "O", tmp_path / "out")[0]).convert("RGB")).astype(int)
+    h = out.shape[0]
+    red = np.where((out[:, :, 0] > 200) & (out[:, :, 1] < 60))[0]
+    blue = np.where((out[:, :, 2] > 200) & (out[:, :, 0] < 60))[0]
+    assert len(red) and len(blue)
+    assert red.min() > 0.05 * h and blue.max() < 0.97 * h  # room above the head and below the feet

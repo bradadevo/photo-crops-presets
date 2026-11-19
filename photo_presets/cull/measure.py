@@ -18,9 +18,13 @@ from PIL import Image
 
 from photo_crops import focus, framing, images
 
-VERSION = 5  # raise when a measurement changes, so files are measured again
+VERSION = 6  # raise when a measurement changes, so files are measured again
 EDGE = 1600  # the photo is looked at this size (RAW: the camera's own preview)
 THUMB_EDGE = 420
+TIGHT_BELOW = 0.40  # the main player shorter than this share of a tall crop: it moves in close on them
+TIGHT_ROOM = (1.5, 1.4)  # room around them then (width, height multipliers)
+BORDER_ROOM = 1.14  # the main player's height with room above and below, for the soft border
+BORDER_MOST = 1.35  # ...when that is at most this much taller than the shape allows (beyond it, mostly border)
 SHAPES = ["4:5", "9:16", "16:9", "1:1", "3:2", "best"]
 FACE_FOR_EYES = 60  # px (at EDGE): smaller faces are too small to judge the eyes
 EYES_CLOSED = 0.17  # eye opening (height / width of the eye outline) below this on both eyes
@@ -278,6 +282,14 @@ def measure(path: Path, cache: Path) -> dict:
                 a = framing.ASPECTS[s]
                 box = framing.fit(act, big, a, framing.PORTRAIT_ROOM if a < 1 else framing.LANDSCAPE_ROOM,
                                   framing.MIN_CROP_SHORT)
+            # the main player small in a tall or square shape (the framing held players nearby who
+            # aren't in the moment with them): in close on the main player and whoever they're in it with
+            a = framing.ASPECTS.get(s)
+            if a and a <= 1 and main_p and not plan.team_photo and (core[3] - core[1]) < TIGHT_BELOW * (box[3] - box[1]):
+                mb, mh = sc(main_p.box), main_p.height * k
+                with_them = [sc(p.box) for p in in_play if p is not main_p and p.height >= 0.75 * main_p.height
+                             and framing._gap(p.box, main_p.box) < 0.25 * main_p.height]
+                box = framing.fit(framing.union([act, core, mb] + with_them), big, a, TIGHT_ROOM, framing.MIN_CROP_SHORT)
             if s in framing.ASPECTS:
                 box = clean_edges(box, big, [sc(p.box) for p in people if p.height >= 0.45 * tallest],
                                   act, core, plan.team_photo)
@@ -287,6 +299,14 @@ def measure(path: Path, cache: Path) -> dict:
         gw, gh = (plan.group[2] - plan.group[0]) * k, (plan.group[3] - plan.group[1]) * k
         out["team_fit"] = {s: bool(plan.team_photo and gw / max(gh, 1) > framing.ASPECTS[s] * 1.02)
                            for s in SHAPES if s in framing.ASPECTS}
+        # a photo too narrow for a shape to hold the main player with room above and below (a tall
+        # screenshot, a narrow crop): the player whole, with room, on a soft border, never trimmed
+        out["border"] = {}
+        need = (core[3] - core[1]) * BORDER_ROOM
+        for s, a in framing.ASPECTS.items():
+            if main_p and not plan.team_photo and big[0] / a < need <= min(big[1], BORDER_MOST * big[0] / a):
+                top = min(max(core[1] - 0.09 * need, 0.0), big[1] - need)
+                out["border"][s] = (0.0, top / big[1], 1.0, (top + need) / big[1])
         out["crops"]["wide"] = tuple(v / d for v, d in zip(framing.wide_box(fplan, big), (*big, *big)))
     else:
         out["crops"] = {}

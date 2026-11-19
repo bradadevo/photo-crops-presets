@@ -284,7 +284,7 @@ function cuPaintBar() {
     <span class="grow"></span>
     ${n > 1 ? `<span class="cu-selinfo">${n} selected</span>` : ""}
     <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo to the Trash (you can undo, or put them back from the Trash)">${icon("trash")}<span class="lbl"> Delete rejects</span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
-    <button class="btn primary" id="cu-fin" ${off(!c.keep, "No keepers yet")} title="Step 3: delete the rejects, then crop, copy or use the keepers">Finish${c.keep ? ` · ${c.keep.toLocaleString()} keepers` : ""} ${icon("right")}</button>`;
+    <button class="btn ${cu.finish ? "ghost on" : "primary"}" id="cu-fin" ${off(!c.keep, "No keepers yet")} title="Step 3: delete the rejects, then crop, copy or use the keepers">Finish${c.keep ? ` · ${c.keep.toLocaleString()} keepers` : ""} ${icon("right")}</button>`;
   paintIcons(bar);
   $("#cu-pass1").onclick = cuPass1;
   $("#cu-pass2").onclick = () => { cu.finish = false; cu.show = c.unsure ? "unsure" : "todo"; cu.sort = "unsure"; store.set("cull.sort", cu.sort); cuRefilter(); if (cu.order.length) cuSetView("one");
@@ -486,6 +486,7 @@ function cuPaintFinish(one) {
   const all = cuFinishIds(), ids = all.filter((id) => !F.out.has(id));
   const size = cuSizeKey();
   const job = sh.job && (sh.job.what === "edit" || sh.job.what === "copy") ? sh.job : null;
+  const made = (what) => !!(job && job.what === what && job.state !== "now" && job.state !== "failed" && (job.folder || "").split("/").pop() === folder);  // (then the next step is the folder)
   const plans = F.what === "crop" ? all.map((id) => [id, cuPlan(cuP(id), size, F.fit)]) : [];
   const enlargedN = plans.filter(([id, pl]) => !F.out.has(id) && pl.needsFit).length;
   const unrated = size === "ai" ? ids.filter((id) => !cuP(id).ai?.crop).length : 0;
@@ -536,15 +537,15 @@ function cuPaintFinish(one) {
 
       <div class="cu-q-h"><b>Where they go</b></div>
       <div class="cu-dest">${icon("folder")}<span>A new folder next to your photos in “${esc(where)}”:</span><input id="fin-folder" value="${esc(folder)}" spellcheck="false"></div>
-      <div class="cu-make">${job?.state === "now" ? cuJobBar(job) : `<button class="btn primary big" id="fin-go" ${off(!ids.length || !looks.length, !ids.length ? "No keepers to make" : "Choose how they should look")}>
-          ${icon("crop")} Make ${plural(ids.length * Math.max(1, looks.length), "picture")}</button><small>${plural(ids.length, "keeper")} × ${plural(looks.length, "look")}. Your originals are never changed.</small>`}</div>
-      ${job && job.state !== "now" && job.what === "edit" ? cuJobDone(job) : ""}` : ""}
+      <div class="cu-make">${job?.state === "now" ? cuJobBar(job) : `<button class="btn ${made("edit") ? "ghost" : "primary big"}" id="fin-go" ${off(!ids.length || !looks.length, !ids.length ? "No keepers to make" : "Choose how they should look")}>
+          ${icon("crop")} ${made("edit") ? "Make them again" : `Make ${plural(ids.length * Math.max(1, looks.length), "picture")}`}</button><small>${plural(ids.length, "keeper")} × ${plural(looks.length, "look")}. Your originals are never changed.</small>`}</div>
+      ${made("edit") || (job?.what === "edit" && job.state === "failed") ? cuJobDone(job) : ""}` : ""}
 
     ${F.what === "copy" ? `
       <div class="cu-dest">${icon("folder")}<span>A new folder next to your photos in “${esc(where)}”:</span><input id="fin-folder" value="${esc(folder)}" spellcheck="false"></div>
       ${ids.some((id) => cuP(id).label) ? `<label class="cu-fit2 cu-bylabel${F.byLabel !== false ? " on" : ""}"><input type="checkbox" id="fin-bylabel" ${F.byLabel !== false ? "checked" : ""}><b>A folder for each label inside it</b><span>${[1, 2, 3, 4, 5].filter((n) => ids.some((id) => cuP(id).label === n)).map((n) => `${cuLabelDot(n)} ${esc(labelName(n))} (${ids.filter((id) => cuP(id).label === n).length})`).join(" · ")}${ids.some((id) => !cuP(id).label) ? ` · the rest (${ids.filter((id) => !cuP(id).label).length}) in the folder itself` : ""}</span></label>` : ""}
-      <div class="cu-make">${job?.state === "now" ? cuJobBar(job) : `<button class="btn primary big" id="fin-go" ${off(!ids.length, "No keepers")}>${icon("copy")} Copy ${plural(ids.length, "photo")}</button><small>Exactly as they are, with their RAW files. Nothing is changed or moved.</small>`}</div>
-      ${job && job.state !== "now" && job.what === "copy" ? cuJobDone(job) : ""}` : ""}
+      <div class="cu-make">${job?.state === "now" ? cuJobBar(job) : `<button class="btn ${made("copy") ? "ghost" : "primary big"}" id="fin-go" ${off(!ids.length, "No keepers")}>${icon("copy")} ${made("copy") ? "Copy them again" : `Copy ${plural(ids.length, "photo")}`}</button><small>Exactly as they are, with their RAW files. Nothing is changed or moved.</small>`}</div>
+      ${made("copy") || (job?.what === "copy" && job.state === "failed") ? cuJobDone(job) : ""}` : ""}
 
     ${F.what === "use" ? `<div class="cu-uses">
       <button class="cu-use2" data-send="looks">${icon("wand")}<b>Make looks</b><span>Your ${plural(ids.length, "keeper")} go into the Looks tab: make looks, posters and team posters from them</span></button>
@@ -588,7 +589,8 @@ function cuJobBar(j) {
 function cuJobDone(j) {
   if (j.state === "failed") return `<div class="cu-note bad">${icon("info")}<span>It stopped: ${esc(j.error || "")}</span></div>`;
   const f = j.folder || "";
-  return `<div class="cu-done">${icon("check")}<div><b>Done: ${plural(j.done, j.what === "copy" ? "photo" : "keeper")} ${j.what === "copy" ? "copied" : "made"}</b>
+  return `<div class="cu-done">${icon("check")}<div><b>All done! ${plural(j.done, j.what === "copy" ? "photo" : "keeper")} ${j.what === "copy" ? "copied" : "made"}</b>
+    <span class="next">Next: open the folder to see them, post them or send them.</span>
     <span>${esc(f.replace(/^\/Users\/[^/]+/, "~"))}</span></div><button class="btn primary" data-open="${esc(f)}">${icon("folder")} Open the folder</button>
     ${j.what === "edit" ? `<button class="btn ghost" id="fin-again">Make another size</button>` : ""}</div>
     ${(() => { const best = [...cu.photos.values()].filter((p) => alive(p) && flagOf(p) === "keep").sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 6);

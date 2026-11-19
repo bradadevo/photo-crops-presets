@@ -139,13 +139,13 @@ def _final(out: Image.Image, src: Image.Image, size: crops.OutputSize, sharpen: 
     return enhance.output_sharpen(out) if sharpen else out
 
 
-def team_on_border(img: Image.Image, group, aspect: float, t) -> Image.Image:
+def team_on_border(img: Image.Image, group, aspect: float, t, room: bool = True) -> Image.Image:
     """The whole team (with a little room) across the frame, on a blurred, darkened copy of the photo
     filling the rest of the tall shape, the way a wide photo is posted to a tall feed."""
     from PIL import ImageFilter, ImageEnhance
     W, H = img.size
     gx0, gy0, gx1, gy1 = group[0] * W, group[1] * H, group[2] * W, group[3] * H
-    rx, ry = 0.05 * (gx1 - gx0), 0.12 * (gy1 - gy0)
+    rx, ry = (0.05 * (gx1 - gx0), 0.12 * (gy1 - gy0)) if room else (0.0, 0.0)
     box = (max(0, round(gx0 - rx)), max(0, round(gy0 - ry)), min(W, round(gx1 + rx)), min(H, round(gy1 + ry)))
     team = img.crop(box)
     cw, ch = (t if t else (team.width, round(team.width / aspect)))
@@ -176,7 +176,9 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
     shape = SHAPE_OF.get(size_key)
     # a team photo too wide for this shape: the whole team on a soft border, never kids cut in half
     team = bool(shape and not override and not ai_crop and (m.get("team_fit") or {}).get(shape) and m.get("group"))
-    if team:
+    # or a photo too narrow for this shape to hold the main player with room: them whole, on the border
+    border = (m.get("border") or {}).get(shape) if shape and not override and not ai_crop else None
+    if team or border:
         subject = None
     folder.mkdir(parents=True, exist_ok=True)
     out = []
@@ -191,6 +193,8 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
         (edited at 33 MP and then shrunk, the texture packs together and looks crunchy)."""
         if team:
             return team_on_border(img, m["group"], SIZES[size_key].aspect, target(size_key, img.size))
+        if border:
+            return team_on_border(img, border, SIZES[size_key].aspect, target(size_key, img.size), room=False)
         crop = img.crop(box)
         t = target(size_key, img.size)
         if not t or crop.size == tuple(t):
