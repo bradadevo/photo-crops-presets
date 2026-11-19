@@ -68,6 +68,7 @@ function cuPoll() {
     await cuState();
     const changed = await cuPhotos();
     if (changed) { cuSort(); cuPaintGrid(); cuPaintTimeline(); if (cu.view !== "grid") cuPaintMain(); cuPaintInfo(); }
+    if (cuShoot()?.pass1 && !modalOpen() && !cu.finish) cuReveal();
     if (before !== JSON.stringify(cu.shoots.map((s) => [s.id, s.measured, s.keep, s.reject, s.job?.state, s.job?.done]))) { cuPaintSide(); cuPaintBar(); }
     cuJobWatch();
     cuPoll();
@@ -127,13 +128,13 @@ function renderCull() {
     cu.built = true;
     box.innerHTML = `<aside class="cu-side" id="cu-side"></aside>
       <section class="cu-main"><div class="cu-bar" id="cu-bar"></div><div class="cu-tl" id="cu-tl" title="The whole event over time: tall bars are bursts of shooting (big moments). Click to jump there."></div>
-        <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div></div>
+        <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div><div class="cu-sprayf" id="cu-sprayf" hidden></div></div>
         <div class="cu-keys" id="cu-keys"></div></section>
       <aside class="cu-info" id="cu-info"></aside>
       <div class="cu-drag" data-edge="l" title="Drag to resize · double-click for the usual size"></div><div class="cu-drag" data-edge="r" title="Drag to resize · double-click for the usual size"></div>`;
     cuElastic(box);
     $("#cu-grid").addEventListener("scroll", () => requestAnimationFrame(cuPaintGrid), { passive: true });
-    new ResizeObserver(() => { cu.gridSig = ""; cuPaintGrid(); if (cu.view !== "grid") cuPaintMain(); }).observe($("#cu-body"));
+    new ResizeObserver(() => { cu.gridSig = ""; cuPaintGrid(); cuFitPic(); }).observe($("#cu-body"));
     $("#cu-grid").addEventListener("click", cuGridClick);
     cuSprayGrid();
     $("#cu-grid").addEventListener("dblclick", (e) => { const t = e.target.closest("[data-p]"); if (t) { cu.cur = +t.dataset.p; cuSetView("one"); } });
@@ -211,7 +212,7 @@ function cuPaintSide() {
       ${row("keep", `${icon("keep")} Keep`, c.keep, "Kept by pass 1 or by you")}
       ${row("reject", `${icon("reject")} Reject`, c.reject, "Rejected by pass 1 or by you: deleted when you press Delete rejects")}
       ${row("unsure", "Pass 1 unsure", c.unsure, "Where pass 1 was least sure: the best place to spend your time")}
-      ${row("todo", "Not looked at yet", c.todo, "Pass 1's marks you haven't confirmed or changed")}
+      ${row("todo", "Not checked by you", c.todo, "Photos with only pass 1's mark: you haven't kept or rejected them yourself")}
       ${row("mine", "Your marks", c.mine, "Photos you marked yourself")}</div>
       <h4 class="sub">Problems <small>${cu.issues.size ? `<a href="#" id="cu-iss-clear">clear</a>` : "tap to filter"}</small></h4>
       <div class="cu-chips">${Object.entries(CU_ISSUE).filter(([k]) => iss[k]).map(([k, [l, t]]) => `<button class="chip${cu.issues.has(k) ? " on" : ""}" data-iss="${k}" title="${esc(t)}">${l} <b>${iss[k]}</b></button>`).join("") || `<span class="faint">None found</span>`}</div>
@@ -262,13 +263,12 @@ function cuPaintBar() {
   bar.innerHTML = `<div class="cu-steps">
       <button class="cu-step${sh.pass1 ? " done" : ""}" id="cu-pass1" title="The app's own first pass: it marks every photo keep or reject. Change how many it keeps and how picky it is, and run it again (your own marks are never changed)">
         <span class="n">1</span><span class="t">Pass 1</span>${measuring ? `<span class="x">· ${Math.round(sh.measured / Math.max(1, sh.total) * 100)}%</span>` : sh.pass1 ? `<span class="x">: ${c.keep.toLocaleString()} keep</span>` : ""}${icon("chev")}</button>
-      <button class="cu-step${c.todo === 0 && c.all ? " done" : ""}" id="cu-pass2" title="Your pass: go through what pass 1 decided. Starts with where it was least sure">
+      <button class="cu-step cu-meter${c.todo === 0 && c.all ? " done" : ""}" id="cu-pass2" style="--pct:${c.all ? Math.round(c.mine / c.all * 100) : 0}%" title="Your pass: ${c.mine} of ${c.all} checked by you. Starts with the close calls">
         <span class="n">2</span><span class="t">Your pass</span>${c.unsure ? `<span class="x">· ${c.unsure.toLocaleString()} unsure</span>` : ""}</button>
       <button class="cu-step${cu.finish ? " now" : ""}" id="cu-pass3" ${off(!c.reject && !c.keep, "Nothing marked yet")} title="Delete the rejects, then crop, copy or use the keepers">
         <span class="n">3</span><span class="t">Finish</span></button></div>
     <div class="seg small" id="cu-views">${[["grid", "grid", "Gallery (G)"], ["one", "single", "One big photo (Space)"], ["compare", "compare", "Side by side (C)"]].map(([k, ic, t]) => `<button class="${cu.view === k ? "on" : ""}" data-view="${k}" title="${t}">${icon(ic)}</button>`).join("")}</div>
     <button class="btn ghost cu-spray-btn${cu.spray ? " on" : ""}" id="cu-spray" title="Spray Can (L): sort photos into your labels by clicking or dragging across them">${icon("spray")}<span class="lbl"> Spray can</span></button>
-    ${cu.spray ? `<div class="cu-palette">${[1, 2, 3, 4, 5].map((n) => `<button class="${cu.spray === n ? "on" : ""}" data-spray="${n}" title="${esc(labelName(n))}${n <= 4 ? ` (${n + 5})` : ""}">${cuLabelDot(n, true)}<span>${esc(labelName(n))}</span></button>`).join("")}</div>` : ""}
     <button class="icon-btn cu-tog${cu.group ? " on" : ""}" id="cu-group" title="${cu.group ? "Bursts are stacked: each shows as its best frame (click to show every frame)" : "Every frame shows (click to stack each burst as its best frame)"}">${icon("stack")}</button>
     <span class="grow"></span>
     ${n > 1 ? `<span class="cu-selinfo">${n} selected</span>` : ""}
@@ -282,7 +282,13 @@ function cuPaintBar() {
   $("#cu-fin").onclick = () => c.keep && cuOpenFinish();
   bar.querySelectorAll("[data-view]").forEach((b) => b.onclick = () => cuSetView(b.dataset.view));
   $("#cu-spray").onclick = () => cuToggleSpray();
-  bar.querySelectorAll("[data-spray]").forEach((b) => b.onclick = () => { cu.spray = +b.dataset.spray; cuPaintBar(); });
+  const fl = $("#cu-sprayf");
+  fl.hidden = !cu.spray || cu.view !== "grid" || cu.finish;
+  fl.innerHTML = cu.spray ? `<span class="t">${icon("spray")} Spray can</span>${[1, 2, 3, 4, 5].map((n) => `<button class="${cu.spray === n ? "on" : ""}" data-spray="${n}" title="${n <= 4 ? `Key ${n + 5}` : ""}">${cuLabelDot(n, true)}<span>${esc(labelName(n))}</span></button>`).join("")}
+    <span class="hint">Click or drag across photos · drag back over to take it off</span><button class="btn small" id="cu-spray-done">Done (Esc)</button>` : "";
+  paintIcons(fl);
+  fl.querySelectorAll("[data-spray]").forEach((b) => b.onclick = () => { cu.spray = cu.lastSpray = +b.dataset.spray; cuPaintBar(); });
+  $("#cu-spray-done", fl)?.addEventListener("click", cuToggleSpray);
   $("#cu-group").onclick = () => { cu.group = !cu.group; store.set("cull.group", cu.group); cu.open.clear(); cuRefilter(); };
   $("#cu-del").onclick = () => c.reject && cuDeleteRejects();
 }
@@ -571,7 +577,48 @@ function cuJobDone(j) {
   const f = j.folder || "";
   return `<div class="cu-done">${icon("check")}<div><b>Done: ${plural(j.done, j.what === "copy" ? "photo" : "keeper")} ${j.what === "copy" ? "copied" : "made"}</b>
     <span>${esc(f.replace(/^\/Users\/[^/]+/, "~"))}</span></div><button class="btn primary" data-open="${esc(f)}">${icon("folder")} Open the folder</button>
-    ${j.what === "edit" ? `<button class="btn ghost" id="fin-again">Make another size</button>` : ""}</div>`;
+    ${j.what === "edit" ? `<button class="btn ghost" id="fin-again">Make another size</button>` : ""}</div>
+    ${(() => { const best = [...cu.photos.values()].filter((p) => alive(p) && flagOf(p) === "keep").sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 6);
+      return best.length >= 3 ? `<div class="cu-bestof"><b>${icon("star")} The best of the event</b><div>${best.map((p) => `<img src="/img/cull/${cu.sel}/${p.id}/thumb.jpg" alt="" title="${esc(p.name)}">`).join("")}</div></div>` : ""; })()}`;
+}
+
+// -- the fun parts: pass 1's reveal, a snappy mark, and the best of the event ----------------------
+/* Pass 1 just finished: what it found, your best shot of the event, and one big button to start. */
+function cuReveal(force = false) {
+  const sh = cuShoot(); if (!sh || !sh.pass1) return;
+  const seen = store.get("cull.revealed", {});
+  if (!force && seen[sh.id]) return;
+  seen[sh.id] = 1; store.set("cull.revealed", seen);
+  const all = [...cu.photos.values()].filter(alive), [c, iss] = cuCounts();
+  const keepers = all.filter((p) => flagOf(p) === "keep").sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const hero = keepers[0], more = keepers.slice(1, 5);
+  if (!hero) return;
+  const bursts = new Set(all.filter((p) => p.bsize > 1).map((p) => p.burst)).size;
+  const secs = sh.took ? Math.round(sh.took) : null;
+  const m = modal(`<div class="cu-reveal">
+      <div class="hero"><img src="/img/cull/${cu.sel}/${hero.id}/view.jpg" alt=""><span class="tag">${icon("star")} Your best shot of the event</span></div>
+      <div class="side"><h2>Pass 1 is done!</h2>
+        <div class="big"><b>${all.length.toLocaleString()}</b><span>photos</span>${icon("right")}<b class="g">${c.keep.toLocaleString()}</b><span>keepers</span></div>
+        ${secs ? `<p class="took">in ${secs < 90 ? plural(secs, "second") : say(secs).replace("about ", "")}, on your Mac</p>` : ""}
+        <ul>${[iss.dupe ? `${plural(iss.dupe, "near copy", "near copies")} set aside${bursts ? ` from ${plural(bursts, "burst")}` : ""}` : "",
+          iss.blur ? `${plural(iss.blur, "soft photo")} caught` : "", iss.eyes ? `${plural(iss.eyes, "closed-eye shot")} caught` : "",
+          `<b>${plural(c.unsure, "photo")}</b> for you to check, the close calls`].filter(Boolean).map((x) => `<li>${x}</li>`).join("")}</ul>
+        <div class="more">${more.map((p) => `<img src="/img/cull/${cu.sel}/${p.id}/thumb.jpg" alt="">`).join("")}</div>
+        <button class="btn primary big" id="rv-go">Start your pass${c.unsure ? ` (${c.unsure} close calls)` : ""}</button>
+        <button class="btn ghost" data-close>Look around first</button></div></div>`);
+  paintIcons(m);
+  m.classList.add("wide");
+  $("#rv-go", m).onclick = () => { closeModal(); $("#cu-pass2")?.click(); };
+}
+/* A quick, satisfying pop on each keep or reject. */
+function cuPop(flag) {
+  if (!flag) return;
+  const host = cu.view === "grid" ? $(`#cu-space [data-p="${cu.cur}"] .im`) : $("#cu-stage");
+  if (!host) return;
+  const el = document.createElement("span");
+  el.className = `cu-pop ${flag}`; el.innerHTML = icon(flag === "keep" ? "keep" : "reject");
+  host.appendChild(el); paintIcons(host);
+  setTimeout(() => el.remove(), 650);
 }
 
 // -- the start page: the three things culling does, and how ------------------------------------------
@@ -642,9 +689,15 @@ function cuPaintMain() {
   });
   const zi = $(".cu-zoom img", one);
   if (zi) fetch(zi.src).then((r) => { const b = r.headers.get("X-Box"); if (b) zi.dataset.box = b; }).catch(() => {});
+  cuFitPic();
   cuCropDrag(p);
   // the next and previous ones load while you look
   [1, -1].forEach((d) => { const q = cu.order[cu.order.indexOf(p.id) + d]; if (q != null) new Image().src = `/img/cull/${cu.sel}/${q}/view.jpg`; });
+}
+function cuFitPic() {
+  const st = $("#cu-stage"), img = $("#cu-img"); if (!st || !img) return;
+  img.style.maxHeight = `${Math.max(120, st.clientHeight - 24)}px`;
+  img.style.maxWidth = `${Math.max(120, st.clientWidth - 24)}px`;
 }
 const CU_SHAPE = { instagram: "4:5", story: "9:16", youtube: "16:9", original: "wide", ai: "best" };
 const CU_TARGET = { instagram: [1080, 1350], story: [1080, 1920] };
@@ -872,7 +925,7 @@ function cuRenameLabels() {
 
 function cuToggleSpray() {
   cu.spray = cu.spray ? null : (cu.lastSpray || 1);
-  if (cu.spray) { cu.lastSpray = cu.spray; if (cu.view !== "grid") cuSetView("grid"); toast("Spray can: click or drag across photos to label them", { small: "Drag back over them to take it off · L or Esc to stop" }); }
+  if (cu.spray) { cu.lastSpray = cu.spray; if (cu.view !== "grid") cuSetView("grid"); }
   $("#cu-grid").classList.toggle("spraying", !!cu.spray); cuPaintBar();
 }
 
@@ -944,6 +997,7 @@ function cuMark(flag) {
   const p = cuP(cu.cur);
   // pressing it again on your own mark takes it back (pass 1's mark shows again)
   const same = ids.length === 1 && flag && p.flag === flag;
+  if (!same) cuPop(flag);
   cuSet(ids, { flag: same ? null : flag }, flag === "keep" ? "Keep" : flag === "reject" ? "Reject" : "Back to pass 1's");
   if (cu.advance && ids.length === 1 && flag && !same) cuStep(1);
 }
@@ -966,9 +1020,20 @@ async function cuUndo(redo = false) {
   toast(`${redo ? "Redid" : "Undid"}: ${step.label}`, { small: plural(step.items.length, "photo") });
   await api(`/api/cull/shoots/${sh.id}/mark`, { items: step.items.map((it) => ({ id: it.id, ...it[key] })) }).catch(() => {});
 }
+function cuEndOfList() {
+  const [c] = cuCounts();
+  if (cu.show === "unsure" || cu.show === "todo") {
+    const nextTodo = cu.show === "unsure" && c.todo > 0;
+    toast(cu.show === "unsure" ? "That's every photo pass 1 was unsure about" : "You've checked them all", {
+      small: nextTodo ? `${plural(c.todo, "photo")} still have only pass 1's mark. Or go to Finish` : "Next: Finish (delete the rejects, use the keepers)",
+      action: nextTodo ? { label: "Check the rest", run: (ev) => { ev.target.closest(".toast")?.remove(); cu.show = "todo"; cuRefilter(); } }
+        : { label: "Finish →", run: (ev) => { ev.target.closest(".toast")?.remove(); cuOpenFinish(); } } });
+  } else toast("That's the last photo here", { small: c.keep ? "Next: Finish, at the top right" : "", action: c.keep ? { label: "Finish →", run: (ev) => { ev.target.closest(".toast")?.remove(); cuOpenFinish(); } } : null });
+}
 function cuStep(d, extend = false) {
   if (!cu.order.length) return;
   let i = cu.order.indexOf(cu.cur);
+  if (d > 0 && i === cu.order.length - 1 && !extend) { cuEndOfList(); return; }
   i = Math.min(cu.order.length - 1, Math.max(0, (i < 0 ? 0 : i) + d));
   cu.cur = cu.order[i];
   if (extend) { cu.picked.add(cu.cur); } else if (!extend && cu.picked.size && cu.view === "grid") { /* keep a selection while moving with arrows only via shift */ cu.picked.clear(); }

@@ -51,6 +51,7 @@ class Shoot:
         self.rev = 0
         self.job: dict | None = None
         self.pass1_at: float | None = None
+        self.started = time.time()  # (how long pass 1 took, the first time)
         self.ranked: dict = {}
 
     def bump(self, p: dict):
@@ -269,7 +270,8 @@ class Cull:
         left = (total - done) * 0.45
         return {"id": sh.id, "name": sh.name, "folders": sh.folders, "total": total, "measured": done,
                 "thumbs": thumbs, "keep": keep, "reject": reject, "yours": yours, "settings": sh.settings,
-                "pass1": sh.pass1_at is not None, "left": round(left), "job": sh.job, "rev": sh.rev}
+                "pass1": sh.pass1_at is not None, "left": round(left), "job": sh.job, "rev": sh.rev,
+                "took": (sh.pass1_at - sh.started) if sh.pass1_at and sh.pass1_at >= sh.started else None}
 
 
 C = Cull()
@@ -399,13 +401,29 @@ async def mark(sid: int, req: Request):
     return {"rev": sh.rev}
 
 
+def _to_trash(paths: list[str]) -> list[tuple[str, str]]:
+    """Your Mac's Trash; a test copy of the app uses its own trash folder, never yours."""
+    if not _STATE:
+        return files.to_trash(paths)
+    import shutil
+    bin_ = _STATE / "Trash"
+    bin_.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for p in paths:
+        if os.path.lexists(p):
+            dest = export.unique(bin_ / Path(p).name)
+            shutil.move(p, dest)
+            moved.append((p, str(dest)))
+    return moved
+
+
 @router.post("/api/cull/shoots/{sid}/trash")
 async def trash(sid: int, req: Request):
     """Moves these photos (every file of each shot: JPEG and RAW) to the Trash."""
     sh = C.shoot(sid)
     ids = [int(i) for i in (await req.json()).get("ids", [])]
     chosen = [sh.photos[i] for i in ids if 0 <= i < len(sh.photos) and sh.photos[i].get("state") != "gone"]
-    moved = await _thread(files.to_trash, [f for p in chosen for f in p["files"]])
+    moved = await _thread(_to_trash, [f for p in chosen for f in p["files"]])
     gone = {was for was, _ in moved}
     with C.lock:
         for p in chosen:

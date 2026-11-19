@@ -49,7 +49,7 @@ def from_trash(moved: list[tuple[str, str]]) -> int:
     """Puts files back from the Trash where they were (undo)."""
     n = 0
     for was, now in moved:
-        if os.path.exists(now) and not os.path.exists(was):
+        if os.path.lexists(now) and not os.path.lexists(was):
             Path(was).parent.mkdir(parents=True, exist_ok=True)
             shutil.move(now, was)
             n += 1
