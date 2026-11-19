@@ -71,9 +71,27 @@ def reference_sharpness(ms: list[dict]) -> float:
     return float(np.percentile(vals, 75)) if len(vals) >= 3 else (max(vals) if vals else 1.0)
 
 
-def features(m: dict, ref: float) -> dict:
+def _size_group(m: dict):
+    """Photos of about the same pixel size (sharpness is only comparable between those: a crop or a
+    shrunk, sharpened copy measures differently from the camera's full-size photo)."""
+    full = m.get("full") or m.get("size")
+    return round(np.log2(max(1, full[0] * full[1])) * 4) if full else None
+
+
+def references(ms: list[dict]) -> dict:
+    """The typical sharp level of each size group with enough photos to say (3 or more)."""
+    groups: dict = {}
+    for m in ms:
+        groups.setdefault(_size_group(m), []).append(m)
+    return {g: reference_sharpness(v) for g, v in groups.items()
+            if sum(1 for m in v if m.get("subject") and m.get("sharp", 0) > 0) >= 3}
+
+
+def features(m: dict, ref: float, lone: bool = False) -> dict:
     """The score's pieces, each 0-1 (also what the taste model learns from)."""
     rel = m.get("sharp", 0) / max(ref, 1e-6) if m.get("subject") else 0.0
+    if lone and m.get("focus_on_subject"):  # nothing like it to compare with: the camera's focus on the player says it
+        rel = max(rel, 0.85)
     main = next((f for f in m.get("faces", []) if f.get("main")), None)
     has_face = bool(main and main.get("px"))
     q = (main or {}).get("quality") or 0.0
@@ -141,11 +159,13 @@ def rank(items: list[tuple[str, float, dict]], taste=None) -> dict[str, Ranked]:
     how likely you are to keep it (0-1), once it has learned enough; blended into the score."""
     ms = [m for _, _, m in items if m]
     ref = reference_sharpness(ms)
+    refs = references(ms)
     out: dict[str, Ranked] = {}
     order = sorted((it for it in items if it[2]), key=lambda it: (it[1], it[0]))
     burst, prev = -1, None
     for pid, t, m in order:
-        f = features(m, ref)
+        g = _size_group(m)
+        f = features(m, refs.get(g, ref), lone=g not in refs)
         r = Ranked(parts=f)
         r.score = 100 * sum(WEIGHTS[k] * f[k] for k in WEIGHTS)
         if taste is not None:

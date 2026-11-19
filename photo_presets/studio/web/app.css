@@ -1310,3 +1310,25 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .modal.wide { padding: 0; overflow: hidden; }
 .cu-reveal .hero img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; }
 .cu-reveal h2 { text-transform: none; letter-spacing: 0; color: var(--text); }
+
+/* -- Culling: People ------------------------------------------------------------------------------ */
+.cu-pplf { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px;
+  border-radius: 12px; background: rgba(20, 23, 30, .96); border: 1px solid var(--good); box-shadow: var(--shadow); white-space: nowrap; max-width: calc(100% - 20px); }
+.cu-pplf[hidden] { display: none; }
+.cu-pplf .t { display: inline-flex; align-items: center; gap: 6px; } .cu-pplf .t svg { width: 15px; height: 15px; color: var(--good); }
+.cu-pplf .n { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+.cu-pplf .fav { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; cursor: pointer; }
+@container (max-width: 700px) { .cu-pplf .n { display: none; } }
+.cu-hint { margin: 2px 0 6px; padding: 0 14px; color: var(--faint); font-size: 12px; line-height: 1.45; }
+.cu-chips .chip svg { width: 12px; height: 12px; margin-right: 2px; }
+.cu-pick { position: absolute; inset: 0; z-index: 4; }
+.cu-pick .who { position: absolute; border: 2px solid rgba(255,255,255,.85); border-radius: 8px; background: rgba(76,209,138,.08); cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+.cu-pick .who:hover { border-color: var(--good); background: rgba(76,209,138,.25); }
+.cu-pick .who i { position: absolute; left: 0; top: -22px; font-style: normal; font-size: 11px; line-height: 1; padding: 4px 6px; border-radius: 5px; background: var(--good); color: #062; font-weight: 700; }
+.cu-pick .tag { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; border-radius: 999px; background: rgba(10,12,16,.88); line-height: 1.2; font-size: 13px; white-space: nowrap; }
+.cu-pp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12.5px; } .cu-pp svg { width: 13px; height: 13px; color: var(--good); }
+.cu-pp.ask { padding: 8px 10px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line-2); }
+.cu-or { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; color: var(--faint); font-size: 12px; }
+.cu-or::before, .cu-or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.cu-num { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 6px; } .cu-num .cu-field.grow { flex: 1; } .cu-num input[maxlength="3"] { width: 70px; }
+.btn.wide { width: 100%; justify-content: center; margin-bottom: 6px; }

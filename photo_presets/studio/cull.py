@@ -44,6 +44,7 @@ class Shoot:
     def __init__(self, sid: int, name: str, folders: list[str], settings: dict | None = None,
                  auto: dict | None = None):
         self.id, self.name, self.folders = sid, name, folders
+        self.shown: dict = {}  # photo path -> (score, reasons) last shown
         self.scans: dict = {}  # photo path -> its players (faces, numbers, kits), for People
         self.people_job: dict | None = None
         self.settings = {"keep": "", "strict": 0.5, "per_burst": True, "size": "instagram", "saved": [], "favor": "",
@@ -240,9 +241,10 @@ class Cull:
             for path, r in ranked.items():
                 if only is not None and path not in only:
                     continue
-                before = sh.auto.get(path)
+                before = (sh.auto.get(path), sh.shown.get(path))
                 sh.auto[path] = [r.suggest, round(r.sure, 2), r.why]
-                if before != sh.auto[path] and path in sh.by_path:
+                sh.shown[path] = (round(r.score), tuple(r.good))  # (a score or reason change shows too)
+                if before != (sh.auto[path], sh.shown[path]) and path in sh.by_path:
                     sh.bump(sh.by_path[path])
             sh.pass1_at = time.time()
         self.save()

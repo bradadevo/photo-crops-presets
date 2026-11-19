@@ -192,3 +192,16 @@ def test_team_photo_on_border():
     img = Image.new("RGB", (6000, 4000), (40, 120, 40))
     out = team_on_border(img, (0.1, 0.3, 0.9, 0.8), 4 / 5, (1080, 1350))
     assert out.size == (1080, 1350)
+
+
+def test_edited_copies_dont_raise_the_sharpness_bar():
+    """Shrunk, sharpened copies (other sizes) in a folder must not make the camera's photos look soft,
+    and a lone crop the camera focused on is not marked down for sharpness."""
+    from photo_presets.cull import rank
+    cam = [{"subject": (0, 0, 1, 1), "sharp": v, "full": (7008, 4672), "focus_on_subject": True} for v in (700, 800, 850, 900)]
+    edits = [{"subject": (0, 0, 1, 1), "sharp": v, "full": (1080, 1350)} for v in (2000, 3000, 3600)]
+    crop = {"subject": (0, 0, 1, 1), "sharp": 806, "full": (3178, 4048), "focus_on_subject": True}
+    items = [(str(i), float(i), m) for i, m in enumerate(cam + edits + [crop])]
+    r = rank.rank(items)
+    assert r["1"].parts["sharp"] > 0.6  # a camera photo judged against its own kind
+    assert r[str(len(items) - 1)].parts["sharp"] > 0.8  # the lone crop

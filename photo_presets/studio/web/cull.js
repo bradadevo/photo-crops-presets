@@ -12,6 +12,7 @@ Object.assign(ICONS, {
   reject: '<path d="M6 6l12 12M18 6 6 18"/>',
   stack: '<rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>',
   timeline: '<path d="M3 20h18M6 16v-4M10 16V8M14 16v-6M18 16V5"/>',
+  user: '<circle cx="12" cy="7.5" r="3.5"/><path d="M5 20.5c.8-3.8 3.6-6 7-6s6.2 2.2 7 6"/>',
   spray: '<rect x="7" y="9" width="8" height="12" rx="2"/><path d="M9 9V6h4v3M13 4h2M17 5l2-1M17 8h3M17 11l2 1"/>',
 });
 
@@ -24,6 +25,7 @@ const cu = {
   advance: store.get("cull.advance", true), cropShow: store.get("cull.crop", false), marks: store.get("cull.marks", true),
   zoom: null, hist: [], future: [], timer: null, built: false, shootSig: "", gridSig: "",
   survey: null, spray: null, labelF: new Set(), labels: [],
+  people: [], person: null, personHits: null, personJob: null, picking: false,
 };
 const CU_ISSUE = { blur: ["Soft", "The main player is soft"], eyes: ["Eyes closed", "Eyes look closed"],
   focus: ["Missed focus", "Focused on the background"], empty: ["No players", "No players in it"],
@@ -43,7 +45,7 @@ const alive = (p) => p.state !== "gone";
 async function cuState() {
   const r = await fetch("/api/cull/state").then((x) => x.json()).catch(() => null);
   if (!r) return;
-  Object.assign(cu, { shoots: r.shoots, cards: r.cards, taste: r.taste, ai: r.ai, sizes: r.sizes, versions: r.versions, fits: r.fits, labels: r.labels || [] });
+  Object.assign(cu, { shoots: r.shoots, cards: r.cards, taste: r.taste, ai: r.ai, sizes: r.sizes, versions: r.versions, fits: r.fits, labels: r.labels || [], people: r.people || [] });
   if (cu.sel && !cu.shoots.some((s) => s.id === cu.sel)) cu.sel = null;
   if (!cu.sel && cu.shoots.length) cu.sel = cu.shoots[0].id;
 }
@@ -88,10 +90,14 @@ function cuSort() {
     if (cu.stars && (p.stars || 0) < cu.stars) return false;
     if (cu.issues.size && !p.issues.some((i) => cu.issues.has(i))) return false;
     if (cu.labelF.size && !cu.labelF.has(p.label || 0)) return false;
+    if (cu.person && (!cu.personHits || !cu.personHits.has(p.id))) return false;
     return true;
   });
   const byTime = (a, b) => (a.t ?? 1e18) - (b.t ?? 1e18) || a.id - b.id;
-  if (cu.sort === "score") list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || byTime(a, b));
+  if (cu.person && cu.personHits) {  // their photos: sure ones first, the best of each burst first, then by how good a shot of them
+    const h = (p) => cu.personHits.get(p.id);
+    list.sort((a, b) => (h(a).status !== "sure") - (h(b).status !== "sure") || (!h(a).best) - (!h(b).best) || h(b).quality - h(a).quality || byTime(a, b));
+  } else if (cu.sort === "score") list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || byTime(a, b));
   else if (cu.sort === "unsure") list.sort((a, b) => ((a.flag ? 2 : a.auto?.[1] ?? 1) - (b.flag ? 2 : b.auto?.[1] ?? 1)) || byTime(a, b));
   else list.sort(byTime);
   // bursts as one stack: the frame that stands for it (yours kept, else the best), unless opened
@@ -128,7 +134,7 @@ function renderCull() {
     cu.built = true;
     box.innerHTML = `<aside class="cu-side" id="cu-side"></aside>
       <section class="cu-main"><div class="cu-bar" id="cu-bar"></div><div class="cu-tl" id="cu-tl" title="The whole event over time: tall bars are bursts of shooting (big moments). Click to jump there."></div>
-        <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div><div class="cu-sprayf" id="cu-sprayf" hidden></div></div>
+        <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div><div class="cu-sprayf" id="cu-sprayf" hidden></div><div class="cu-pplf" id="cu-pplf" hidden></div></div>
         <div class="cu-keys" id="cu-keys"></div></section>
       <aside class="cu-info" id="cu-info"></aside>
       <div class="cu-drag" data-edge="l" title="Drag to resize · double-click for the usual size"></div><div class="cu-drag" data-edge="r" title="Drag to resize · double-click for the usual size"></div>`;
@@ -216,6 +222,9 @@ function cuPaintSide() {
       ${row("mine", "Your marks", c.mine, "Photos you marked yourself")}</div>
       <h4 class="sub">Problems <small>${cu.issues.size ? `<a href="#" id="cu-iss-clear">clear</a>` : "tap to filter"}</small></h4>
       <div class="cu-chips">${Object.entries(CU_ISSUE).filter(([k]) => iss[k]).map(([k, [l, t]]) => `<button class="chip${cu.issues.has(k) ? " on" : ""}" data-iss="${k}" title="${esc(t)}">${l} <b>${iss[k]}</b></button>`).join("") || `<span class="faint">None found</span>`}</div>
+      <h4 class="sub">People <small><a href="#" id="cu-ppl-add">+ find a player</a></small></h4>
+      ${cu.people.length ? `<div class="cu-chips">${cu.people.map((x) => `<button class="chip${cu.person === x.id ? " on" : ""}" data-pp="${x.id}" title="Show only ${esc(x.name)}'s photos">${icon("user")} ${esc(x.name)}${x.number && !x.name.includes(x.number) ? ` <b>#${esc(x.number)}</b>` : ""}</button>`).join("")}</div>`
+        : `<p class="cu-hint">Find one player's photos: click them in a photo, or type their number.</p>`}
       <h4 class="sub">Labels <small><a href="#" id="cu-lab-names">rename</a>${cu.labelF.size ? ` · <a href="#" id="cu-lab-clear">clear</a>` : ""}</small></h4>
       <div class="cu-chips">${[1, 2, 3, 4, 5].map((n) => `<button class="chip${cu.labelF.has(n) ? " on" : ""}" data-lf="${n}" title="Show only ${esc(labelName(n))}">${cuLabelDot(n)} ${esc(labelName(n))} <b>${iss["lab" + n] || 0}</b></button>`).join("")}</div>
       <h4 class="sub">Stars at least</h4><div class="cu-stars" id="cu-starsf">${[0, 1, 2, 3, 4, 5].map((n) => `<button class="${cu.stars === n ? "on" : ""}" data-sf="${n}">${n ? "★".repeat(n) : "Any"}</button>`).join("")}</div>
@@ -244,6 +253,8 @@ function cuPaintSide() {
   side.querySelectorAll("[data-reveal]").forEach((b) => b.onclick = () => api("/api/reveal", { path: b.dataset.reveal }));
   side.querySelectorAll("[data-iss]").forEach((b) => b.onclick = () => { const k = b.dataset.iss; cu.issues.has(k) ? cu.issues.delete(k) : cu.issues.add(k); cuRefilter(); });
   $("#cu-iss-clear")?.addEventListener("click", (e) => { e.preventDefault(); cu.issues.clear(); cuRefilter(); });
+  side.querySelectorAll("[data-pp]").forEach((b) => b.onclick = () => cuShowPerson(b.dataset.pp));
+  $("#cu-ppl-add")?.addEventListener("click", (e) => { e.preventDefault(); cuAddPerson(); });
   side.querySelectorAll("[data-lf]").forEach((b) => b.onclick = () => { const n = +b.dataset.lf; cu.labelF.has(n) ? cu.labelF.delete(n) : cu.labelF.add(n); cuRefilter(); });
   $("#cu-lab-clear")?.addEventListener("click", (e) => { e.preventDefault(); cu.labelF.clear(); cuRefilter(); });
   $("#cu-lab-names")?.addEventListener("click", (e) => { e.preventDefault(); cuRenameLabels(); });
@@ -692,6 +703,7 @@ function cuPaintMain() {
   const zi = $(".cu-zoom img", one);
   if (zi) fetch(zi.src).then((r) => { const b = r.headers.get("X-Box"); if (b) zi.dataset.box = b; }).catch(() => {});
   cuFitPic();
+  if (cu.picking) cuPickLayer();
   cuCropDrag(p);
   // the next and previous ones load while you look
   [1, -1].forEach((d) => { const q = cu.order[cu.order.indexOf(p.id) + d]; if (q != null) new Image().src = `/img/cull/${cu.sel}/${q}/view.jpg`; });
@@ -925,6 +937,120 @@ function cuRenameLabels() {
   };
 }
 
+// -- People: one player's photos (a click on them, or their number), best first, one per burst -------
+const cuPerson = () => cu.people.find((x) => x.id === cu.person);
+async function cuLoadPerson() {
+  const sh = cuShoot(), who = cuPerson();
+  clearTimeout(cu.personTimer);
+  if (!sh || !who) { cu.personHits = null; return; }
+  let r; try { r = await api(`/api/cull/shoots/${sh.id}/people/${who.id}/photos`); } catch { return; }
+  if (cu.person !== who.id) return;
+  cu.personHits = new Map(Object.entries(r.photos).map(([k, v]) => [+k, v]));
+  cu.personJob = r.job;
+  cuRefilter(); cuPaintPeopleBar();
+  if (r.job && r.job.state === "now") cu.personTimer = setTimeout(cuLoadPerson, 2000);
+}
+function cuShowPerson(id) {
+  cu.person = cu.person === id ? null : id;
+  cu.personHits = null; cu.personJob = null;
+  if (cu.person) { cu.sortWas = cu.sortWas ?? cu.sort; cuLoadPerson(); }
+  cuRefilter(); cuPaintPeopleBar();
+}
+function cuPaintPeopleBar() {
+  const el = $("#cu-pplf"); if (!el) return;
+  const who = cuPerson(), sh = cuShoot();
+  el.hidden = !who || !!cu.spray || !!cu.finish;
+  if (el.hidden) { el.innerHTML = ""; return; }
+  const hits = cu.personHits, job = cu.personJob;
+  const n = hits ? [...hits.values()].filter((h) => h.status === "sure").length : 0, maybe = hits ? hits.size - n : 0;
+  const favored = sh?.settings?.favor === who.id;
+  el.innerHTML = `<span class="t">${icon("user")} <b>${esc(who.name)}</b>${who.number && !who.name.includes(who.number) ? ` <small>#${esc(who.number)}</small>` : ""}</span>
+    <span class="n">${hits ? `${plural(n, "photo")}${maybe ? ` · ${maybe} to confirm` : ""}, best first` : `<span class="spin sm"></span> Finding them…`}
+      ${job && job.state === "now" ? ` · looking at the event ${Math.round(job.done / Math.max(1, job.total) * 100)}%` : ""}</span>
+    <label class="fav" title="Pass 1 gives photos with ${esc(who.name)} a lift, so more of them are kept (only in this event)"><input type="checkbox" id="pp-fav" ${favored ? "checked" : ""}> Favor in pass 1</label>
+    <button class="btn small ghost" id="pp-forget" title="Forget this player">Forget</button>
+    <button class="btn small" id="pp-close">Everyone (Esc)</button>`;
+  paintIcons(el);
+  $("#pp-close", el).onclick = () => cuShowPerson(cu.person);
+  $("#pp-fav", el).onchange = async (e) => {
+    const on = e.target.checked; e.target.blur();  // (so Esc and the other keys work right after)
+    await api(`/api/cull/shoots/${sh.id}/pass1`, { favor: on ? who.id : "" });
+    toast(on ? `Pass 1 now favors ${who.name}` : "Pass 1 treats everyone the same again",
+      { small: on ? "Photos with them get a lift and say why. Your own marks never change" : "Your own marks never change" });
+    await cuState(); cuPaintBar();
+  };
+  $("#pp-forget", el).onclick = async () => {
+    if (!confirm(`Forget ${who.name}? Their photos and your marks stay; only the player is forgotten.`)) return;
+    await api(`/api/cull/people/${who.id}`, null, { method: "DELETE" });
+    cu.people = cu.people.filter((x) => x.id !== who.id); cuShowPerson(who.id); cuPaintSide();
+  };
+}
+function cuAddPerson() {
+  const m = modal(`<header><h2>Find a player</h2></header><div class="body">
+      <p style="margin-top:0">Their photos in this event, best first, one per burst. Two ways:</p>
+      <button class="btn primary big wide" id="ap-click">${icon("user")} Click them in a photo</button>
+      <small class="faint">Best: it learns their face, kit and number. Works when you can see their face.</small>
+      <div class="cu-or"><span>or</span></div>
+      <div class="cu-num"><label class="cu-field"><span>Jersey number</span><input id="ap-num" inputmode="numeric" maxlength="3" placeholder="7"></label>
+        <label class="cu-field grow"><span>Name (optional)</span><input id="ap-name" maxlength="40" placeholder="Aiden"></label>
+        <button class="btn" id="ap-go">Find</button></div>
+      <small class="faint">A number is found only where it can be read on the shirt.</small></div>
+    <footer><button class="btn ghost" data-close>Cancel</button></footer>`);
+  paintIcons(m);
+  $("#ap-click", m).onclick = () => {
+    closeModal();
+    if (cu.view === "grid") cuSetView("one");
+    cu.picking = true; cuPaintMain();
+  };
+  const go = async () => {
+    const number = $("#ap-num", m).value.trim().replace(/^#/, ""), name = $("#ap-name", m).value.trim();
+    if (!/^\d{1,3}$/.test(number)) { toast("Type their jersey number", { small: "Or click them in a photo" }); return; }
+    const r = await api("/api/cull/people", { number, name });
+    cu.people.push(r.person); closeModal(); cuPaintSide(); cuShowPerson(r.person.id);
+  };
+  $("#ap-go", m).onclick = go;
+  $("#ap-num", m).onkeydown = (e) => { if (e.key === "Enter") go(); };
+  $("#ap-name", m).onkeydown = (e) => { if (e.key === "Enter") go(); };
+}
+/* Click your player: everyone the app sees in the big photo, outlined. */
+async function cuPickLayer() {
+  const pic = $("#cu-pic"), img = $("#cu-img"), p = cuP(cu.cur), sh = cuShoot();
+  if (!pic || !img || !p) return;
+  const layer = document.createElement("div");
+  layer.className = "cu-pick"; layer.innerHTML = `<span class="tag"><span class="spin sm"></span> Finding everyone…</span>`;
+  pic.appendChild(layer);
+  let r; try { r = await api(`/api/cull/shoots/${sh.id}/people/at/${p.id}`); } catch { layer.remove(); return; }
+  if (!cu.picking || cuP(cu.cur) !== p) return;
+  if (!r.people.length) { layer.innerHTML = `<span class="tag">No one found here: open another photo of them (← →)</span>`; return; }
+  layer.innerHTML = r.people.map((q) => { const [x0, y0, x1, y1] = q.box;
+    return `<button class="who" data-i="${q.i}" style="left:${x0 * 100}%;top:${y0 * 100}%;width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%"
+      title="${q.face ? "This one" : "This one (face not clear here: a photo with their face works better)"}">${q.number ? `<i>#${esc(q.number)}</i>` : ""}</button>`; }).join("")
+    + `<span class="tag">Click your player · Esc to stop</span>`;
+  layer.querySelectorAll("[data-i]").forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const q = r.people.find((x) => x.i === +b.dataset.i);
+    const m = modal(`<header><h2>Who is this?</h2></header><div class="body">
+        <div class="cu-num"><label class="cu-field grow"><span>Name</span><input id="wp-name" maxlength="40" placeholder="Aiden"></label>
+          <label class="cu-field"><span>Number</span><input id="wp-num" maxlength="3" inputmode="numeric" value="${esc(q.number || "")}" placeholder="7"></label></div>
+        <small class="faint">The number helps where their face isn't seen. Saved for your next events too.</small></div>
+      <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="wp-go">Find their photos</button></footer>`);
+    const save = async () => {
+      const res = await api("/api/cull/people", { sid: sh.id, pid: p.id, i: q.i, name: $("#wp-name", m).value.trim(), number: $("#wp-num", m).value.trim() });
+      cu.picking = false; closeModal(); cu.people.push(res.person); cuPaintSide(); cuPaintMain(); cuShowPerson(res.person.id);
+      toast(`Finding ${res.person.name} in every photo`, { small: "Best first, one per burst. Close calls ask you" });
+    };
+    $("#wp-go", m).onclick = save;
+    $("#wp-name", m).onkeydown = (e) => { if (e.key === "Enter") save(); };
+    setTimeout(() => $("#wp-name", m)?.focus(), 30);
+  });
+}
+async function cuAnswer(yes) {
+  const who = cuPerson(), sh = cuShoot(), p = cuP(cu.cur); if (!who || !p) return;
+  await api(`/api/cull/people/${who.id}/answer`, { sid: sh.id, photo: p.id, yes });
+  toast(yes ? `Yes, ${who.name}` : `Not ${who.name}`, { small: "Thanks: the finder learns from it" });
+  await cuLoadPerson(); cuPaintInfo();
+}
+
 function cuToggleSpray() {
   cu.spray = cu.spray ? null : (cu.lastSpray || 1);
   if (cu.spray) { cu.lastSpray = cu.spray; if (cu.view !== "grid") cuSetView("grid"); }
@@ -946,6 +1072,9 @@ function cuPaintInfo() {
       <button class="cu-mk${f === "reject" ? " on r" : ""}" data-mk="reject" title="Reject (X)">${icon("reject")} Reject</button></div>
     <p class="cu-who">${yours(p) ? `Your mark${p.auto ? ` · pass 1 said ${p.auto[0]}` : ""} <a href="#" id="cu-undo1">back to pass 1's (U)</a>` : p.auto ? `Pass 1 · ${Math.round(p.auto[1] * 100)}% sure${p.auto[1] < UNSURE ? " · <b>worth a look</b>" : ""}` : p.state === "done" ? "Pass 1 hasn't run yet" : `<span class="spin sm"></span> Pass 1 is looking at it`}</p>
     ${p.auto ? `<p class="cu-why">${esc(p.auto[2])}</p>` : ""}
+    ${(() => { const h = cu.personHits?.get(p.id), who = cuPerson(); if (!h || !who) return "";
+      return h.status === "sure" ? `<p class="cu-pp">${icon("user")} ${esc(who.name)} is in it${h.best ? " · <b>their best of this moment</b>" : ""} <small class="faint">(${esc(h.why)})</small></p>`
+        : `<div class="cu-pp ask">${icon("user")} Is this ${esc(who.name)}? <button class="btn small" id="pp-yes">Yes</button><button class="btn small ghost" id="pp-no">No</button></div>`; })()}
     <div class="cu-labrow">${[1, 2, 3, 4, 5].map((n) => `<button class="${p.label === n ? "on" : ""}" data-lab="${n}" title="${esc(labelName(n))}${n <= 4 ? ` (${n + 5})` : ""}">${cuLabelDot(n, true)}</button>`).join("")}${p.label ? `<span>${esc(labelName(p.label))}</span>` : `<span class="faint">No label</span>`}</div>
     <div class="cu-starrow">${[1, 2, 3, 4, 5].map((n) => `<button data-star="${n}" class="${(p.stars || 0) >= n ? "on" : ""}" title="${n} star${n > 1 ? "s" : ""} (${n})">★</button>`).join("")}</div>
     ${p.score != null ? `<div class="cu-score"><span>Score</span><i style="--s:${p.score / 100}"></i><b>${p.score}</b></div>` : ""}
@@ -969,6 +1098,8 @@ function cuPaintInfo() {
     <div class="cu-open"><button class="btn ghost small" id="cu-reveal">${icon("folder")} Show in Finder</button></div>`;
   paintIcons(box);
   box.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => cuMark(b.dataset.mk));
+  $("#pp-yes", box)?.addEventListener("click", () => cuAnswer(true));
+  $("#pp-no", box)?.addEventListener("click", () => cuAnswer(false));
   box.querySelectorAll("[data-lab]").forEach((b) => b.onclick = () => cuSetLabel(cuTargets(), p.label === +b.dataset.lab ? 0 : +b.dataset.lab));
   box.querySelectorAll("[data-star]").forEach((b) => b.onclick = () => cuStars(+b.dataset.star === p.stars ? 0 : +b.dataset.star));
   $("#cu-undo1")?.addEventListener("click", (e) => { e.preventDefault(); cuMark(null); });
@@ -1206,6 +1337,8 @@ function cullKey(e) {
   else if (k === "l") cuToggleSpray();
   else if (k === " " || k === "enter") { e.preventDefault(); cuSetView(cu.view === "grid" ? "one" : "grid"); }
   else if (k === "escape" && cu.spray) { cuToggleSpray(); }
+  else if (k === "escape" && cu.picking) { cu.picking = false; cuPaintMain(); }
+  else if (k === "escape" && cu.person && cu.view === "grid") { cuShowPerson(cu.person); }
   else if (k === "escape") { if (cu.zoom) { cu.zoom = null; cuPaintMain(); } else if (cu.view !== "grid") cuSetView("grid"); else if (cu.picked.size) { cu.picked.clear(); cu.gridSig = ""; cuPaintGrid(); cuPaintBar(); } }
   else if (k === "z") { if (cu.view === "grid") cuSetView("one");
     const p = cuP(cu.cur), fc = p?.faces?.find((x) => x.main) || p?.faces?.[0];
