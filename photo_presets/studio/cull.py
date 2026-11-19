@@ -31,7 +31,8 @@ IMPORTS = (_STATE / "imports") if _STATE else Path("~/Pictures/AllProPhoto Impor
 TEST_OUT = (_STATE / "out") if _STATE else None  # a test copy never writes beside your photos
 VIEW_EDGE = 2048
 JPEG_HEADERS = {"Cache-Control": "private, max-age=604800"}
-SEND = {"looks": None}  # set by the server: adds photos to the Looks tab
+SEND = {"looks": None}
+LABELS = ["Instagram", "Album", "Team", "Family", "Prints"]  # the five color labels' names, until you rename them  # set by the server: adds photos to the Looks tab
 
 # hooks the server fills in
 def _noop(paths):
@@ -82,6 +83,7 @@ class Cull:
         self.taste = taste.Taste(HOME / "cull-taste.json")
         self._pending = False
         self.trashed: dict[str, list] = {}  # undo tokens
+        self.labels = list(LABELS)
         self.state_file = STATE_FILE
 
     # -- keeping it across restarts
@@ -96,6 +98,7 @@ class Cull:
                 data = {}
             self.marks = data.get("marks", {})
             self.ai = data.get("ai", {})
+            self.labels = data.get("labels") or list(LABELS)
             self.next = data.get("next", 1)
             for s in data.get("shoots", []):
                 sh = Shoot(s["id"], s["name"], s["folders"], s.get("settings"), s.get("auto"))
@@ -120,7 +123,7 @@ class Cull:
             return
         with self.lock:
             self._pending = False
-            data = {"next": self.next, "marks": self.marks, "ai": self.ai,
+            data = {"next": self.next, "marks": self.marks, "ai": self.ai, "labels": self.labels,
                     "shoots": [{"id": s.id, "name": s.name, "folders": s.folders, "settings": s.settings,
                                 "auto": s.auto, "pass1_at": s.pass1_at} for s in self.shoots.values()]}
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -244,6 +247,7 @@ class Cull:
             "score": round(r.score) if r else None, "issues": r.issues if r else [], "good": r.good if r else [],
             "burst": r.burst if r else None, "bsize": r.burst_size if r else 1, "best": r.burst_best if r else True,
             "auto": auto, "flag": mine.get("flag"), "stars": mine.get("stars", 0), "crop": mine.get("crop"),
+            "label": mine.get("label"),
             "crops": m.get("crops") or {}, "full": m.get("full"), "faces": [f for f in m.get("faces", []) if f.get("box")],
             "focus": m.get("focus_point"), "subject": m.get("group") or m.get("subject"),
             "cam": {k: m.get(k) for k in ("iso", "shutter", "aperture", "focal", "camera")} if m else {},
@@ -299,7 +303,7 @@ def state():
     C.load()
     k, r = C.taste.counts()
     return {"shoots": [C.summary(s) for s in sorted(C.shoots.values(), key=lambda s: -s.id)],
-            "cards": files.cards(), "taste": {"kept": k, "rejected": r, "ready": C.taste.ready, "need": taste.MIN_EACH},
+            "cards": files.cards(), "labels": C.labels, "taste": {"kept": k, "rejected": r, "ready": C.taste.ready, "need": taste.MIN_EACH},
             "ai": ai.key_ready(), "sizes": {k: v.label for k, v in export.SIZES.items()}, "fits": export.FITS,
             "versions": export.VERSIONS}
 
@@ -374,7 +378,7 @@ async def mark(sid: int, req: Request):
                 continue
             p = sh.photos[pid]
             mine = dict(C.marks.get(p["path"], {}))
-            for k in ("flag", "stars", "crop"):
+            for k in ("flag", "stars", "crop", "label"):
                 if k in it:
                     if it[k] in (None, 0, "") and k != "stars":
                         mine.pop(k, None)
@@ -442,6 +446,7 @@ async def export_keepers(sid: int, req: Request):
     size = body.get("size") or sh.settings.get("size", "instagram")
     versions = "".join(v for v in (body.get("versions") or "A") if v in "OABCD")
     fit = body.get("fit") if body.get("fit") in export.FITS else "widen"
+    by_label = bool(body.get("by_label"))  # copy: a folder for each label (Instagram, Album...) inside the folder
     shown = {int(k): tuple(v) for k, v in (body.get("crops") or {}).items() if v}  # the crops the Finish page showed
     if what == "edit":
         sh.settings["size"] = size
@@ -452,7 +457,9 @@ async def export_keepers(sid: int, req: Request):
         try:
             for i, p in enumerate(chosen, 1):
                 if what == "copy":
-                    export.copy_files([Path(f) for f in p["files"]], folder)
+                    lab = C.marks.get(p["path"], {}).get("label") if by_label else None
+                    name = C.labels[lab - 1] if isinstance(lab, int) and 1 <= lab <= len(C.labels) else None
+                    export.copy_files([Path(f) for f in p["files"]], folder / export.safe_name(name) if name else folder)
                 else:
                     a = C.ai.get(p["path"]) or {}
                     ai_crop = (tuple(a["crop"]), a.get("shape", "4:5")) if a.get("crop") else None
@@ -521,6 +528,16 @@ async def send(sid: int, req: Request):
     paths = [Path(sh.photos[i]["path"]) for i in ids if 0 <= i < len(sh.photos) and sh.photos[i]["state"] != "gone"]
     added = (SEND["looks"] or _noop)(paths)
     return {"added": len(added), "asked": len(paths)}
+
+
+@router.put("/api/cull/labels")
+async def rename_labels(req: Request):
+    """Your names for the five color labels."""
+    names = (await req.json()).get("names") or []
+    C.load()
+    C.labels = [(str(n).strip()[:30] or LABELS[i]) for i, n in enumerate(names[:5])] + LABELS[len(names[:5]):]
+    C.save()
+    return {"labels": C.labels}
 
 
 @router.get("/api/cull/cards")

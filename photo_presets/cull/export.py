@@ -32,6 +32,12 @@ def unique(dest: Path) -> Path:
         i += 1
 
 
+def safe_name(name: str) -> str:
+    """A label as a folder name (no slashes or colons)."""
+    import re
+    return re.sub(r'[/:\\]+', "-", name).strip(" .") or "Label"
+
+
 def copy_files(files: list[Path], folder: Path) -> list[Path]:
     """Straight copies (dates kept); one already there with the same size is skipped."""
     folder.mkdir(parents=True, exist_ok=True)
