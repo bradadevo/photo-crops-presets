@@ -151,7 +151,8 @@ class Slot:
                        if r.name else "", notes=r.notes, matched="match" in r.recipe,
                        width=w, height=h, base_width=r.after.width, base_height=r.after.height,
                        edits=r.edits, ai=timing.uses_ai(r.recipe), cutout=pipeline.needs_cutout(r.recipe),
-                       fixes=len(E.fixes_for(r)), removed=len(E.removals.get(str(r.source), [])))
+                       fixes=len(E.fixes_for(r)), removed=len(E.removals.get(str(r.source), [])),
+                       tune=next(([f.x, f.y] for f in E.fixes_for(r) if f.kind == "tune"), [0, 0]))
         return out
 
 
@@ -222,7 +223,7 @@ class Session:
     def saved(self) -> dict:
         return {"photos": [str(p.path) for p in self.photos.values()],
                 "future": {str(self.photos[pid].path): rms for pid, rms in self.future.items() if pid in self.photos and rms},
-                "fixes": [[k[0], k[1], [[f.x, f.y, f.add] for f in v]] for k, v in E.fixes.items() if v],
+                "fixes": [[k[0], k[1], [f.to_json() for f in v]] for k, v in E.fixes.items() if v],
                 "removals": E.removals}
 
     def save(self) -> None:
@@ -240,7 +241,7 @@ class Session:
         except (OSError, ValueError):
             return
         for path, crop, fixes in data.get("fixes", []):
-            E.fixes[(path, crop)] = [Fix(float(x), float(y), bool(add)) for x, y, add in fixes]
+            E.fixes[(path, crop)] = [Fix.from_json(v) for v in fixes]
         for path, removals in (data.get("removals") or {}).items():
             E.removals[path] = removals
         looks = restore_looks()
@@ -319,6 +320,7 @@ class Session:
 
 E = Engine()
 E.brand_dir = STATE or CONFIG
+E.bg_dir = ADDED.parent / "backgrounds"  # your own background pictures (a test copy: its own)
 S = Session()
 W = Worker()
 
@@ -1067,8 +1069,9 @@ def _variant(r: Result, kind: str) -> bytes:
 async def slot_image(sid: int, ver: int, kind: str):
     s = S.slot(sid)
     r = s.result
-    if kind == "fix":
-        return picture(jpeg(await asyncio.to_thread(E.fix_view, r), quality=88))
+    if kind.startswith("fix"):  # fix, fix-black, fix-white, fix-mask: the cut-out as you check it
+        view = kind[4:] or "tint"
+        return picture(jpeg(await asyncio.to_thread(E.fix_view, r, view), quality=88))
     if kind not in ("after", "thumb", "full", "before", "base") and not re.fullmatch(r"area-\d+", kind):
         raise HTTPException(404)
     if not edits.edited(r.edits):  # nothing to work out
@@ -1530,19 +1533,36 @@ async def clear_match():
 
 @app.post("/api/slots/{sid}/fix")
 async def fix(sid: int, req: Request):
-    """{x, y (shares of the picture), add} a click; {undo: true}; {reset: true}."""
+    """{x, y (shares of the picture), add} a click; {kind: "brush" | "edge", points, r (a share of the
+    picture's width), add} a stroke; {kind: "tune", soft, shift} the whole edge; {undo: true}; {reset: true}."""
     s = S.slot(sid)
     body = await req.json()
     r = s.result
     fixes = E.fixes_for(r)
+    kind = body.get("kind", "click")
     if body.get("reset"):
         fixes = []
     elif body.get("undo"):
         fixes = fixes[:-1]
+    elif kind == "tune":  # (one setting for the whole edge: the last one counts)
+        fixes = [f for f in fixes if f.kind != "tune"]
+        soft, shift = float(body.get("soft", 0)), float(body.get("shift", 0))
+        if soft or shift:
+            fixes.append(Fix(round(min(max(soft, 0), 1), 3), round(min(max(shift, -1), 1), 3), True, "tune"))
+    elif kind in ("brush", "edge"):
+        pts = tuple(tuple(round(v, 4) for v in engine.from_frame(r.frame, float(x), float(y))) for x, y in (body.get("points") or [])[:2000])
+        if not pts:
+            return {"fixes": len(fixes)}
+        width = (r.frame[2] - r.frame[0]) if r.frame else 1.0
+        fixes.append(Fix(pts[0][0], pts[0][1], bool(body.get("add", True)), kind, pts, round(float(body.get("r", 0.02)) * width, 4)))
     else:
         x, y = engine.from_frame(r.frame, float(body["x"]), float(body["y"]))
         fixes.append(Fix(round(x, 4), round(y, 4), bool(body.get("add", True))))
     await asyncio.wrap_future(W.submit(FIX, E.set_fixes, r, fixes))
+    for o in S.slots.values():  # a new background (or a poster) uses the cut-out: shown again with the fix
+        if o.result is not None and o.result.source == r.source and o.result.crop == r.crop and \
+                ((o.result.edits or {}).get("background") or (o.result.edits or {}).get("poster")):
+            o.ver += 1
     return {"fixes": len(fixes)}
 
 
@@ -1768,6 +1788,64 @@ async def person_face(pid: int, person: int):
 @app.get("/api/logos")
 def logos():
     return {"logos": brand.listing(E.brand_dir)}
+
+
+# New backgrounds behind the player --------------------------------------------------------------
+
+@app.get("/api/backgrounds")
+def list_backgrounds():
+    """The backgrounds made here, and your own pictures (newest first)."""
+    from photo_presets import backgrounds
+    own = sorted((p for p in E.bg_dir.glob("*.jpg")), key=lambda p: -p.stat().st_mtime) if E.bg_dir.is_dir() else []
+    return {"made": [{"src": n, "about": backgrounds.ABOUT[n]} for n in backgrounds.NAMES],
+            "own": [{"src": f"file:{p.name}", "about": p.stem} for p in own]}
+
+
+@app.get("/img/bg/{src}.jpg")
+async def background_preview(src: str, color: str = "#1f2a44"):
+    """A small picture of a background (in this team color)."""
+    from photo_presets import backgrounds
+
+    def make():
+        if src.startswith("file:"):
+            p = E.bg_dir / src[5:]
+            if "/" in src[5:] or not p.is_file():
+                raise HTTPException(404)
+            arr = backgrounds.from_image(p, 240, 300)
+        elif src in backgrounds.NAMES:
+            arr = backgrounds.make(src, 240, 300, color if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else "#1f2a44")
+        else:
+            raise HTTPException(404)
+        return jpeg(pipeline.to_image(arr), quality=84)
+    return picture(PICTURES.get(("bg", src, color), make))
+
+
+@app.post("/api/backgrounds")
+async def add_background(file: UploadFile = File(...)):
+    """Your own background picture (a stadium, a street, a famous field): kept for every photo."""
+    data = await file.read()
+
+    def keep():
+        import io
+        from photo_crops import images as ims
+        tmp = E.bg_dir / ("." + (Path(file.filename or "bg").name or "bg"))
+        E.bg_dir.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(data)
+        try:
+            img = ims.load(tmp).image.convert("RGB")
+        except Exception:
+            raise HTTPException(400, "That file isn't a picture AllProPhoto can open")
+        finally:
+            tmp.unlink(missing_ok=True)
+        img.thumbnail((4096, 4096))
+        name = re.sub(r"[^A-Za-z0-9 _-]", "", Path(file.filename or "Background").stem)[:40].strip() or "Background"
+        dest = E.bg_dir / f"{name}.jpg"
+        n = 2
+        while dest.exists():
+            dest, n = E.bg_dir / f"{name} {n}.jpg", n + 1
+        img.save(dest, quality=93)
+        return {"src": f"file:{dest.name}"}
+    return await asyncio.to_thread(keep)
 
 
 @app.post("/api/logos")

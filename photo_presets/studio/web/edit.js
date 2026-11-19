@@ -184,6 +184,7 @@ function renderEdit(cur) {
       ${st.areaSel === i ? [["exposure", "Brightness", -2, 2, 0.05, "ev"], ["warmth", "Warmth", -1.5, 1.5, 0.05, "", "warm"], ["saturation", "Saturation", -1, 1, 0.05]].map(([k, label, min, max, stp, unit, cls]) =>
         `<div class="slider"><label>${label}</label><output>${fmtVal(k, ar[k] || 0, unit)}</output><input type="range" class="${cls || ""}" data-area-k="${k}" data-i="${i}" data-unit="${unit || ""}" min="${min}" max="${max}" step="${stp}" value="${ar[k] || 0}"></div>`).join("") : ""}
       </div>`).join("")}</div>` : "",
+    background: st.tool === "background" || e.background ? backgroundSection(e) : "",
     poster: st.tool === "poster" || e.poster ? posterSection(e) : "",
     text: texts.length ? `<div class="section"><h3>Text</h3>${texts.map((t, i) => `<div class="item${st.textSel === i ? " on" : ""}" data-text="${i}">
       <div class="item-head"><textarea class="field text-in" rows="1" data-ti="${i}" placeholder="Type here">${esc(t.text)}</textarea><button class="icon-btn" data-del-text="${i}" title="Remove this text">${icon("trash")}</button></div>
@@ -193,7 +194,7 @@ function renderEdit(cur) {
       </div>`).join("")}</div>` : "",
     logo: st.tool === "logo" || (e.logos || []).length ? logoSection(e) : "",
   };
-  const design = ["poster", "text", "logo", "area"].includes(st.tool) && parts[st.tool] ? st.tool : null;
+  const design = ["background", "poster", "text", "logo", "area"].includes(st.tool) && parts[st.tool] ? st.tool : null;
   const group = (g, title, body) => `<details class="group" data-g="${g}" ${(st.openGroups[g] ?? !design) ? "open" : ""}>
     <summary><h3>${title}</h3>${icon("chev")}</summary><div class="group-body">${body}</div></details>`;
   pane.innerHTML = `
@@ -208,7 +209,8 @@ function renderEdit(cur) {
       ${tool("text", "type", "Text", "Add a name, a score or a date (T)")}
       ${tool("logo", "badge", "Logo", "Put your logo on it: a team crest, a sponsor, your own mark")}
       ${tool("poster", "layout", "Poster", "Make it a social post: Game Day, Spotlight, MVP, Goal, Matchday, Champions and more")}
-      ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player")}
+      ${tool("background", "image", "Background", "Put the player in front of a new background (or right-click the picture)")}
+      ${tool("cutout", "wand", "Cut-out", "Fix what counts as the player: click, paint, refine hair")}
     </div>
     ${cur.look === "Original" ? `<button class="btn wide on-top" id="e-on-top" ${off(!photo?.edited, "Edit the photo first (light, color, crop, or remove something), then put a look on top of it. Example: lower the player's light, then add Stadium Lights for a night shot.")} title="Pick looks to go on top of this edit (they keep your light, color, crop and removals)">${icon("layers")} Add a look on top of this edit</button>` : ""}
     ${design ? `<div class="working">${parts[design]}</div>` : ""}
@@ -327,6 +329,7 @@ function bindEditPane(cur, pane) {
   });
   bindLogoSection(cur, pane);
   bindPosterSection(cur, pane);
+  bindBackgroundSection(cur, pane);
   // text
   pane.querySelectorAll(".text-in").forEach((ta) => {
     const i = +ta.dataset.ti;
@@ -436,6 +439,7 @@ function renderTool(v, cur) {
     wb: `<span class="title"><b>White balance</b><span>Click something that should be white or gray</span></span><span class="sep"></span><button data-done>Cancel</button>`,
     text: `<span class="title"><b>Text</b><span>Drag to place it · type in the panel</span></span><span class="sep"></span><button data-add-text>${icon("plus")} Add text</button><button data-done>Done</button>`,
     logo: `<span class="title"><b>Logo</b><span>Pick one in the panel · drag it to place it</span></span><span class="sep"></span><button data-done>Done</button>`,
+    background: `<span class="title"><b>Background</b><span>Pick one in the panel · right-click the picture for more</span></span><span class="sep"></span><button data-done>Done</button>`,
     poster: `<span class="title"><b>Poster</b><span>${cur.edits?.poster?.template === "custom" ? "Drag a piece to move it · its corner resizes it · arrows nudge" : "Click a word to change it · or pick a layout in the panel"}</span></span><span class="sep"></span><button data-done>Done</button>`,
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
@@ -658,6 +662,11 @@ const POSTERS = [["gameday", "Game Day", "The player in front of a big title"], 
   ["split", "Diagonal Split", "A team-color panel on the diagonal with their name, their number big"],
   ["card", "Player Card", "A collector's card: a team-color frame, a gold rule and a nameplate"],
   ["cinematic", "Cinematic", "Film letterbox bars, the name between thin gold rules"],
+  ["banner", "Stadium Banner ★", "The team name huge in chrome over a stadium glow, the player in front, their name in script"],
+  ["smoke", "Smoke Burst ★", "Team-color powder smoke and light slashes behind the player, the name big below"],
+  ["featured", "Featured Split ★", "Half black-and-white texture, half team color; a script title, a brushed number and a role"],
+  ["storm", "Storm Night ★", "A storm sky with a floodlight breaking through, the name glowing below"],
+  ["collector", "Collector's Edition ★", "A magazine cover: chrome title, a script badge and a ribbon across the corner"],
   ["custom", "Custom ✦", "Your own: move, resize and restyle every piece (starts from the layout you are on)"]];
 const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]], spotlight: [["title", "Name"], ["line", "Position"], ["number", "Number"]],
   final: [["title", "Above the score"], ["home", "Your team"], ["home_score", "Their score"], ["away", "The other team"], ["away_score", "Its score"]],
@@ -670,7 +679,12 @@ const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]]
   cover: [["title", "Magazine title"], ["line", "Issue line"], ["name", "Headline"], ["away", "Line under the headline"]],
   split: [["title", "Name"], ["line", "Line under it"], ["number", "Number"]],
   card: [["title", "Name"], ["line", "Position or year"], ["number", "Number"]],
-  cinematic: [["title", "Name"], ["line", "Line under it"]] };
+  cinematic: [["title", "Name"], ["line", "Line under it"]],
+  banner: [["line", "Club (small, above)"], ["title", "Team name"], ["name", "Player's name (script)"]],
+  smoke: [["line", "Club (small, above)"], ["title", "Team name"], ["name", "Player's name (first last)"]],
+  featured: [["line", "Year"], ["title", "Script word"], ["away", "Small script word"], ["number", "Number"], ["home", "Role"], ["name", "Player's name"]],
+  storm: [["title", "Name"], ["line", "Line under it"], ["number", "Number (faint, behind)"]],
+  collector: [["title", "Magazine title"], ["line", "Issue line"], ["minute", "Year"], ["away", "Script badge"], ["home", "Ribbon"]] };
 const POSTER_SHAPES = [["post", "Post", "Instagram post, 4:5", 4, 5], ["square", "Square", "Instagram or Facebook square, 1:1", 1, 1],
   ["story", "Story", "Instagram or TikTok story or reel, 9:16", 9, 16], ["wide", "Wide", "YouTube, X or Facebook, 16:9", 16, 9]];
 const WORD_COLORS = ["#ffffff", "#111111", "#d4af37", "#c8102e", "#0b3d91", "#1f2a44", "#0f5f3a", "#d97706", "#5b2a86", "#7dd3fc"];

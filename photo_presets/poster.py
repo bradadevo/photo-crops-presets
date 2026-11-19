@@ -33,6 +33,11 @@ TEMPLATES = {
     "split": "Diagonal Split",
     "card": "Player Card",
     "cinematic": "Cinematic",
+    "banner": "Stadium Banner",
+    "smoke": "Smoke Burst",
+    "featured": "Featured Split",
+    "storm": "Storm Night",
+    "collector": "Collector's Edition",
     "custom": "Custom",
 }
 SHAPES = {"post": 4 / 5, "square": 1.0, "story": 9 / 16, "wide": 16 / 9}  # width / height
@@ -52,6 +57,11 @@ DEFAULTS = {
     "split": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  U11", "number": "7"},
     "card": {"title": "LINCOLN", "line": "MIDFIELD  ·  2026", "number": "7"},
     "cinematic": {"title": "LINCOLN", "line": "PSG LAKE NONA  ·  FALL SEASON"},
+    "banner": {"line": "LAKE NONA SOCCER CLUB", "title": "LIONS", "name": "Lincoln Hayes"},
+    "smoke": {"line": "LAKE NONA YOUTH SOCCER", "title": "STRIKERS", "name": "LINCOLN HAYES"},
+    "featured": {"line": "2026", "title": "Featured", "away": "athlete", "number": "10", "home": "CAPTAIN", "name": "LINCOLN HAYES"},
+    "storm": {"line": "PSG LAKE NONA  ·  U11", "title": "LINCOLN", "number": "7"},
+    "collector": {"title": "SOCCER", "line": "THE SEASON ISSUE", "minute": "2026", "away": "All-Star", "home": "COLLECTOR'S EDITION"},
     "custom": {},
 }
 GOLD = (212, 175, 55)
@@ -784,10 +794,262 @@ def _cinematic(pic, m, p, W, H, color, has_logo):
     return _over(out, lay)
 
 
+# Studio themes: the player cut out onto a background made here (see backgrounds.py) -----------
+SUPP = "/System/Library/Fonts/Supplemental/"
+COND = "/System/Library/Fonts/Avenir Next Condensed.ttc"
+HEAVY_IT = 9  # Avenir Next (and Condensed) Heavy Italic
+
+
+def _ff(path: str, index: int, px: float) -> ImageFont.FreeTypeFont:
+    try:
+        return ImageFont.truetype(path, max(6, int(px)), index=index)
+    except OSError:
+        return _font(HEAVY, px)
+
+
+def _fit_ff(text: str, path: str, index: int, width: float, max_px: float) -> ImageFont.FreeTypeFont:
+    px = max_px
+    f = _ff(path, index, px)
+    while px > 8 and text and f.getlength(text) > width:
+        px *= 0.94
+        f = _ff(path, index, px)
+    return f
+
+
+def _spaced(text: str) -> str:
+    return " ".join(text)  # (letter-spaced, for small lines in capitals)
+
+
+def _hex(color) -> str:
+    return "#%02x%02x%02x" % tuple(int(np.clip(c, 0, 1) * 255) for c in color)
+
+
+def _studio(pic, m, p, name, color, H, W) -> np.ndarray:
+    """The player in front of a background made here (or, with no cut-out, the photo softly over it)."""
+    from photo_presets import backgrounds
+    bg = backgrounds.make(name, W, H, p.get("color", "#1f2a44"))
+    if m is None:
+        return pic * 0.45 + bg * 0.55
+    return backgrounds.compose(pic, m[..., 0], bg, wrap=0.6, match=0.3, shadow=0.0)
+
+
+def _chrome(out, key, xy, text, font, anchor, top=(1, 1, 1), bottom=(0.62, 0.66, 0.72), edge=(0.05, 0.06, 0.08),
+            glow=None, stroke=None):
+    """A word in polished metal (a light-to-dark sweep) with a dark edge and a soft shadow (or a glow)."""
+    if not text:
+        return out
+    H, W = out.shape[:2]
+    lay, d = _layer((W, H))
+    sw = stroke if stroke is not None else max(2, int(font.size * 0.06))
+    _say(d, key, xy, text, font=font, fill=(255, 255, 255, 255), anchor=anchor, stroke_width=sw, stroke_fill=(0, 0, 0, 255))
+    a = np.asarray(lay).astype(np.float32) / 255
+    alpha, inner = a[..., 3:4], a[..., :1]
+    ys, xs = np.nonzero(alpha[..., 0] > 0.1)
+    if not len(ys):
+        return out
+    t = np.clip((np.arange(H, dtype=np.float32)[:, None, None] - ys.min()) / max(1, ys.max() - ys.min()), 0, 1)
+    top, bottom, edge = (np.array(v, np.float32) for v in (top, bottom, edge))
+    sweep = top * (1 - t) + bottom * t
+    sweep = sweep + (top - sweep) * np.clip(1 - np.abs(t - 0.55) / 0.08, 0, 1)[..., :1] * 0.8  # a bright band across
+    col = sweep * inner + edge * (1 - inner)
+    soft = cv2.GaussianBlur(alpha[..., 0], (0, 0), max(1.0, font.size * 0.05))[..., None]
+    if glow is not None:
+        out = out + np.array(glow, np.float32) * soft * 0.7
+    else:
+        off = max(1, int(font.size * 0.04))
+        sh = np.roll(np.roll(soft, off, 0), off, 1)
+        out = out * (1 - sh * 0.6)
+    return out * (1 - alpha) + col * alpha
+
+
+def _banner(pic, m, p, W, H, color, has_logo):
+    """A stadium banner: the team's name huge in chrome over a team-color stadium glow, the club in spaced
+    capitals above it, the player in front, their name in a flowing script at the bottom right."""
+    u = _NOTE.u
+    base = _studio(pic, m, p, "Stadium Lights", color, H, W)
+    out = base.copy()
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(_spaced(line), DEMI, W * 0.86, u * 0.026)
+        _say(d, "line", (W / 2, u * 0.03), _spaced(line), font=lf, fill=(255, 255, 255, 230), anchor="mt")
+    out = _over(out, lay)
+    title = p.get("title", "")
+    tf = _fit_ff(title, COND, HEAVY_IT, W * 0.92, u * 0.2)
+    lift = tuple(color + (1 - color) * 0.55)
+    out = _chrome(out, "title", (W / 2, u * 0.075), title, tf, "mt", top=(1, 1, 1), bottom=lift, edge=tuple(color * 0.25))
+    if m is not None:  # the player in front of the name
+        out = out * (1 - m) + base * m
+    name = p.get("name", "")
+    nf = _fit_ff(name, SUPP + "SnellRoundhand.ttc", 2, W * 0.5, u * 0.11)
+    out = _chrome(out, "name", (W * 0.95, H - u * 0.07), name, nf, "rs", top=(1, 0.97, 0.88), bottom=(0.78, 0.66, 0.36),
+                  edge=(0.05, 0.05, 0.05), stroke=max(2, int(nf.size * 0.05)))
+    return out
+
+
+def _smoke_burst(pic, m, p, W, H, color, has_logo):
+    """Powder smoke in the team color bursting behind the player, light slashes at the sides, the team's
+    name in chrome behind their head, their name big at the bottom (first name solid, last name outlined)."""
+    u = _NOTE.u
+    base = _studio(pic, m, p, "Powder Smoke", color, H, W)
+    out = base.copy()
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.022)
+        _say(d, "line", (W / 2, u * 0.05), _spaced(line), font=lf, fill=(255, 255, 255, 220), anchor="mt")
+    out = _over(out, lay)
+    title = p.get("title", "")
+    tf = _fit_ff(title, COND, HEAVY_IT, W * 0.9, u * 0.17)
+    light = tuple(color + (1 - color) * 0.6)
+    out = _chrome(out, "title", (W / 2, u * 0.085), title, tf, "mt", top=(1, 1, 1), bottom=light, edge=(0.03, 0.04, 0.06))
+    if m is not None:
+        out = out * (1 - m) + base * m
+    name = p.get("name", "")
+    if name:
+        first, _, last = name.partition(" ")
+        f1 = _fit_ff(first, COND, HEAVY_IT, W * 0.7, u * 0.1)
+        f2 = _fit_ff(last or first, COND, HEAVY_IT, W * 0.86, u * 0.13)
+        y2 = H - u * 0.05
+        y1 = y2 - f2.size * 0.95
+        out = _chrome(out, "name", (W / 2, y1), first if last else "", f1, "ms", top=light, bottom=tuple(color * 0.8 + 0.1),
+                      edge=(0.02, 0.02, 0.03))
+        lay, d = _layer((W, H))
+        _say(d, "name", (W / 2, y2), last or first, font=f2, fill=(255, 255, 255, 0), anchor="ms",
+             stroke_width=max(2, int(f2.size * 0.05)), stroke_fill=(255, 255, 255, 245))
+        out = _over(out, _shadowed(lay, u * 0.006, 0.6))
+    return out
+
+
+def _featured(pic, m, p, W, H, color, has_logo):
+    """Half black-and-white texture, half team color, split on the diagonal; a year and a flowing script
+    word at the top right; the number big and brushed with a row of dots and a role under it; the name
+    spaced along the bottom."""
+    u = _NOTE.u
+    base = _studio(pic, m, p, "Signature Split", color, H, W)
+    out = base * (1 - _gradient(H, W, 0.0, 0.55, 0.75))
+    lay, d = _layer((W, H))
+    year = p.get("line", "")
+    if year:
+        _say(d, "line", (W * 0.94, u * 0.06), year, font=_font(DEMI, u * 0.03), fill=(255, 255, 255, 235), anchor="rm")
+    title = p.get("title", "")
+    sf = _fit_ff(title, SUPP + "SnellRoundhand.ttc", 2, W * 0.4, u * 0.085)
+    _say(d, "title", (W * 0.95, u * 0.125), title, font=sf, fill=(255, 255, 255, 250), anchor="rm")
+    sub = p.get("away", "")
+    if sub:
+        _say(d, "away", (W * 0.93, u * 0.18), sub, font=_ff(SUPP + "SnellRoundhand.ttc", 1, u * 0.045), fill=(255, 255, 255, 235), anchor="rm")
+    out = _over(out, _shadowed(lay, u * 0.006, 0.6))
+    if m is not None:
+        out = out * (1 - m) + base * m
+    lay, d = _layer((W, H))
+    num = p.get("number", "")
+    cx = W * 0.83
+    if num:
+        nf = _fit_ff(num, SUPP + "Brush Script.ttf", 0, W * 0.3, u * 0.2)
+        _say(d, "number", (cx, H - u * 0.27), num, font=nf, fill=(255, 255, 255, 250), anchor="mm")
+        r = max(2, u * 0.006)
+        for i in range(7):
+            x = cx + (i - 3) * u * 0.024
+            d.ellipse((x - r, H - u * 0.175 - r, x + r, H - u * 0.175 + r), fill=(255, 255, 255, 235))
+    role = p.get("home", "")
+    if role:
+        rf = _fit_font(_spaced(role), DEMI, W * 0.3, u * 0.032)
+        _say(d, "home", (cx, H - u * 0.13), _spaced(role), font=rf, fill=(255, 255, 255, 245), anchor="mm")
+    name = p.get("name", "")
+    if name:
+        nm = "   ".join(_spaced(w) for w in name.split())
+        f = _fit_font(nm, MEDIUM, W * 0.9, u * 0.045)
+        _say(d, "name", (W / 2, H - u * 0.045), nm, font=f, fill=(255, 255, 255, 250), anchor="mm")
+    return _over(out, _shadowed(lay, u * 0.006, 0.6))
+
+
+def _storm(pic, m, p, W, H, color, has_logo):
+    """A storm sky with a floodlight breaking through, the number faint and huge behind the player, the
+    name at the bottom with a cool glow."""
+    u = _NOTE.u
+    base = _studio(pic, m, p, "Storm Sky", color, H, W)
+    out = base * (1 - _gradient(H, W, 0.0, 0.6, 0.7))
+    lay, d = _layer((W, H))
+    num = p.get("number", "")
+    if num:
+        f = _fit_font(num, HEAVY, W * 0.8, H * 0.55)
+        _say(d, "number", (W / 2, H * 0.42), num, font=f, fill=(255, 255, 255, 46), anchor="mm")
+    out = _over(out, lay)
+    if m is not None:
+        out = out * (1 - m) + base * m
+    title = p.get("title", "")
+    tf = _fit_ff(title, COND, 8, W * 0.86, u * 0.13)
+    out = _chrome(out, "title", (W / 2, H - u * 0.085), title, tf, "ms", top=(1, 1, 1), bottom=(0.72, 0.78, 0.9),
+                  edge=(0.03, 0.04, 0.08), glow=(0.35, 0.5, 0.85))
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.024)
+        _say(d, "line", (W / 2, H - u * 0.04), _spaced(line), font=lf, fill=(220, 228, 245, 235), anchor="mm")
+    return _over(out, lay)
+
+
+def _collector(pic, m, p, W, H, color, has_logo):
+    """A collector's magazine cover: a team-color studio with a darker panel down one side, the title
+    huge in chrome, the issue line under it, a script badge in a box at the bottom left and a ribbon
+    across the bottom right corner."""
+    u = _NOTE.u
+    from photo_presets import backgrounds
+    bg = backgrounds.make("Team Studio", W, H, p.get("color", "#1f2a44"))
+    xx = np.linspace(0, 1, W, dtype=np.float32)[None, :, None]
+    panel = (xx > 0.56).astype(np.float32)
+    bg = bg * (1 - panel * 0.45) + panel * (color * 0.7 + 0.04)
+    bg[:, int(W * 0.56):int(W * 0.56) + max(2, int(W * 0.004))] = 0.92
+    base = backgrounds.compose(pic, m[..., 0], bg, wrap=0.5, shadow=0.0) if m is not None else pic * 0.5 + bg * 0.5
+    out = base.copy()
+    title = p.get("title", "")
+    tf = _fit_ff(title, COND, HEAVY_IT, W * 0.94, u * 0.2)
+    lift = tuple(color + (1 - color) * 0.5)
+    out = _chrome(out, "title", (W / 2, u * 0.02), title, tf, "mt", top=(1, 1, 1), bottom=lift, edge=(0.02, 0.02, 0.02))
+    lay, d = _layer((W, H))
+    line = p.get("line", "")
+    if line:
+        lf = _fit_ff(_spaced(line), COND, HEAVY_IT, W * 0.42, u * 0.028)
+        _say(d, "line", (W * 0.05, u * 0.035 + tf.size * 1.02), _spaced(line), font=lf, fill=(255, 255, 255, 240), anchor="lt")
+    out = _over(out, _shadowed(lay, u * 0.005, 0.6))
+    if m is not None:
+        out = out * (1 - m) + base * m
+    lay, d = _layer((W, H))
+    box = (W * 0.02, H - u * 0.2, W * 0.5, H - u * 0.07)
+    d.rounded_rectangle(box, radius=u * 0.025, fill=(8, 8, 10, 235), outline=(255, 255, 255, 235), width=max(2, int(u * 0.004)))
+    yr = p.get("minute", "")
+    if yr:
+        _say(d, "minute", ((box[0] + box[2]) / 2, box[1] + u * 0.03), yr, font=_font(DEMI, u * 0.028), fill=(255, 255, 255, 240), anchor="mm")
+    sc = p.get("away", "")
+    if sc:
+        sf = _fit_ff(sc, SUPP + "SnellRoundhand.ttc", 2, (box[2] - box[0]) * 0.86, u * 0.075)
+        _say(d, "away", ((box[0] + box[2]) / 2, box[1] + u * 0.088), sc, font=sf, fill=(255, 255, 255, 250), anchor="mm")
+    out = _over(out, lay)
+    rib = p.get("home", "")
+    if rib:  # a ribbon across the bottom right corner
+        size = int(u * 0.42)
+        r = Image.new("RGBA", (size * 2, size * 2), (0, 0, 0, 0))
+        rd = ImageDraw.Draw(r)
+        band = u * 0.055
+        rd.rectangle((0, size - band / 2, size * 2, size + band / 2), fill=(10, 10, 12, 245))
+        rd.rectangle((0, size - band / 2, size * 2, size - band / 2 + max(2, u * 0.004)), fill=_c255(color))
+        rd.rectangle((0, size + band / 2 - max(2, u * 0.004), size * 2, size + band / 2), fill=_c255(color))
+        rf = _fit_ff(rib, COND, HEAVY_IT, size * 1.2, band * 0.6)
+        rd.text((size, size), rib, font=rf, fill=_c255(color + (1 - color) * 0.35), anchor="mm")
+        r = r.rotate(45, resample=Image.BICUBIC)
+        lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        lay.alpha_composite(r, (int(W - size * 1.45), int(H - size * 1.45)))
+        _note_box("home", (W - size * 1.0, H - size * 1.0, W, H))
+        out = _over(out, _shadowed(lay, u * 0.01, 0.5))
+    return out
+
+
 MORE = {"name": _name_stack, "goal": _goal, "teamcolor": _team_color, "matchday": _matchday, "champions": _champions,
-        "jersey": _jersey, "cover": _cover_story, "split": _split, "card": _player_card, "cinematic": _cinematic}
+        "jersey": _jersey, "cover": _cover_story, "split": _split, "card": _player_card, "cinematic": _cinematic,
+        "banner": _banner, "smoke": _smoke_burst, "featured": _featured, "storm": _storm, "collector": _collector}
 LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "champions": "bc",
-           "jersey": "br", "cover": "br", "split": "tl", "card": "br", "cinematic": "tl"}
+           "jersey": "br", "cover": "br", "split": "tl", "card": "br", "cinematic": "tl",
+           "banner": "tr", "smoke": "tl", "featured": "tl", "storm": "tr", "collector": "tr"}
 
 
 def _logo_placed(out: np.ndarray, logo: Image.Image, W: int, H: int, at: dict) -> np.ndarray:
@@ -844,8 +1106,9 @@ def customized(p: dict, has_logo: bool = False) -> dict:
 
 # A team's posters: where each player's name and number go -------------------------------------
 NAME_KEY = {"spotlight": "title", "name": "title", "teamcolor": "title", "goal": "name", "mvp": "line",
-            "jersey": "title", "cover": "name", "split": "title", "card": "title", "cinematic": "title"}
-NUMBER_KEY = {"spotlight": "number", "jersey": "number", "split": "number", "card": "number"}
+            "jersey": "title", "cover": "name", "split": "title", "card": "title", "cinematic": "title",
+            "banner": "name", "smoke": "name", "featured": "name", "storm": "title"}
+NUMBER_KEY = {"spotlight": "number", "jersey": "number", "split": "number", "card": "number", "featured": "number", "storm": "number"}
 
 
 def player_fields(p: dict) -> dict:

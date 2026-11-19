@@ -52,11 +52,30 @@ SAM_PAD = 0.2  # the closer look reaches this share of the object's size around 
 
 @dataclass(frozen=True)
 class Fix:
-    """A click on the photo: x, y (shares of its width and height); add (True)
-    or take out (False) what is there."""
+    """One fix to the cut-out, in order:
+    "click": the object at x, y (shares of the photo's width and height): add (True) or take it out;
+    "brush": painted in (add) or out along points, a brush of radius r (a share of the photo's width);
+    "edge":  the refine-edge brush along points: there, the edge follows the photo's own (hair, fingers);
+    "tune":  the whole edge: x = softness (0-1), y = shift (-1 in ... +1 out)."""
     x: float
     y: float
     add: bool = True
+    kind: str = "click"
+    points: tuple = ()
+    r: float = 0.0
+
+    def to_json(self):
+        if self.kind == "click":
+            return [self.x, self.y, self.add]
+        return {"kind": self.kind, "x": self.x, "y": self.y, "add": self.add, "r": self.r,
+                "points": [[round(px, 4), round(py, 4)] for px, py in self.points]}
+
+    @staticmethod
+    def from_json(v) -> "Fix":
+        if isinstance(v, (list, tuple)):
+            return Fix(float(v[0]), float(v[1]), bool(v[2]))
+        return Fix(float(v.get("x", 0)), float(v.get("y", 0)), bool(v.get("add", True)), str(v.get("kind", "click")),
+                   tuple((float(px), float(py)) for px, py in v.get("points", [])), float(v.get("r", 0)))
 
 
 @dataclass
@@ -200,7 +219,23 @@ class Prepared:
         matte = auto.copy() if auto is not None else np.zeros((h, w), np.float32)
         ih, iw = (subject.shape if subject is not None else (self.image.height, self.image.width))
         outline = (subject > 127) if subject is not None else np.zeros((ih, iw), bool)
+        soft = shift = 0.0
         for f in self.fixes:
+            if f.kind == "tune":
+                soft, shift = float(np.clip(f.x, 0, 1)), float(np.clip(f.y, -1, 1))
+                continue
+            if f.kind in ("brush", "edge"):
+                stroke = brush_mask(f.points, f.r, (h, w))
+                if f.kind == "edge":
+                    matte = refine_edge(matte, self._guide(h, w), stroke, max(2.0, f.r * w * 0.35))
+                elif f.add:
+                    matte = np.maximum(matte, stroke)
+                else:
+                    matte = matte * (1 - stroke)
+                part = cv2.resize(stroke, (iw, ih), interpolation=cv2.INTER_LINEAR) > 0.5
+                if f.kind == "brush":
+                    outline = (outline | part) if f.add else (outline & ~part)
+                continue
             key = (f.x, f.y, h, w)
             if key not in self._pieces:
                 self._pieces[key] = segment(self.image, f.x, f.y, (h, w))
@@ -212,7 +247,15 @@ class Prepared:
             else:
                 matte = matte * (1 - piece)
                 outline &= ~part
+        matte = tune_edge(matte, soft, shift)
         return matte.astype(np.float32), (outline.astype(np.uint8) * 255 if outline.any() else None)
+
+    def _guide(self, h: int, w: int) -> np.ndarray:
+        """The photo at the cut-out's size (floats), for the refine-edge brush."""
+        key = ("guide", h, w)
+        if key not in self._pieces:
+            self._pieces[key] = cv2.resize(np.asarray(self.image.convert("RGB")), (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+        return self._pieces[key]
 
 
 def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, float, float]]) -> np.ndarray:
@@ -305,6 +348,102 @@ def _sam_mask(img: Image.Image, x: float, y: float) -> np.ndarray | None:
     if m.shape != (img.height, img.width):
         m = cv2.resize(m.astype(np.uint8), img.size, interpolation=cv2.INTER_NEAREST).astype(bool)
     return m
+
+
+def brush_mask(points, r: float, size: tuple[int, int]) -> np.ndarray:
+    """A brush stroke (points: shares of the photo; r: its radius, a share of the photo's width) as a
+    0-1 mask at size (h, w), with a slightly soft edge like a real brush."""
+    h, w = size
+    m = np.zeros((h, w), np.uint8)
+    rad = max(1, int(round(r * w)))
+    pts = [(int(round(x * w)), int(round(y * h))) for x, y in points] or []
+    for a, b in zip(pts, pts[1:] or pts):
+        cv2.line(m, a, b, 255, rad * 2, cv2.LINE_AA)
+    for p in pts:
+        cv2.circle(m, p, rad, 255, -1, cv2.LINE_AA)
+    out = m.astype(np.float32) / 255
+    return cv2.GaussianBlur(out, (0, 0), max(0.6, rad * 0.12))
+
+
+def _box(a: np.ndarray, r: int) -> np.ndarray:
+    return cv2.boxFilter(a, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REFLECT)
+
+
+def guided(I: np.ndarray, p: np.ndarray, r: int, eps: float) -> np.ndarray:
+    """The color guided filter (He et al.): p's edges made to follow the edges in the color image I.
+    It is what carries a cut-out's edge into single strands of hair."""
+    mI = [_box(I[..., c], r) for c in range(3)]
+    mp = _box(p, r)
+    cov = [_box(I[..., c] * p, r) - mI[c] * mp for c in range(3)]
+    var = np.empty(p.shape + (3, 3), np.float32)
+    for i in range(3):
+        for j in range(i, 3):
+            v = _box(I[..., i] * I[..., j], r) - mI[i] * mI[j]
+            var[..., i, j] = var[..., j, i] = v
+    var += np.eye(3, dtype=np.float32) * eps
+    a = np.linalg.solve(var, np.stack(cov, -1)[..., None])[..., 0]
+    b = mp - sum(a[..., c] * mI[c] for c in range(3))
+    ma = [_box(a[..., c], r) for c in range(3)]
+    return sum(ma[c] * I[..., c] for c in range(3)) + _box(b, r)
+
+
+def refine_edge(matte: np.ndarray, guide: np.ndarray, stroke: np.ndarray, rad: float = 6) -> np.ndarray:
+    """The refine-edge brush: where it was painted, the cut-out's edge is worked out again from the photo
+    itself (hair, fingers, a net). Each pixel there is weighed between the player's colors and the
+    background's colors close to it (learned from what is surely one or the other), then smoothed along
+    the photo's own edges, so single strands of hair come in and the grass between them stays out."""
+    ys, xs = np.nonzero(stroke > 0.02)
+    if not len(ys):
+        return matte
+    h, w = matte.shape
+    near = max(6, int(rad * 4))  # how far to look for the player's and the background's colors
+    pad = near + int(rad) + 8
+    y0, y1, x0, x1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1), max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
+    m, I, s = matte[y0:y1, x0:x1].astype(np.float32), guide[y0:y1, x0:x1], stroke[y0:y1, x0:x1]
+    unknown = s > 0.02
+    fg = ((m > 0.95) & ~unknown).astype(np.float32)
+    bg = ((m < 0.05) & ~unknown).astype(np.float32)
+    if fg.sum() < 4 or bg.sum() < 4:  # (both kinds next to the brush, or nothing to learn from)
+        fg, bg = (m > 0.95).astype(np.float32), (m < 0.05).astype(np.float32)
+    if fg.sum() < 4 or bg.sum() < 4:
+        return matte
+
+    def local_mean(weights):
+        k = near
+        n = _box(weights, k)
+        out = np.stack([_box(I[..., c] * weights, k) for c in range(3)], -1) / np.maximum(n, 1e-6)[..., None]
+        far = n < 1e-3  # nothing of that kind close: its average over the whole brush area
+        if far.any():
+            out[far] = (I * weights[..., None]).sum((0, 1)) / max(weights.sum(), 1e-6)
+        return out
+
+    F, B = local_mean(fg), local_mean(bg)
+    d = F - B
+    alpha = ((I - B) * d).sum(-1) / np.maximum((d * d).sum(-1), 1e-3)
+    alpha = np.clip(alpha, 0, 1)
+    alpha = np.clip(guided(I, alpha.astype(np.float32), max(1, int(rad * 0.5)), 1e-3), 0, 1)
+    alpha = np.clip((alpha - 0.1) / 0.8, 0, 1)  # (no grey haze left in the background)
+    keep = cv2.erode((m > 0.97).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    alpha[keep] = 1.0
+    out = matte.copy()
+    out[y0:y1, x0:x1] = m * (1 - s) + alpha * s
+    return out
+
+
+def tune_edge(matte: np.ndarray, soft: float, shift: float) -> np.ndarray:
+    """The whole edge softened (feathered) and moved in or out, like Select and Mask's sliders."""
+    if not soft and not shift:
+        return matte
+    h, w = matte.shape
+    unit = max(h, w) / 1000
+    out = matte
+    if shift:
+        k = max(1, int(round(abs(shift) * 6 * unit)))
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1))
+        out = cv2.dilate(out, ker) if shift > 0 else cv2.erode(out, ker)
+    if soft:
+        out = cv2.GaussianBlur(out, (0, 0), max(0.3, soft * 4 * unit))
+    return np.clip(out, 0, 1).astype(np.float32)
 
 
 def segment(img: Image.Image, x: float, y: float, size: tuple[int, int]) -> np.ndarray:

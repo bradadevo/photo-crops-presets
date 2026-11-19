@@ -85,7 +85,8 @@ class Engine:
         self.fixes: dict[tuple[str, str], list[Fix]] = {}
         # AI drawings, kept so a look's export (and reel) reuse its preview's drawing
         self.drawings: OrderedDict = OrderedDict()
-        self.brand_dir = Path("~/.config/photo-crops-presets").expanduser()  # where the brand kit's logos are
+        self.brand_dir = Path("~/.config/photo-crops-presets").expanduser()
+        self.bg_dir = Path("~/.cache/photo-crops-presets/backgrounds").expanduser()  # your own backgrounds (set by the app)  # where the brand kit's logos are
         # distractions removed from each photo: a list of removals, each a list of brush strokes
         self.removals: dict[str, list[list[dict]]] = {}
         self._cleaned: OrderedDict = OrderedDict()  # (photo, removals): its cleaned image and 16-bit copy
@@ -245,6 +246,29 @@ class Engine:
         done, _ = pipeline.finish(before, look, r.recipe, alpha)
         return done
 
+    def background_image(self, bg: dict, w: int, h: int) -> np.ndarray:
+        """The new background (made, or your picture) at w x h, kept for the next picture of that size."""
+        from photo_presets import backgrounds
+        key = (bg["src"], bg.get("color"), w, h)
+        cache = self.__dict__.setdefault("_bgs", {})
+        if key not in cache:
+            if len(cache) > 6:
+                cache.pop(next(iter(cache)))
+            if bg["src"].startswith("file:"):
+                p = self.bg_dir / bg["src"][5:]
+                cache[key] = backgrounds.from_image(p, w, h) if p.is_file() else backgrounds.make("Studio Grey", w, h)
+            else:
+                cache[key] = backgrounds.make(bg["src"], w, h, bg.get("color", "#1f2a44"))
+        return cache[key]
+
+    def with_background(self, arr: np.ndarray, m: np.ndarray, bg: dict) -> np.ndarray:
+        from photo_presets import backgrounds
+        h, w = arr.shape[:2]
+        if m.shape != (h, w):
+            m = cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR)
+        return backgrounds.compose(arr, m, self.background_image(bg, w, h), bg.get("blur", 0), bg.get("dim", 0),
+                                   bg.get("match", 0.35), bg.get("wrap", 0.5))
+
     def finalize(self, r: "Result", arr: np.ndarray, areas: bool = True, geometry: bool = True,
                  texts: bool = True, removals: bool = True) -> np.ndarray:
         """The result's picture (floats 0-1, any size) with its edits: parts
@@ -253,6 +277,10 @@ class Engine:
         if not edits.edited(e):
             return arr
         out = self.removed(r, arr) if removals else arr
+        if e.get("background"):  # the player in front of a new background (before parts, crop and poster)
+            m = self.cutout(r)
+            if m is not None:
+                out = self.with_background(out, m, e["background"])
         if areas:
             for a in e.get("areas", []):
                 out = edits.adjust_part(out, self.part(r, a["x"], a["y"], *out.shape[:2]), a)
@@ -378,12 +406,20 @@ class Engine:
     def fixes_for(self, r: Result) -> list[Fix]:
         return list(self.fixes.get((str(r.source), r.crop), []))
 
-    def fix_view(self, r: Result) -> Image.Image:
-        """The original photo with the cut-out tinted blue and your clicks
-        marked (green: added, red: taken out), for fixing it."""
+    def fix_view(self, r: Result, view: str = "tint") -> Image.Image:
+        """The original photo with the cut-out tinted blue and your clicks marked (green: added, red:
+        taken out), for fixing it. view: "tint"; "black" or "white" (the player alone on it, to see the
+        edge); "mask" (the cut-out itself, white on black)."""
         before = pipeline.to_array(r.before)
         m = self.cutout(r)
         out = before.copy()
+        if m is not None and view in ("black", "white", "mask"):
+            a = m[..., None]
+            if view == "mask":
+                out = np.repeat(a, 3, axis=2)
+            else:
+                out = before * a + (0.0 if view == "black" else 1.0) * (1 - a)
+            return Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8))
         if m is not None:
             a = m[..., None]
             out = before * (1 - 0.5 * a) + CUTOUT_TINT * 0.5 * a
@@ -394,6 +430,8 @@ class Engine:
         h, w = img.shape[:2]
         size = max(6, int(max(h, w) * 0.007))
         for f in self.fixes_for(r):
+            if f.kind != "click":  # (strokes show in the cut-out itself)
+                continue
             x, y = to_frame(r.frame, f.x, f.y)
             if not (0 <= x <= 1 and 0 <= y <= 1):
                 continue

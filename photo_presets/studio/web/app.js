@@ -32,6 +32,7 @@ const ICONS = {
   clip: '<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
   crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  brush: '<path d="M9.06 11.9 17.5 3.5a2.12 2.12 0 0 1 3 3l-8.44 8.44"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/>',
   eraser: '<path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L11 21z"/><path d="M22 21H7M5 11l9 9"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
   pipette: '<path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3z"/>',
@@ -173,7 +174,7 @@ const st = {
   modelsLoaded: false,
   activePhoto: null, current: null, mode: "edit", view: "single", tab: "looks",
   picked: new Set(), filter: store.get("filter", "All"), query: "", fromEdits: store.get("fromEdits", true),
-  scope: "one", crop: "none", compare: false, split: 50, fixing: false, fixAdd: true, fixVer: 0,
+  scope: "one", crop: "none", compare: false, split: 50, fixing: false, fixAdd: true, fixVer: 0, fixR: store.get("fixR", 0.02),
   reelSource: "kept", reelTask: null, reelOrder: [], reelOut: new Set(),
   zoom: { on: false, x: 50, y: 50, k: 2.5 }, survey: [],
   tool: null, cropDraft: null, brush: { r: store.get("brush", 0.025), strokes: [], points: [], order: [] }, areaSel: null, textSel: null,
@@ -444,13 +445,14 @@ function renderViewer() {
     return;
   }
   const sig = viewerSignature(cur);
-  v.classList.remove("survey-mode");
+  v.classList.remove("survey-mode", "has-cutbar");
   if (sig === viewerSig) return updateViewerLive(cur);
   viewerSig = sig;
   if (st.finding) { renderFindPick(v); return; }
   if (cur && cur.state === "done" && st.tool) { renderTool(v, cur); return; }
   if (cur && cur.state === "done") {
-    const src = st.fixing ? `/img/slot/${cur.id}/0/fix.jpg?v=${st.fixVer}` : slotImg(cur);
+    const fv = st.fixView && st.fixView !== "tint" ? "-" + st.fixView : "";
+    const src = st.fixing ? `/img/slot/${cur.id}/0/fix${fv}.jpg?v=${st.fixVer}` : slotImg(cur);
     v.innerHTML = `<div class="frame${st.fixing ? " fixing" : ""}${st.zoom.on ? " zoomed" : ""}" id="frame" style="--split:${st.split}%;${zoomVars()}">
         <div class="layer"><img class="after" src="${src}" alt="${esc(cur.title)}" draggable="false" data-base="${st.fixing ? "" : `${cur.width}x${cur.height}`}"></div>
         ${st.fixing || st.zoom.on || st.compare ? "" : `<div class="texts" id="texts"></div>`}
@@ -460,6 +462,7 @@ function renderViewer() {
       </div>
       ${st.fixing ? fixBar() : ""}
       <div class="caption">${toolbar(cur)}</div>`;
+    v.classList.toggle("has-cutbar", !!st.fixing);  // (room under the picture for the cut-out tools: never over the hair or feet)
     if (st.fixing) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
     paintTexts(cur);
     bindViewer(cur);
@@ -516,16 +519,6 @@ function toolbar(cur) {
   </div>`;
 }
 
-function fixBar() {
-  return `<div class="fixbar toolbar">
-    <div class="seg small"><button data-fix="add" class="${st.fixAdd ? "on" : ""}">${icon("plus")} Add</button><button data-fix="remove" class="${st.fixAdd ? "" : "on"}">${icon("x")} Take out</button></div>
-    <span class="sep"></span>
-    <button data-fix="undo" title="Undo the last click">${icon("undo")}</button>
-    <button data-fix="reset">Automatic</button>
-    <span class="sep"></span>
-    <button data-fix="remake" class="on">Remake this photo's looks</button>
-    <button data-fix="done">Done</button></div>`;
-}
 
 function updateViewerLive(cur) {
   if (!cur || cur.state === "done") return;
@@ -598,18 +591,17 @@ function bindViewer(cur) {
     };
   }
   if (st.fixing && f) {
-    f.onclick = async (e) => {
-      const r = f.getBoundingClientRect();
-      await api(`/api/slots/${cur.id}/fix`, { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, add: st.fixAdd });
-      st.fixVer++; renderViewer();
-    };
+    if (!st.fixTune || st.fixTuneFor !== cur.id) { st.fixTune = cur.tune || [0, 0]; st.fixTuneFor = cur.id; }
+    bindFixBrush(cur, v);  // clicks, brush strokes, refine edge (background.js)
     v.querySelectorAll("[data-fix]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation();
       const a = b.dataset.fix;
       if (a === "add" || a === "remove") { st.fixAdd = a === "add"; viewerSig = ""; renderViewer(); return; }
       if (a === "done") { st.fixing = false; renderViewer(); return; }
       if (a === "undo" || a === "reset") {
-        await api(`/api/slots/${cur.id}/fix`, { [a]: true }); st.fixVer++; renderViewer(); return;
+        await api(`/api/slots/${cur.id}/fix`, { [a]: true }); st.fixVer++;
+        if (a === "reset") st.fixTune = [0, 0];
+        viewerSig = ""; renderViewer(); return;
       }
       if (a === "remake") {
         st.fixing = false; renderViewer();

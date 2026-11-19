@@ -35,7 +35,7 @@ AREA_EDGE = 1024  # px: a part's traced outline, scaled to each picture
 def edited(edits: dict | None) -> bool:
     e = edits or {}
     return bool(e.get("areas") or e.get("angle") or e.get("crop") or e.get("texts") or e.get("removals")
-                or e.get("logos") or e.get("poster"))
+                or e.get("logos") or e.get("poster") or e.get("background"))
 
 
 def cover_scale(w: int, h: int, angle: float) -> float:
@@ -282,6 +282,14 @@ def clean(edits: dict | None) -> dict:
                             "strokes": [{"pts": [[float(x), float(y)] for x, y in st.get("pts", [])][:2000],
                                          "r": float(st.get("r", 0.02))} for st in rm.get("strokes", [])][:200]}
                            for rm in e["removals"] if rm.get("points") or rm.get("strokes")][:30]
+    bg = e.get("background")
+    if bg and isinstance(bg, dict) and bg.get("src"):  # a new background behind the player (see backgrounds.py)
+        from photo_presets import backgrounds
+        src = str(bg["src"])[:120]
+        if src in backgrounds.NAMES or (src.startswith("file:") and "/" not in src[5:] and ".." not in src):
+            num = lambda k, d: float(np.clip(float(bg.get(k, d)), 0, 1))
+            out["background"] = {"src": src, "color": str(bg.get("color") or "#1f2a44")[:9], "blur": num("blur", 0.0),
+                                 "dim": num("dim", 0.0), "match": num("match", 0.35), "wrap": num("wrap", 0.5)}
     if e.get("poster"):  # a social post layout around the picture (see poster.py)
         from photo_presets import poster
         p = poster.clean(e["poster"])
