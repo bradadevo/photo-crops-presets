@@ -730,6 +730,9 @@ def restart():
         time.sleep(0.4)
         exe = Path(sys.executable)
         bundle = next((p for p in exe.parents if p.suffix == ".app"), None)
+        new = Path("~/Applications/VS Digital Pro.app").expanduser()
+        if bundle is not None and not bundle.exists() and new.exists():
+            bundle = new  # (the app was renamed and moved: open it where it is now)
         if bundle is not None:  # the Mac app: open it again once this one has quit
             subprocess.Popen(["/bin/sh", "-c", f"sleep 1.2; open -n '{bundle}'"], start_new_session=True)
             os._exit(0)
