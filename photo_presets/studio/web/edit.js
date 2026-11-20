@@ -1,4 +1,4 @@
-/* AllProPhoto Studio: editing a picture. The Edit tab (light, color, the look, parts, text),
+/* VS Digital Pro Studio: editing a picture. The Edit tab (light, color, the look, parts, text),
    the tools used on the picture itself (crop and straighten, remove distractions, adjust a
    part, white balance, text), and undo / redo. Loaded after app.js, whose helpers it uses. */
 "use strict";

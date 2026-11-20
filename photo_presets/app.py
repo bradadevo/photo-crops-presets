@@ -8,7 +8,7 @@ It serves two ways of working:
   on every photo, fine-tune it once for all of them, export them all (and make
   a reel).
 
-    uv run allprophoto
+    uv run vsdigitalpro
 """
 
 import base64
@@ -526,7 +526,7 @@ def _deliver(chosen, how, folder, kind, sizes, creator, notice, contact, marked,
     if marked:
         text = (mark_text or "").strip() or credit.notice() or "PROOF"
         mark = deliver.Watermark(text, mark_style, float(mark_opacity))
-    into = Path(tempfile.mkdtemp(prefix="allprophoto-zip-")) if how == ZIP else dest
+    into = Path(tempfile.mkdtemp(prefix="vsdigitalpro-zip-")) if how == ZIP else dest
     state = {"done": 0, "name": chosen[0].title}
 
     def tick(done, total, name):
@@ -550,7 +550,7 @@ def _deliver(chosen, how, folder, kind, sizes, creator, notice, contact, marked,
     if how == ZIP:
         dest.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y-%m-%d %H.%M.%S")
-        zipped = dest / f"AllProPhoto {stamp} ({photos}).zip"
+        zipped = dest / f"VS Digital Pro {stamp} ({photos}).zip"
         with zipfile.ZipFile(zipped, "w", zipfile.ZIP_DEFLATED) as z:
             for f in sorted(into.rglob("*")):
                 if f.is_file():
@@ -828,7 +828,7 @@ def choices_updates():
 
 # Lightroom presets ----------------------------------------------------------------------
 
-CHART_FILE = PREVIEWS / "chart" / "AllProPhoto color chart.tif"
+CHART_FILE = PREVIEWS / "chart" / "VS Digital Pro color chart.tif"
 
 LR_STEPS = """
 **In Lightroom Classic**
@@ -1070,14 +1070,14 @@ def build() -> gr.Blocks:
     ids = lib.ids()
     names = list(presets.load_all())
     src = lib.sources
-    with gr.Blocks(title="AllProPhoto") as demo:
+    with gr.Blocks(title="VS Digital Pro") as demo:
         results = gr.State([])
         selected = gr.State(0)
         card = gr.HTML("", visible=False, elem_id="progress-card")  # floats over the page while looks are made
         thumbs = gr.State([])  # the gallery's pictures, so one fine-tuned look updates alone
         trial = gr.State([])  # every photo from step 1, while looks were tried on one of them
         gr.Markdown(
-            "# AllProPhoto\n"
+            "# VS Digital Pro\n"
             "Pro looks for your sports photos. Faces stay clean of effects, and your originals are never "
             "changed.\n\n"
             "<div class='steps-strip'><span>1 · Add photos</span><span>2 · Choose looks</span>"

@@ -28,7 +28,7 @@ _STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_ST
 HOME = _STATE or Path("~/.config/photo-crops-presets").expanduser()
 STATE_FILE = HOME / "cull.json"
 CACHE = (_STATE / "cull-cache") if _STATE else Path("~/.cache/photo-crops-presets/cull").expanduser()
-IMPORTS = (_STATE / "imports") if _STATE else Path("~/Pictures/AllProPhoto Imports").expanduser()
+IMPORTS = (_STATE / "imports") if _STATE else Path("~/Pictures/VS Digital Pro Imports").expanduser()
 TEST_OUT = (_STATE / "out") if _STATE else None  # a test copy never writes beside your photos
 VIEW_EDGE = 2048
 JPEG_HEADERS = {"Cache-Control": "private, max-age=604800"}

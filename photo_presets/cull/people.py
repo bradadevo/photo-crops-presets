@@ -1,5 +1,5 @@
 """People in the Culling tab: the players you name (from a click on them, or just their jersey number)
-and which photos of an event they are in, best first, one per burst. Uses AllProPhoto's player finder
+and which photos of an event they are in, best first, one per burst. Uses VS Digital Pro's player finder
 (photo_presets.players: faces with a free model on this Mac, numbers read by the Mac's own text
 reading, kit colors), with one addition: a player can be just a number."""
 

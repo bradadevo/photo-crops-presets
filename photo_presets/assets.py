@@ -80,6 +80,11 @@ def _usable(name: str) -> bool:
     return "__MACOSX" not in name and not Path(name).name.startswith(".")
 
 
+def _renamed(lut: str) -> str:
+    """A pro grade by its name from before the app was renamed ("APP Prime Time" is "VS Prime Time")."""
+    return "VS " + lut[4:] if lut.startswith("APP ") and (BUILTIN_LUTS / f"VS {lut[4:]}.cube").exists() else lut
+
+
 class Library:
     def __init__(self, sources: Sources | None = None):
         self.sources = sources or Sources.load()
@@ -91,8 +96,9 @@ class Library:
     def scan(self) -> None:
         s = self.sources
         self.luts, self.textures, self.overlays = {}, {}, {}
-        for p in sorted(BUILTIN_LUTS.glob("*.cube")):  # AllProPhoto's own pro grades, always there
+        for p in sorted(BUILTIN_LUTS.glob("*.cube")):  # VS Digital Pro's own pro grades, always there
             self.luts[p.stem] = Source(str(p))
+
         for folder in _paths(s.lut_folders):
             if folder.is_dir():
                 for p in sorted(folder.rglob("*.cube")):
@@ -149,13 +155,13 @@ class Library:
 
     def has(self, asset_id: str) -> bool:
         kind, _, name = asset_id.partition(":")
-        return {"lut": name in self.luts, "texture": name in self.textures, "overlay": name in self.overlays,
+        return {"lut": _renamed(name) in self.luts, "texture": name in self.textures, "overlay": name in self.overlays,
                 "generated": name in procedural.KINDS}.get(kind, False)
 
     # Fetching -----------------------------------------------------------------
 
     def lut_path(self, name: str) -> str:
-        return str(_local(self.luts[name], ".cube"))
+        return str(_local(self.luts[_renamed(name)], ".cube"))
 
     def texture(self, asset_id: str, h: int, w: int, seed: int = 0) -> np.ndarray:
         """The texture as floats (H, W, 3) in 0-1, covering h x w."""

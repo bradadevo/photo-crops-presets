@@ -525,7 +525,7 @@ def test_floodlights_stand_high_above_the_field_and_players_cast_a_shadow(empty_
 
 
 def test_pro_grades_are_real_luts_kind_to_skin_and_the_pitch():
-    """AllProPhoto's own grades: real .cube LUTs that load, in their own group, never turning skin
+    """VS Digital Pro's own grades: real .cube LUTs that load, in their own group, never turning skin
     orange or the pitch yellow."""
     import numpy as np
     from photo_presets import grades, luts, presets

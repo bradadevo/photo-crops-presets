@@ -1,4 +1,4 @@
-"""AllProPhoto Studio: the app's own web page (studio/web) and the small local
+"""VS Digital Pro Studio: the app's own web page (studio/web) and the small local
 server behind it. The looks engine does the work; this file keeps the session
 (photos, the looks made, the ones you keep) and answers the page.
 
@@ -6,7 +6,7 @@ Everything that makes pictures runs on one worker thread, in order of
 importance: fixing a cut-out, then the looks you asked for, then exports and
 reels, then the little look previews on your photo (so they never slow a run).
 
-    uv run allprophoto            (the classic Gradio app: uv run allprophoto-classic)
+    uv run vsdigitalpro            (the classic Gradio app: uv run vsdigitalpro-classic)
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ CONFIG = Path("~/.config/photo-crops-presets").expanduser()
 STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_STATE") else None
 PREFS = (STATE or CONFIG) / "studio.json"
 EXAMPLES = (STATE / "examples") if STATE else Path("~/.cache/photo-crops-presets/examples").expanduser()  # each look's last picture, for the picker
-WORK = Path(tempfile.mkdtemp(prefix="allprophoto-"))  # songs for reels
+WORK = Path(tempfile.mkdtemp(prefix="vsdigitalpro-"))  # songs for reels
 ADDED = (STATE / "added") if STATE else Path("~/.cache/photo-crops-presets/added").expanduser()  # photos dropped or pasted
 EDITED = ADDED.parent / "edited"
 if STATE:  # a test copy: its own presets and their pictures too (never your real ones)
@@ -78,7 +78,7 @@ class Worker:
     def __init__(self):
         self.q: PriorityQueue = PriorityQueue()
         self.order = itertools.count()
-        threading.Thread(target=self._loop, daemon=True, name="allprophoto-worker").start()
+        threading.Thread(target=self._loop, daemon=True, name="vsdigitalpro-worker").start()
 
     def submit(self, priority: int, fn, *args) -> Future:
         fut: Future = Future()
@@ -376,7 +376,7 @@ class Keeper:
     def start(self):
         if not self.started:
             self.started = True
-            threading.Thread(target=self._loop, daemon=True, name="allprophoto-keeper").start()
+            threading.Thread(target=self._loop, daemon=True, name="vsdigitalpro-keeper").start()
 
     def _loop(self):
         while True:
@@ -648,7 +648,7 @@ def start_run(jobs: list[tuple[int, Job]], crop: str, by_photo: list[int] | None
 
 # The app -------------------------------------------------------------------------------------
 
-app = FastAPI(title="AllProPhoto")
+app = FastAPI(title="VS Digital Pro")
 from photo_presets.studio import check as _check  # the Check tab (how a clip or photo was shot, and fixes)
 app.include_router(_check.router)
 from photo_presets.studio import cull as _cull  # the Culling tab (pass 1 by the app, pass 2 by you)
@@ -1634,9 +1634,9 @@ def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo
     try:
         n = len(chosen)
         photos = f"{n} picture{'s' if n != 1 else ''}"
-        stamp = f"AllProPhoto {time.strftime('%Y-%m-%d %H.%M.%S')} ({photos})"
+        stamp = f"VS Digital Pro {time.strftime('%Y-%m-%d %H.%M.%S')} ({photos})"
         # separate files go in a folder of their own (never scattered over the Desktop)
-        into = Path(tempfile.mkdtemp(prefix="allprophoto-zip-")) if how == ZIP else engine._unique(dest / stamp)
+        into = Path(tempfile.mkdtemp(prefix="vsdigitalpro-zip-")) if how == ZIP else engine._unique(dest / stamp)
         saved, notes = E.export(chosen, into, tick, kind, sizes, credit, mark, logo, recipes)
         if how == ZIP:
             dest.mkdir(parents=True, exist_ok=True)
@@ -1844,7 +1844,7 @@ async def add_background(file: UploadFile = File(...)):
         try:
             img = ims.load(tmp).image.convert("RGB")
         except Exception:
-            raise HTTPException(400, "That file isn't a picture AllProPhoto can open")
+            raise HTTPException(400, "That file isn't a picture VS Digital Pro can open")
         finally:
             tmp.unlink(missing_ok=True)
         img.thumbnail((4096, 4096))
@@ -2051,7 +2051,7 @@ def _classic() -> None:
 
 
 def _ours(port: int) -> bool:
-    """Is AllProPhoto already running on this port?"""
+    """Is VS Digital Pro already running on this port?"""
     import urllib.request
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/looks", timeout=1.5) as r:
@@ -2061,7 +2061,7 @@ def _ours(port: int) -> bool:
 
 
 def _older(port: int) -> bool:
-    """Is the AllProPhoto running on this port an older version than the code here?"""
+    """Is the VS Digital Pro running on this port an older version than the code here?"""
     import json
     import urllib.request
     try:
@@ -2072,7 +2072,7 @@ def _older(port: int) -> bool:
 
 
 def _retire(port: int) -> None:
-    """Asks the older AllProPhoto to save and quit (or ends it, if it is too old to be asked)."""
+    """Asks the older VS Digital Pro to save and quit (or ends it, if it is too old to be asked)."""
     import signal
     import urllib.request
     try:
@@ -2083,7 +2083,7 @@ def _retire(port: int) -> None:
             out = subprocess.run(["lsof", "-tiTCP:%d" % port, "-sTCP:LISTEN"], capture_output=True, text=True).stdout
             for pid in out.split():
                 cmd = subprocess.run(["ps", "-o", "command=", "-p", pid], capture_output=True, text=True).stdout
-                if "AllProPhoto" in cmd or "photo_presets" in cmd or "allprophoto" in cmd:
+                if any(n in cmd for n in ("VS Digital Pro", "vsdigitalpro", "AllProPhoto", "allprophoto", "photo_presets")):  # (its old name too)
                     os.kill(int(pid), signal.SIGTERM)
         except (OSError, ValueError):
             pass
@@ -2100,27 +2100,27 @@ def _free(port: int) -> bool:
 
 
 def _window(url: str) -> None:
-    """AllProPhoto in its own Mac window, named and with its icon in the Dock."""
+    """VS Digital Pro in its own Mac window, named and with its icon in the Dock."""
     import webview
     try:
         from AppKit import NSApplication, NSImage
         from Foundation import NSBundle
         info = NSBundle.mainBundle().infoDictionary()
-        info["CFBundleName"] = info["CFBundleDisplayName"] = "AllProPhoto"
+        info["CFBundleName"] = info["CFBundleDisplayName"] = "VS Digital Pro"
         icon = WEB / "icon.png"
         if icon.exists():
             NSApplication.sharedApplication().setApplicationIconImage_(
                 NSImage.alloc().initWithContentsOfFile_(str(icon)))
     except Exception:
         pass
-    win = webview.create_window("AllProPhoto", url, width=1480, height=920, min_size=(980, 620),
+    win = webview.create_window("VS Digital Pro", url, width=1480, height=920, min_size=(980, 620),
                                 background_color="#0b0c0e", text_select=False)
     win.events.closed += _shut_down  # closing the window quits the whole app, engine included
     webview.start()
 
 
 def main() -> int:
-    """uv run allprophoto [--window] [--port N] [--no-browser]"""
+    """uv run vsdigitalpro [--window] [--port N] [--no-browser]"""
     import uvicorn
     import webbrowser
     port = 7860

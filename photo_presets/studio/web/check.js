@@ -1,4 +1,4 @@
-/* AllProPhoto Studio: the Check tab. How a clip or photo was shot, what is holding it back, fixes for
+/* VS Digital Pro Studio: the Check tab. How a clip or photo was shot, what is holding it back, fixes for
    the file (a new copy; the original is never changed), what to change next time, files compared side
    by side, and the assessment exported. Loaded after app.js, whose helpers it uses. */
 "use strict";

@@ -92,7 +92,7 @@ def auto_white_balance(arr: np.ndarray) -> np.ndarray:
     if mid.sum() < 100:
         return arr
     # gray-world as OpenCV's GrayworldWB does it (saturation threshold 0.95): the channel averages of
-    # the pixels that are not fully saturated, evened out (AllProPhoto's OpenCV has no xphoto module)
+    # the pixels that are not fully saturated, evened out (VS Digital Pro's OpenCV has no xphoto module)
     hi, lo = src.max(axis=2), src.min(axis=2)
     usable = (hi > 0) & ((hi - lo) / np.maximum(hi, 1e-6) < 0.95)
     if usable.sum() < 100:

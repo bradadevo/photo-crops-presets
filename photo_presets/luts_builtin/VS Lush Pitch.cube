@@ -1,5 +1,5 @@
-TITLE "APP Lush Pitch"
-# AllProPhoto pro color grade
+TITLE "VS Lush Pitch"
+# VS Digital Pro pro color grade
 LUT_3D_SIZE 33
 DOMAIN_MIN 0.0 0.0 0.0
 DOMAIN_MAX 1.0 1.0 1.0

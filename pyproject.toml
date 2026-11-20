@@ -31,8 +31,12 @@ dependencies = [
 [project.scripts]
 photo-crops = "photo_crops.cli:main"
 photo-crops-ui = "photo_crops.ui:main"
+vsdigitalpro = "photo_presets.studio.server:main"
+vsdigitalpro-classic = "photo_presets.app:main"
+vsdigitalpro-install-app = "photo_presets.studio.macapp:main"
+vsdigitalpro-batch = "photo_presets.cli:main"
+# the old names still work
 allprophoto = "photo_presets.studio.server:main"
-allprophoto-classic = "photo_presets.app:main"
 allprophoto-install-app = "photo_presets.studio.macapp:main"
 allprophoto-batch = "photo_presets.cli:main"
 # the earlier names still work

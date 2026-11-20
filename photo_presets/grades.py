@@ -1,5 +1,5 @@
-"""AllProPhoto's own pro color grades, made here as real 3D LUTs (.cube files, 33 points a side) so
-the same look works in AllProPhoto, Final Cut Pro, Lightroom or Photoshop. Each grade is a short
+"""VS Digital Pro's own pro color grades, made here as real 3D LUTs (.cube files, 33 points a side) so
+the same look works in VS Digital Pro, Final Cut Pro, Lightroom or Photoshop. Each grade is a short
 list of film-style moves: a tone curve, matte blacks, a highlight roll-off, split toning, and
 color moves by hue (the pitch's greens, skin, sky and kit blues), always kind to skin.
 
@@ -116,52 +116,52 @@ def cube(g: dict, title: str) -> str:
     b, gg, rr = np.meshgrid(r, r, r, indexing="ij")  # .cube order: red changes fastest
     rgb = np.stack([rr.ravel(), gg.ravel(), b.ravel()], 1)
     out = grade(rgb, g)
-    lines = [f'TITLE "{title}"', "# AllProPhoto pro color grade", f"LUT_3D_SIZE {N}", "DOMAIN_MIN 0.0 0.0 0.0",
+    lines = [f'TITLE "{title}"', "# VS Digital Pro pro color grade", f"LUT_3D_SIZE {N}", "DOMAIN_MIN 0.0 0.0 0.0",
              "DOMAIN_MAX 1.0 1.0 1.0"]
     lines += [f"{v[0]:.6f} {v[1]:.6f} {v[2]:.6f}" for v in out]
     return "\n".join(lines) + "\n"
 
 
-# The grades. Names are AllProPhoto's own.
+# The grades. Names are VS Digital Pro's own.
 GRADES: dict[str, dict] = {
     # a premium broadcast look: rich, deep and clean, cool shadows, warm skin, the pitch a true green
-    "APP Prime Time": {"contrast": 0.14, "rolloff": 0.5, "saturation": 1.04, "shadow_desat": 0.3,
+    "VS Prime Time": {"contrast": 0.14, "rolloff": 0.5, "saturation": 1.04, "shadow_desat": 0.3,
                        "hues": [(GRASS, 12, 0.85, -0.04, 26), (BLUE, 0, 1.1, 0.0), (RED, 0, 1.06, 0.0)],
                        "shadows": ("#1d3a55", 0.10), "highlights": ("#ffe2c0", 0.04)},
     # late-afternoon sun: amber highlights, a soft roll-off, gently teal shadows (the grass stays green)
-    "APP Golden Hour": {"contrast": 0.1, "rolloff": 0.6, "saturation": 0.98,
+    "VS Golden Hour": {"contrast": 0.1, "rolloff": 0.6, "saturation": 0.98,
                         "hues": [(GRASS, 16, 0.78, -0.02, 26), (YELLOW, 0, 0.85, 0.0), (BLUE, 0, 0.9, 0.0)],
                         "shadows": ("#24464f", 0.10), "highlights": ("#ffb256", 0.2), "lift": 0.015, "exposure": 0.04},
     # a night match under the lights: cool and deep, the kits glowing, skin still skin
-    "APP Night Match": {"exposure": -0.2, "contrast": 0.2, "saturation": 0.95, "shadow_desat": 0.5,
+    "VS Night Match": {"exposure": -0.2, "contrast": 0.2, "saturation": 0.95, "shadow_desat": 0.5,
                         "hues": [(GRASS, 30, 0.6, -0.06, 30), (BLUE, -5, 1.2, 0.02), (TEAL, 0, 1.1, 0.0)],
                         "shadows": ("#0d2440", 0.24), "highlights": ("#d8ecff", 0.06), "rolloff": 0.5},
     # the big-film look: teal shadows and background, warm skin and highlights
-    "APP Blockbuster": {"contrast": 0.16, "saturation": 1.0, "rolloff": 0.5,
+    "VS Blockbuster": {"contrast": 0.16, "saturation": 1.0, "rolloff": 0.5,
                         "hues": [(GRASS, 45, 0.7, -0.04, 34), (BLUE, -20, 1.05, 0.0), (YELLOW, -8, 0.9, 0.0)],
                         "shadows": ("#0f4c5c", 0.2), "highlights": ("#ffb070", 0.1)},
     # silvery, harsh and gritty: the bleach-bypass film process
-    "APP Bleach Bypass": {"exposure": -0.2, "bleach": 0.55, "contrast": 0.08, "saturation": 0.85, "skin_keep": 0.4,
+    "VS Bleach Bypass": {"exposure": -0.2, "bleach": 0.55, "contrast": 0.08, "saturation": 0.85, "skin_keep": 0.4,
                           "hues": [(GRASS, 10, 0.8, 0.0, 30)], "shadows": ("#1e2a30", 0.06), "rolloff": 0.6},
     # soft film stock: pastel, warm, lifted blacks, natural greens
-    "APP Film Stock": {"contrast": 0.06, "rolloff": 0.7, "saturation": 0.92, "highlight_desat": 0.3,
+    "VS Film Stock": {"contrast": 0.06, "rolloff": 0.7, "saturation": 0.92, "highlight_desat": 0.3,
                        "hues": [(GRASS, 14, 0.8, 0.02, 28), (BLUE, 8, 0.88, 0.02), (RED, 4, 0.95, 0.0)],
                        "shadows": ("#2c3e44", 0.08), "highlights": ("#ffe1bd", 0.07), "lift": 0.05, "gain": 0.97},
     # old slide film: saturated reds and blues, deep contrast, a vintage warmth
-    "APP Heritage Chrome": {"contrast": 0.2, "saturation": 1.04, "shadow_desat": 0.2, "rolloff": 0.4,
+    "VS Heritage Chrome": {"contrast": 0.2, "saturation": 1.04, "shadow_desat": 0.2, "rolloff": 0.4,
                             "hues": [(RED, -4, 1.18, -0.03), (BLUE, 6, 1.2, -0.03), (GRASS, 18, 0.8, -0.05, 28),
                                      (YELLOW, 0, 0.85, 0.0)],
                             "highlights": ("#ffe9c4", 0.06), "shadows": ("#231a14", 0.06)},
     # crisp and cold: clean whites, steel-blue shadows, less color
-    "APP Ice Cold": {"contrast": 0.12, "saturation": 0.8, "skin_keep": 0.75, "rolloff": 0.5,
+    "VS Ice Cold": {"contrast": 0.12, "saturation": 0.8, "skin_keep": 0.75, "rolloff": 0.5,
                      "hues": [(GRASS, 30, 0.6, 0.0, 30), (BLUE, -8, 1.1, 0.02), (YELLOW, 0, 0.7, 0.0)],
                      "shadows": ("#24435f", 0.16), "highlights": ("#e6f2ff", 0.08)},
     # the pitch at its best: deep, rich greens, punchy kits, true skin
-    "APP Lush Pitch": {"contrast": 0.14, "saturation": 1.05, "rolloff": 0.5,
+    "VS Lush Pitch": {"contrast": 0.14, "saturation": 1.05, "rolloff": 0.5,
                        "hues": [(GRASS, 14, 0.98, -0.13, 26), (YELLOW, 8, 0.85, 0.0), (BLUE, 0, 1.1, 0.0)],
                        "shadows": ("#14281c", 0.05)},
     # the modern magazine look: muted, matte and calm
-    "APP Matte Editorial": {"contrast": 0.1, "saturation": 0.78, "highlight_desat": 0.2, "rolloff": 0.5,
+    "VS Matte Editorial": {"contrast": 0.1, "saturation": 0.78, "highlight_desat": 0.2, "rolloff": 0.5,
                             "hues": [(GRASS, 12, 0.7, 0.0, 28), (BLUE, 0, 0.85, 0.0)],
                             "shadows": ("#2a3236", 0.08), "highlights": ("#f6ebdc", 0.05), "lift": 0.07, "gain": 0.96},
 }

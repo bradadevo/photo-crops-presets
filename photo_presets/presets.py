@@ -187,54 +187,54 @@ STARTERS: dict[str, dict] = {
         {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.4,
          "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
-    # Pro color grades: AllProPhoto's own LUTs (photo_presets/grades.py), finished on the player
+    # Pro color grades: VS Digital Pro's own LUTs (photo_presets/grades.py), finished on the player
     "Prime Time": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Prime Time", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Prime Time", "strength": 1.0},
         {"op": "lens_blur", "radius": 0.004, "layer": "background"},
         {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
         {"op": "subject_vignette", "amount": 0.25, "spread": 0.4}]},
     "Golden Hour": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Golden Hour", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Golden Hour", "strength": 1.0},
         {"op": "glow", "amount": 0.2, "threshold": 0.7},
         {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
         {"op": "vignette", "amount": 0.25}]},
     "Night Match": {"protect_faces": True, "skin_protect": 0.8, "steps": [
-        {"op": "lut", "asset": "lut:APP Night Match", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Night Match", "strength": 1.0},
         {"op": "exposure", "stops": -1.0, "layer": "background"},
         {"op": "saturation", "amount": 0.8, "layer": "background"},
         {"op": "specular_bloom", "amount": 0.4, "threshold": 0.8},
         {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
         {"op": "vignette", "amount": 0.4}]},
     "Blockbuster": {"protect_faces": True, "skin_protect": 0.8, "steps": [
-        {"op": "lut", "asset": "lut:APP Blockbuster", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Blockbuster", "strength": 1.0},
         {"op": "exposure", "stops": -0.4, "layer": "background"},
         {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
         {"op": "grain", "amount": 0.08},
         {"op": "vignette", "amount": 0.35}]},
     "Bleach Bypass": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Bleach Bypass", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Bleach Bypass", "strength": 1.0},
         {"op": "athletic_clarity", "amount": 0.8},
         {"op": "grain", "amount": 0.15},
         {"op": "vignette", "amount": 0.35}]},
     "Film Stock": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Film Stock", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Film Stock", "strength": 1.0},
         {"op": "athletic_clarity", "amount": 0.3, "layer": "subject"},
         {"op": "grain", "amount": 0.2}]},
     "Heritage Chrome": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Heritage Chrome", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Heritage Chrome", "strength": 1.0},
         {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
         {"op": "grain", "amount": 0.12},
         {"op": "vignette", "amount": 0.25}]},
     "Ice Cold": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Ice Cold", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Ice Cold", "strength": 1.0},
         {"op": "lens_blur", "radius": 0.004, "layer": "background"},
         {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"}]},
     "Lush Pitch": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Lush Pitch", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Lush Pitch", "strength": 1.0},
         {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
         {"op": "vignette", "amount": 0.2}]},
     "Matte Editorial": {"protect_faces": True, "steps": [
-        {"op": "lut", "asset": "lut:APP Matte Editorial", "strength": 1.0},
+        {"op": "lut", "asset": "lut:VS Matte Editorial", "strength": 1.0},
         {"op": "lens_blur", "radius": 0.006, "layer": "background"},
         {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"}]},
     "Player Vignette": {"protect_faces": True, "steps": [

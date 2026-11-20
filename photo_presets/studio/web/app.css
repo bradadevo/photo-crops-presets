@@ -1,4 +1,4 @@
-/* AllProPhoto Studio: dark, photo-first, quiet chrome */
+/* VS Digital Pro Studio: dark, photo-first, quiet chrome */
 :root {
   --bg: #0b0c0e;
   --panel: #121316;
@@ -76,11 +76,14 @@ i[data-i] svg { width: 100%; height: 100%; }
 .top { grid-area: top; display: flex; align-items: center; gap: 16px; padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--line); background: var(--panel); position: relative; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 9px; width: calc(var(--rail) - 16px); }
-.mark { width: 22px; height: 22px; border-radius: 6px; background:
-  linear-gradient(135deg, var(--accent) 0%, #8a5cff 100%); position: relative; }
-.mark::after { content: ""; position: absolute; inset: 5px 6px 5px 6px; background: #fff;
-  clip-path: polygon(50% 0, 100% 100%, 70% 100%, 50% 50%, 30% 100%, 0 100%); }
-.word { font-size: 15px; letter-spacing: -0.01em; font-weight: 600; }
+/* VS Digital Pro's mark: VS, heavy and italic like a jersey, on a navy-to-blue tile (the app icon's) */
+.mark { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(135deg, #0c1838 0%, #2f6bff 100%);
+  position: relative; display: grid; place-items: center; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+.mark::before { content: ""; position: absolute; left: -4px; right: -4px; top: 58%; height: 2px; background: rgba(140,180,255,.35);
+  transform: rotate(-18deg); }
+.mark::after { content: "VS"; position: relative; color: #fff; font: italic 800 12.5px/1 "Avenir Next Condensed", "Avenir Next", var(--font);
+  letter-spacing: -.02em; text-shadow: 0 1px 2px rgba(0,8,30,.5); }
+.word { font-size: 15px; letter-spacing: -0.01em; font-weight: 600; white-space: nowrap; }
 .word b { font-weight: 700; color: var(--accent-2); }
 .modes { display: flex; gap: 2px; padding: 2px; background: var(--panel-2); border-radius: 9px; border: 1px solid var(--line); }
 .modes button { border: 0; background: transparent; color: var(--muted); height: 28px; padding: 0 16px; border-radius: 7px;

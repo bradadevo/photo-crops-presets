@@ -1,4 +1,4 @@
-/* AllProPhoto Studio: the Culling tab.
+/* VS Digital Pro Studio: the Culling tab.
    Pass 1: the app looks at every photo of a shoot and marks it keep or reject (with why, how sure
    it is and a crop on the action). Pass 2: you go through it, keep and reject (your marks always win
    and teach it your taste), then delete the rejects (to the Trash, undoable), copy or crop-and-edit
@@ -413,7 +413,7 @@ function cuSetView(v) {
 // -- step 3, Finish: one page for everything after culling ------------------------------------------
 // 1 clear out the rejects; 2 what to do with the keepers: crop them for posting (where, how they look,
 // every crop checked with a plain label, the sharpness choice, where they go, one button), copy them
-// as they are, or use them in AllProPhoto.
+// as they are, or use them in VS Digital Pro.
 const CU_WHERE = [
   ["instagram", "Instagram post", "4:5 · 1,080 × 1,350"],
   ["story", "Story or Reel", "9:16 · 1,080 × 1,920"],
@@ -510,7 +510,7 @@ function cuPaintFinish(one) {
     <section class="cu-sec"><h2><span class="n">2</span> What do you want to do with your ${plural(ids.length, "keeper")}?</h2>
       <div class="cu-whats">${tile("crop", "crop", "Crop them for posting", "Instagram, Story or YouTube, cropped on the action and edited")}
         ${tile("copy", "copy", "Copy them as they are", "The original files (and RAW), untouched, into one folder")}
-        ${tile("use", "layers", "Use them in AllProPhoto", "Make looks, posters and reels from them")}</div>
+        ${tile("use", "layers", "Use them in VS Digital Pro", "Make looks, posters and reels from them")}</div>
 
     ${F.what === "crop" ? `
       <div class="cu-q-h"><b>Where will they be posted?</b></div>
@@ -1284,7 +1284,7 @@ async function cuImport() {
   const m = modal(`<header><h2>Import from ${esc(card.name)}</h2></header><div class="body">
       <p style="margin-top:0">${card.photos.toLocaleString()} photos (JPEG and RAW; videos are left on the card). Photos already copied before are skipped. Pass 1 starts on each one as it arrives.</p>
       <label class="cu-field"><span>New folder's name</span><input id="im-name" placeholder="The day's date + Import"></label>
-      <label class="check-row"><input type="checkbox" id="im-choose"><span>Choose where it goes<small>Otherwise: Pictures › AllProPhoto Imports</small></span></label>
+      <label class="check-row"><input type="checkbox" id="im-choose"><span>Choose where it goes<small>Otherwise: Pictures › VS Digital Pro Imports</small></span></label>
     </div><footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="im-go">${icon("card")} Import and cull</button></footer>`);
   paintIcons(m);
   $("#im-go", m).onclick = async () => {

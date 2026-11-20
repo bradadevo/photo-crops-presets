@@ -1,8 +1,8 @@
-# AllProPhoto
+# VS Digital Pro
 
 Everything in [photo-crops](https://github.com/bradadevo/photo-crops)
 (professional crops, face close-ups, screenshots rebuilt from the camera
-files), plus **AllProPhoto**: a creative looks engine for sports photos
+files), plus **VS Digital Pro**: a creative looks engine for sports photos
 with its own Mac app.
 
 - **Random exploration**: drop in photos and get a gallery of different,
@@ -41,16 +41,16 @@ their drawing models (about 5 GB, once) to `~/.cache/huggingface` the first
 time one is used. Reels and video overlays need ffmpeg
 (`brew install ffmpeg`).
 
-## The AllProPhoto app
+## The VS Digital Pro app
 
 ```bash
-uv run allprophoto-install-app     # once: puts AllProPhoto.app in ~/Applications
+uv run vsdigitalpro-install-app     # once: puts VS Digital Pro.app in ~/Applications
 ```
 
-Then open **AllProPhoto** like any Mac app (Finder, Spotlight or the Dock: drag
+Then open **VS Digital Pro** like any Mac app (Finder, Spotlight or the Dock: drag
 it there to keep it). It opens in its own window, no Terminal or browser
 needed. Run the install again after updating Python or the project's
-packages. Without the app: `uv run allprophoto` opens the same thing in your
+packages. Without the app: `uv run vsdigitalpro` opens the same thing in your
 browser (`--window` for the app window).
 
 It is dark and photo-first, like Lightroom: **your photos** on the left, the
@@ -283,7 +283,7 @@ the space left, the photos, looks, tools and poster layouts flow into more
 columns, and the widths are remembered. Double-click an edge for the normal
 width.
 
-**Export**: separate files go in a new folder of their own ("AllProPhoto
+**Export**: separate files go in a new folder of their own ("VS Digital Pro
 <date> (<n> pictures)") inside the folder you choose, like the zip; each file
 is dated when it was exported (the date the photo was taken stays inside it,
 where Photos reads it). A small .json beside each picture (how it was made)
@@ -418,7 +418,7 @@ photo** makes looks from the photo as shot.
 picks and stars, cut-out fixes and removals are saved as you go (looks at
 preview size in `~/.cache/photo-crops-presets/session-looks`) and are all
 there when the app opens again. **Remove all** (and removing a look) clears
-them. When a newer version of AllProPhoto is installed, a green **Restart to
+them. When a newer version of VS Digital Pro is installed, a green **Restart to
 update** button appears at the top: the app closes and opens again in a few
 seconds, with everything as it was. (The app keeps using the version it
 started with until then, so it never mixes old and new.)
@@ -427,7 +427,7 @@ Press **?** for every keyboard shortcut.
 
 **Tools** (top right) opens the preset editor, Lightroom presets and assets in
 your browser: they are the classic app's pages (below), working on the same
-looks. The classic app on its own: `uv run allprophoto-classic`.
+looks. The classic app on its own: `uv run vsdigitalpro-classic`.
 
 **Quality and color** (for paid and print work):
 - RAW (and 16-bit TIFF) photos keep a 16-bit copy, and full-size exports make
@@ -466,7 +466,7 @@ minute, and only what is on screen is drawn).
    1. **Clear out the rejects**: look at them first, or delete them (JPEG and RAW together go to the
       Trash, with undo).
    2. **What to do with the keepers**: **Crop them for posting**, **Copy them as they are** (a Picks
-      folder) or **Use them in AllProPhoto** (Looks, Reel). For cropping, on the same page: where
+      folder) or **Use them in VS Digital Pro** (Looks, Reel). For cropping, on the same page: where
       they'll be posted (Instagram post 4:5, Story or Reel 9:16, YouTube 16:9; more choices: same size
       as the camera photo, or AI choosing each crop), how they should look (Natural, Punchy, Softer, No
       edits, AI touch-up: one picture of each), **Check your crops** (every keeper with its crop drawn
@@ -532,11 +532,11 @@ precision (floats), so LUT looks keep 16-bit photos smooth.
 ### Command line
 
 ```bash
-uv run allprophoto-batch --list
-uv run allprophoto-batch ~/Movies/"Game day" --random 6 --crop crop
-uv run allprophoto-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
-uv run allprophoto-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
-uv run allprophoto-batch ~/Movies/"Game day" --all-presets
+uv run vsdigitalpro-batch --list
+uv run vsdigitalpro-batch ~/Movies/"Game day" --random 6 --crop crop
+uv run vsdigitalpro-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
+uv run vsdigitalpro-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
+uv run vsdigitalpro-batch ~/Movies/"Game day" --all-presets
 ```
 
 ## Starter presets
@@ -804,15 +804,15 @@ The tests never load the large models.
 ```text
 photo_crops/          photo-crops (see its README)
 photo_presets/
-  studio/             The AllProPhoto app
+  studio/             The VS Digital Pro app
     server.py         Its local server: the session (photos, looks made, kept), the worker, the page's API
     web/              The page: index.html, app.css, app.js, edit.js (plain JavaScript, no build step)
-    macapp.py         allprophoto-install-app: AllProPhoto.app in ~/Applications
+    macapp.py         vsdigitalpro-install-app: VS Digital Pro.app in ~/Applications
     share.py          AirDrop, Messages and Mail, the Mac's own share windows
   edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling
   retouch.py          Removing distractions with LaMa
   app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
-  cli.py              allprophoto-batch
+  cli.py              vsdigitalpro-batch
   engine.py           Random and preset modes, previews, full-size export
   pipeline.py         Running recipes, the step registry, plugins, keeping faces clean
   effects.py          The built-in steps

@@ -1,4 +1,4 @@
-/* AllProPhoto Studio: the page. Plain JavaScript, no build step.
+/* VS Digital Pro Studio: the page. Plain JavaScript, no build step.
    The server (studio/server.py) keeps the session; this page shows it and sends what you do. */
 "use strict";
 
@@ -256,7 +256,7 @@ function renderTop() {
     notify("Your looks are ready", `${plural(n, "look")} to look through`);
   }
   wasMaking = making.length;
-  document.title = "AllProPhoto";
+  document.title = "VS Digital Pro";
   if (making.length) {
     const runIds = new Set(making.map((s) => s.run));
     const inRuns = st.slots.filter((s) => runIds.has(s.run));
@@ -267,7 +267,7 @@ function renderTop() {
     const left = st.eta ? Math.max(1, (st.eta - Date.now()) / 1000) : 0;
     const spent = st.runStart ? (Date.now() - st.runStart) / 1000 : 0;
     const pct = left ? Math.min(99, Math.round(100 * spent / (spent + left))) : Math.round(frac * 100);
-    document.title = `(${pct}%) Making looks · AllProPhoto`;
+    document.title = `(${pct}%) Making looks · VS Digital Pro`;
     pill.innerHTML = `<span class="spin"></span><span><b>${pct}%</b> · ${done} of ${plural(inRuns.length, "look")}${left ? " · " + clock(left) + " left" : ""}
       <small class="phase">${esc(st.phase || "")}</small></span>
       <button class="btn ghost" id="stop-run">Stop</button><span class="bar" style="width:${pct}%"></span>`;
@@ -1456,12 +1456,12 @@ document.addEventListener("keydown", (e) => {
 function restartApp() {
   const making = st.slots.filter((s) => s.state === "wait" || s.state === "now").length;
   const m = modal(`<header><h2>Restart with the new version?</h2></header><div class="body"><p style="margin:0;color:var(--muted)">
-    AllProPhoto closes and opens again in a few seconds. Your photos, looks, edits, picks and stars come back as they are.
+    VS Digital Pro closes and opens again in a few seconds. Your photos, looks, edits, picks and stars come back as they are.
     ${making ? `<br><br><b style="color:var(--gold)">${plural(making, "look")} still being made will stop</b>: make them again after.` : ""}</p></div>
     <footer><button class="btn ghost" data-close>Later</button><button class="btn primary" id="rs-go">Restart now</button></footer>`);
   $("#rs-go", m).onclick = async () => {
     closeModal();
-    $("#modal-root").innerHTML = `<div class="scrim"><div class="modal" style="width:auto;padding:26px 30px;display:flex;gap:14px;align-items:center"><span class="spin"></span><b>Restarting AllProPhoto…</b></div></div>`;
+    $("#modal-root").innerHTML = `<div class="scrim"><div class="modal" style="width:auto;padding:26px 30px;display:flex;gap:14px;align-items:center"><span class="spin"></span><b>Restarting VS Digital Pro…</b></div></div>`;
     try { await fetch("/api/restart", { method: "POST" }); } catch { /* it is going down */ }
     const back = async () => {
       try { const r = await fetch("/api/looks", { cache: "no-store" }); if (r.ok) { location.reload(); return; } } catch { /* not yet */ }

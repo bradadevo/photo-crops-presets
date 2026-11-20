@@ -1,4 +1,4 @@
-/* AllProPhoto: the custom poster. Your own layout from the same pieces the ready-made ones use
+/* VS Digital Pro: the custom poster. Your own layout from the same pieces the ready-made ones use
    (text in any style, a number badge, a panel or band, a line, a logo), each moved by dragging it
    on the picture, resized by its corner, changed in the panel, in front of the players or behind
    them. The app draws the poster (what you see is what is exported); the page draws only the

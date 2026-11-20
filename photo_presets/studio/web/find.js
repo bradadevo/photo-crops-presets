@@ -1,4 +1,4 @@
-/* AllProPhoto Studio: finding a player in every photo. Click them once; the photos with them
+/* VS Digital Pro Studio: finding a player in every photo. Click them once; the photos with them
    are found (the best first, one per burst), and close calls are asked: "Is this your player?" */
 "use strict";
 
