@@ -209,3 +209,36 @@ def test_photo_text_font_and_angle():
     a = edits.draw_texts(arr, [{**e["texts"][0], "angle": 0}])
     b = edits.draw_texts(arr, e["texts"][:1])
     assert a.max() > 0.5 and b.max() > 0.5 and not np.allclose(a, b)
+
+
+def test_customize_keeps_a_words_font_and_angle_and_a_split_name_is_one_piece():
+    from photo_presets import poster
+    p = poster.clean({"template": "smoke", "moves": {"name": {"r": 15, "f": "brush"}}})
+    els = poster.customized(p)["elements"]
+    names = [e for e in els if e["type"] == "text" and e["text"] == p["name"]]
+    assert len(names) == 1 and names[0]["angle"] == 15 and names[0]["font"] == "brush"
+
+
+def test_each_layout_keeps_its_own_word_changes():
+    from photo_presets import poster
+    p = poster.clean({"template": "smoke", "kept_moves": {"storm": {"title": {"r": 5, "f": "impact"}}, "nope": {"title": {"r": 1}}}})
+    assert p["kept_moves"] == {"storm": {"title": {"x": 0, "y": 0, "s": 1, "r": 5.0, "f": "impact"}}}
+    assert poster.customized(p)["kept_moves"] == p["kept_moves"]
+
+
+def test_a_word_in_parts_turns_as_one():
+    """Smoke Burst's name is two parts (first name, last name): turned, they keep their places
+    relative to each other, around the whole name's middle."""
+    import cv2
+    from photo_presets import poster
+    arr = np.zeros((1000, 800, 3), np.float32)
+    flat = poster.compose(arr, None, poster.clean({"template": "smoke", "line": "", "title": ""}))
+    turned = poster.compose(arr, None, poster.clean({"template": "smoke", "line": "", "title": "", "moves": {"name": {"r": 90}}}))
+    H, W = flat.shape[:2]
+    a = cv2.rotate(flat.max(2), cv2.ROTATE_90_CLOCKWISE)  # the flat name turned as one picture
+    b = turned.max(2)
+    mid = poster.middles(poster.words(poster.clean({"template": "smoke", "line": "", "title": ""})))["name"]
+    # where the whole name's middle lands: compare the ink around it
+    ys, xs = np.nonzero(b > 0.5)
+    assert len(ys) and abs(xs.mean() / W - mid[0]) < 0.06 and abs(ys.mean() / H - mid[1]) < 0.12
+    assert a.shape[0] == W  # (sanity)

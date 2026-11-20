@@ -201,9 +201,9 @@ function bindCustom(cur, pane, set) {
     set((p) => { p[PK(p)] = p[PK(p)].filter((x) => x.id !== id); });
   });
   box.querySelector("[data-piece-dup]")?.addEventListener("click", () => {
-    const id = newId();
+    const id = newId(), from = st.pieceSel;  // (the copy is made after the new one is chosen)
     set((p) => {
-      const el = p[PK(p)].find((x) => x.id === st.pieceSel);
+      const el = p[PK(p)].find((x) => x.id === from);
       if (el) p[PK(p)].push({ ...clone(el), id, x: Math.min(0.95, el.x + 0.04), y: Math.min(0.95, el.y + 0.04) });
     });
     st.pieceSel = id;

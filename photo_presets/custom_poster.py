@@ -231,14 +231,20 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
     if t == "card":  # its nameplate
         add(type="box", x=0.5, y=(H - u * 0.1) / H, w=1.1, h=u * 0.2 / H, color=p.get("color", "#1f2a44"), opacity=0.95,
             round=False, behind=True)
+    moves = p.get("moves") or {}
     seen = set()
     for w in words:
         k = w["key"]
         if k == "logo":  # (the logo is placed below, as its own piece)
             continue
-        if k in seen and t == "name":
+        if k in seen:  # a word drawn in parts (a first name over a last name): one piece, the whole word
             continue
         seen.add(k)
+        parts = [x for x in words if x["key"] == k]
+        if len(parts) > 1:
+            w = {**w, "x0": min(x["x0"] for x in parts), "x1": max(x["x1"] for x in parts),
+                 "y0": (min(x["y0"] for x in parts) + max(x["y1"] for x in parts)) / 2 - (w["y1"] - w["y0"]) / 2,
+                 "y1": (min(x["y0"] for x in parts) + max(x["y1"] for x in parts)) / 2 + (w["y1"] - w["y0"]) / 2}
         text = p.get(k, "")
         if k == "home_score":
             text = f"{p.get('home_score', '')}  –  {p.get('away_score', '')}"
@@ -259,8 +265,9 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
         color = own or ("#d4af37" if (t == "champions" and k == "title") or (t == "card" and k == "line") else "#ffffff")
         if t == "jersey" and k == "number":  # the giant number, in the team color, behind the player
             color, style = own or p.get("color", "#1f2a44"), "heavy"
+        own = {k2: v for k2, v in (("angle", w.get("r") or (moves.get(k) or {}).get("r")), ("font", (moves.get(k) or {}).get("f"))) if v}
         add(type="text", x=(w["x0"] + w["x1"]) / 2, y=(w["y0"] + w["y1"]) / 2, text=text, style=style, size=round(size, 4),
-            color=color, behind=(k == "title" and t in BEHIND_TITLE) or (t in ("jersey", "split") and k == "number"))
+            color=color, behind=(k == "title" and t in BEHIND_TITLE) or (t in ("jersey", "split") and k == "number"), **own)
     if t == "champions":
         line = next((w for w in words if w["key"] == "line"), None)
         if line:

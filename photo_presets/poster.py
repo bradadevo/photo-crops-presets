@@ -96,22 +96,12 @@ def clean(p: dict | None) -> dict | None:
             for t, w in (p.get("kept") or {}).items() if t in TEMPLATES and isinstance(w, dict)}
     if kept:
         out["kept"] = kept  # the words typed for the other layouts: back when you switch back
-    moves = {}
-    for k, m in (p.get("moves") or {}).items():
-        if k in FIELD_KEYS and isinstance(m, dict):
-            try:
-                mv = {"x": round(float(np.clip(float(m.get("x", 0)), -1, 1)), 4), "y": round(float(np.clip(float(m.get("y", 0)), -1, 1)), 4),
-                      "s": round(float(np.clip(float(m.get("s", 1)), 0.3, 4)), 3)}
-            except (TypeError, ValueError):
-                continue
-            if fonts.angle_ok(m.get("r", 0)):
-                mv["r"] = fonts.angle_ok(m["r"])  # turned to any angle (degrees, clockwise)
-            if fonts.name_ok(m.get("f")):
-                mv["f"] = m["f"]  # in a font of your choice
-            if mv != {"x": 0, "y": 0, "s": 1}:
-                moves[k] = mv
+    moves = _moves(p.get("moves"))
     if moves:
-        out["moves"] = moves  # words moved or resized by you on the picture
+        out["moves"] = moves  # words moved, resized, turned or set in another font by you
+    kept_moves = {t: _moves(m) for t, m in (p.get("kept_moves") or {}).items() if t in TEMPLATES and isinstance(m, dict)}
+    if any(kept_moves.values()):
+        out["kept_moves"] = {t: m for t, m in kept_moves.items() if m}  # the other layouts' word changes, for coming back
     if p.get("family"):  # one of a team's posters: the same design, each player's own picture, name and number
         out["family"] = str(p["family"])[:12]
     pic = p.get("pic") or {}
@@ -145,6 +135,25 @@ def clean(p: dict | None) -> dict | None:
     if p["template"] == "spotlight":
         out["number_style"] = p.get("number_style") if p.get("number_style") in NUMBER_STYLES else "badge"
     return out
+
+
+def _moves(raw) -> dict:
+    """Words you moved, resized, turned or set in another font: {key: {x, y, s, r?, f?}}."""
+    moves = {}
+    for k, m in (raw or {}).items():
+        if k in FIELD_KEYS and isinstance(m, dict):
+            try:
+                mv = {"x": round(float(np.clip(float(m.get("x", 0)), -1, 1)), 4), "y": round(float(np.clip(float(m.get("y", 0)), -1, 1)), 4),
+                      "s": round(float(np.clip(float(m.get("s", 1)), 0.3, 4)), 3)}
+            except (TypeError, ValueError):
+                continue
+            if fonts.angle_ok(m.get("r", 0)):
+                mv["r"] = fonts.angle_ok(m["r"])  # turned to any angle (degrees, clockwise)
+            if fonts.name_ok(m.get("f")):
+                mv["f"] = m["f"]  # in a font of your choice
+            if mv != {"x": 0, "y": 0, "s": 1}:
+                moves[k] = mv
+    return moves
 
 
 WORD_KEYS = ("title", "line", "number", "home", "away", "home_score", "name", "minute")
@@ -264,10 +273,12 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
     box = d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))
     angle = (move or {}).get("r", 0)
     image = getattr(d, "_image", None)
-    if angle and image is not None and image.mode == "RGBA":  # turned around its middle
+    if angle and image is not None and image.mode == "RGBA":  # turned around its middle (a word in parts: the whole word's)
         lay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         ImageDraw.Draw(lay).text(xy, text, font=font, **kw)
-        image.alpha_composite(fonts.turned(lay, angle, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)))
+        mid = (getattr(_NOTE, "middles", None) or {}).get(key)
+        mid = (mid[0] * image.size[0], mid[1] * image.size[1]) if mid else ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+        image.alpha_composite(fonts.turned(lay, angle, mid))
     else:
         d.text(xy, text, font=font, **kw)
     boxes = getattr(_NOTE, "boxes", None)
@@ -294,9 +305,22 @@ def words(p: dict, has_logo: bool = False, logo_img: Image.Image | None = None) 
             for k, b in found]
 
 
+def middles(found: list[dict]) -> dict[str, tuple[float, float]]:
+    """The middle of each word (all its parts together), in shares of the poster."""
+    out = {}
+    for k in {w["key"] for w in found}:
+        parts = [w for w in found if w["key"] == k]
+        out[k] = ((min(w["x0"] for w in parts) + max(w["x1"] for w in parts)) / 2,
+                  (min(w["y0"] for w in parts) + max(w["y1"] for w in parts)) / 2)
+    return out
+
+
 def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos=None) -> np.ndarray:
     """The poster (floats 0-1). arr: the picture as edited; matte: its players (0-1, same size);
     logo: an RGBA logo (or None); logos: a logo by its id (for a custom poster's logo pieces)."""
+    _NOTE.middles = None
+    if any(m.get("r") for m in (p.get("moves") or {}).values()) and getattr(_NOTE, "boxes", None) is None:
+        _NOTE.middles = middles(words(p, bool(logo)))  # (a turned word in parts turns as one)
     _NOTE.colors = p.get("colors")
     _NOTE.logos = logos
     _NOTE.pic = p.get("pic")
@@ -305,6 +329,7 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos
         return _compose(arr, matte, p, logo)
     finally:
         _NOTE.colors = None
+        _NOTE.middles = None
         _NOTE.pic = None
         _NOTE.moves = None
 
@@ -1121,7 +1146,7 @@ def customized(p: dict, has_logo: bool = False) -> dict:
     W, H = size_for(800, 1000, p)
     u = _unit(W, H, p)
     els = custom_poster.from_layout(p, words(p, has_logo), W, H, u)
-    keep = {k: p[k] for k in ("shape", "color", "logo", "size", "colors", "kept") if k in p}
+    keep = {k: p[k] for k in ("shape", "color", "logo", "size", "colors", "kept", "kept_moves") if k in p}
     return clean({**keep, "template": "custom", "elements": els,
                   "fade_top": 0.3 if p["template"] in ("final", "spotlight") else 0.1,
                   "fade_bottom": 0.62 if p["template"] != "spotlight" else 0.3})

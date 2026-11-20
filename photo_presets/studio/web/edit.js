@@ -623,9 +623,15 @@ async function paintWords(cur) {
   const place = (w) => `left:${w.x0 * 100}%;top:${w.y0 * 100}%;width:${(w.x1 - w.x0) * 100}%;height:${(w.y1 - w.y0) * 100}%`;
   box.classList.add("pieces-layer");
   const live = st.tool === "poster";
+  const turnOrigin = (w) => {  // a word in parts turns around the whole word's middle (as the app draws it)
+    const parts = wordsList.filter((x) => x.key === w.key);
+    const mx = (Math.min(...parts.map((x) => x.x0)) + Math.max(...parts.map((x) => x.x1))) / 2;
+    const my = (Math.min(...parts.map((x) => x.y0)) + Math.max(...parts.map((x) => x.y1))) / 2;
+    return `${((mx - w.x0) / (w.x1 - w.x0)) * 100}% ${((my - w.y0) / (w.y1 - w.y0)) * 100}%`;
+  };
   box.innerHTML = wordsList.filter((w) => !w.key.startsWith("el:")).map((w) => w.key === "logo"
     ? `<div class="pc pc-logo${st.pieceSel === "logo" ? " sel" : ""}" data-pc="logo" title="Drag the logo anywhere · its corner resizes it · Delete takes it off" style="${place(w)}">${live ? `<span class="pc-h"></span>` : ""}</div>`
-    : `<div class="pc pc-word${st.pieceSel === "w:" + w.key ? " sel" : ""}" data-pc="w:${w.key}" data-pk="${w.key}" role="button" aria-label="${esc(label(w.key))}: click to type, drag to move, its round handle turns it" style="${place(w)}${w.r ? `;rotate:${w.r}deg` : ""}">${live && st.pieceSel === "w:" + w.key ? `<span class="pc-h"></span>${turnHandle(w.y0)}` : ""}</div>`).join("");
+    : `<div class="pc pc-word${st.pieceSel === "w:" + w.key ? " sel" : ""}" data-pc="w:${w.key}" data-pk="${w.key}" role="button" aria-label="${esc(label(w.key))}: click to type, drag to move, its round handle turns it" style="${place(w)}${w.r ? `;rotate:${w.r}deg;transform-origin:${turnOrigin(w)}` : ""}">${live && st.pieceSel === "w:" + w.key && wordsList.find((x) => x.key === w.key) === w ? `<span class="pc-h"></span>${turnHandle(w.y0)}` : ""}</div>`).join("");
   f.appendChild(box);
   // a word: click to type it, drag to move it, its corner to make it bigger or smaller
   box.querySelectorAll(".pc-word").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
@@ -846,10 +852,12 @@ function bindPosterSection(cur, pane) {
     set((p) => {
       const words = Object.fromEntries((POSTER_FIELDS[p.template] || []).map(([k]) => [k, p[k] ?? ""]));
       const kept = { ...(p.kept || {}), [p.template]: words };  // what you typed, for coming back to this layout
+      const keptMoves = { ...(p.kept_moves || {}), [p.template]: p.moves || {} };  // and where, how big, which font, what angle
       const keep = { shape: p.shape, color: p.color, logo: p.logo ?? (st.kit?.[0]?.id || ""), ...(p.colors ? { colors: p.colors } : {}),
-        ...(p.size ? { size: p.size } : {}), ...(p.family ? { family: p.family } : {}), kept };
+        ...(p.size ? { size: p.size } : {}), ...(p.family ? { family: p.family } : {}), kept, kept_moves: keptMoves };
+      const back = keptMoves[b.dataset.poster];
       for (const k of Object.keys(p)) delete p[k];
-      Object.assign(p, keep, { template: b.dataset.poster }, kept[b.dataset.poster] || {});
+      Object.assign(p, keep, { template: b.dataset.poster }, kept[b.dataset.poster] || {}, back && Object.keys(back).length ? { moves: back } : {});
     });
   });
   const ppName = $("#pp-name", pane);
