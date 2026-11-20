@@ -22,6 +22,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from photo_presets import enlarge
+
 CONFIG = Path.home() / ".config" / "photo-crops-presets" / "delivery.json"
 FONT = "/System/Library/Fonts/Avenir Next.ttc"  # index 0 is Bold, 5 Medium
 
@@ -91,7 +93,7 @@ def sized(arr: np.ndarray, size: Size, focus: tuple[float, float],
     x0, y0, x1, y1 = crop_box(w, h, tw / th, focus, keep)
     part = arr[y0:y1, x0:x1]
     grow = tw / (x1 - x0)
-    out = cv2.resize(part, (tw, th), interpolation=cv2.INTER_AREA if grow < 1 else cv2.INTER_LANCZOS4)
+    out = enlarge.fit(part, (tw, th))  # (a real enlargement: the AI detail enlarger)
     if size.web and grow < 1:
         blur = cv2.GaussianBlur(out, (0, 0), 0.8)
         out = out + (out - blur) * 0.35

@@ -94,3 +94,30 @@ def test_a_match_comes_before_the_look(tmp_path):
     lib = Library(Sources([], [], [], [], [], []))
     out, _ = pipeline.render(img, {"steps": [], "match": {"stops": 1.0, "gains": [1, 1, 1]}}, lib, Scene())
     assert abs(np.asarray(out)[0, 0, 0] - 120) <= 1
+
+
+def test_a_real_enlargement_uses_the_detail_enlarger_and_falls_back_to_plain(monkeypatch):
+    from photo_presets import enlarge
+    small = np.random.default_rng(0).random((100, 80, 3)).astype(np.float32)
+    calls = []
+
+    def fake(img):
+        calls.append(img.shape)
+        return np.repeat(np.repeat(img, 4, 0), 4, 1)
+
+    monkeypatch.setattr(enlarge, "USE_AI", True)
+    monkeypatch.setattr(enlarge, "ai_4x", fake)
+    out = enlarge.fit(small, (240, 300))
+    assert out.shape == (300, 240, 3) and calls == [(100, 80, 3)]
+    assert 0 <= out.min() and out.max() <= 1
+    enlarge.fit(small, (84, 105))  # a small enlargement (1.05x): plain
+    enlarge.fit(small, (40, 50))  # shrinking: plain
+    assert len(calls) == 1
+
+    def broken(img):
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(enlarge, "ai_4x", broken)
+    assert enlarge.fit(small, (240, 300)).shape == (300, 240, 3)  # plain enlarging still works
+    out, grow = deliver.sized(small, deliver.SIZES["ig_portrait"], (0.5, 0.5))
+    assert out.shape[:2] == (1350, 1080) and grow > 1

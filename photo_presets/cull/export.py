@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 from photo_crops import images
+from photo_presets import enlarge
 from photo_presets.cull import crops, enhance
 
 SIZES = crops.SIZES  # instagram 4:5, story 9:16, youtube 16:9, original, ai (best crop)
@@ -133,9 +134,9 @@ def _subject_in(box, subject, img_size):
 
 def _final(out: Image.Image, src: Image.Image, size: crops.OutputSize, sharpen: bool = True) -> Image.Image:
     if size.pixels:
-        out = out.resize(size.pixels, Image.Resampling.LANCZOS)
+        out = enlarge.fit_pil(out, size.pixels)
     elif size.match_source and out.size != src.size:
-        out = out.resize(src.size, Image.Resampling.LANCZOS)
+        out = enlarge.fit_pil(out, src.size)
     return enhance.output_sharpen(out) if sharpen else out
 
 
