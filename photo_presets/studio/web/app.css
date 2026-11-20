@@ -1,24 +1,38 @@
-/* VS Digital Pro Studio: dark, photo-first, quiet chrome */
+/* VS Digital Pro Studio: dark, photo-first, quiet chrome, in the VectorShots brand */
+@font-face { font-family: "Big Shoulders Display"; font-weight: 700; font-display: swap; src: url("/brand/BigShouldersDisplay-700.ttf") format("truetype"); }
+@font-face { font-family: "Big Shoulders Display"; font-weight: 900; font-display: swap; src: url("/brand/BigShouldersDisplay-900.ttf") format("truetype"); }
+@font-face { font-family: "Chakra Petch"; font-weight: 500; font-display: swap; src: url("/brand/ChakraPetch-500.ttf") format("truetype"); }
+@font-face { font-family: "Chakra Petch"; font-weight: 600; font-display: swap; src: url("/brand/ChakraPetch-600.ttf") format("truetype"); }
+@font-face { font-family: "Chakra Petch"; font-weight: 700; font-display: swap; src: url("/brand/ChakraPetch-700.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-weight: 400; font-display: swap; src: url("/brand/Manrope-400.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-weight: 500; font-display: swap; src: url("/brand/Manrope-500.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-weight: 600; font-display: swap; src: url("/brand/Manrope-600.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-weight: 700; font-display: swap; src: url("/brand/Manrope-700.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-weight: 800; font-display: swap; src: url("/brand/Manrope-800.ttf") format("truetype"); }
 :root {
-  --bg: #0b0c0e;
-  --panel: #121316;
-  --panel-2: #191b1f;
-  --panel-3: #22252a;
-  --line: #23262b;
-  --line-2: #30343a;
-  --text: #ececef;
-  --muted: #9ea1a8;
-  --faint: #6c7078;
-  --accent: #4f8bff;
-  --accent-2: #7aa7ff;
-  --accent-soft: rgba(79, 139, 255, 0.16);
+  /* VS Digital Pro, in the brand of vectorshotsdigital.com: black, VectorShots blue, a red accent */
+  --bg: #030509;
+  --panel: #0a0d12;
+  --panel-2: #10141b;
+  --panel-3: #19202a;
+  --line: #1a212b;
+  --line-2: #273140;
+  --text: #f1f4f8;
+  --muted: #9ca3af;
+  --faint: #636b78;
+  --accent: #0077c0;
+  --accent-2: #3fa9f5;
+  --accent-soft: rgba(0, 119, 192, 0.2);
+  --red: #dc2626;
   --gold: #f5c443;
   --good: #3ecf8e;
-  --bad: #ff5d5d;
-  --radius: 10px;
-  --radius-sm: 7px;
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --bad: #ff5a5a;
+  --radius: 4px;
+  --radius-sm: 3px;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.45);
+  --font: "Manrope", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: "Big Shoulders Display", "Avenir Next Condensed", Impact, sans-serif;
+  --font-tech: "Chakra Petch", "Manrope", system-ui, sans-serif;
   --rail: 236px;
   --inspector: 356px;
   color-scheme: dark;
@@ -50,7 +64,7 @@ i[data-i] svg { width: 100%; height: 100%; }
   transition: background .12s, border-color .12s, opacity .12s; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--panel-3); }
 .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
-.btn.primary:hover:not(:disabled) { background: #6396ff; }
+.btn.primary:hover:not(:disabled) { background: #1688d4; }
 .btn.primary:disabled { background: var(--panel-3); color: var(--faint); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .btn.ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
@@ -76,14 +90,10 @@ i[data-i] svg { width: 100%; height: 100%; }
 .top { grid-area: top; display: flex; align-items: center; gap: 16px; padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--line); background: var(--panel); position: relative; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 9px; width: calc(var(--rail) - 16px); }
-/* VS Digital Pro's mark: VS, heavy and italic like a jersey, on a navy-to-blue tile (the app icon's) */
-.mark { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(135deg, #0c1838 0%, #2f6bff 100%);
-  position: relative; display: grid; place-items: center; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
-.mark::before { content: ""; position: absolute; left: -4px; right: -4px; top: 58%; height: 2px; background: rgba(140,180,255,.35);
-  transform: rotate(-18deg); }
-.mark::after { content: "VS"; position: relative; color: #fff; font: italic 800 12.5px/1 "Avenir Next Condensed", "Avenir Next", var(--font);
-  letter-spacing: -.02em; text-shadow: 0 1px 2px rgba(0,8,30,.5); }
-.word { font-size: 15px; letter-spacing: -0.01em; font-weight: 600; white-space: nowrap; }
+/* the VectorShots mark: VS in blue in a blue square, on black */
+.mark { width: 30px; height: 30px; border: 2px solid var(--accent); background: #000; display: grid; place-items: center; flex: none; }
+.mark::after { content: "VS"; color: var(--accent); font: 900 17px/1 var(--font-display); letter-spacing: .005em; }
+.word { font: 900 19px/1 var(--font-display); text-transform: uppercase; letter-spacing: .005em; white-space: nowrap; color: #fff; }
 .word b { font-weight: 700; color: var(--accent-2); }
 .modes { display: flex; gap: 2px; padding: 2px; background: var(--panel-2); border-radius: 9px; border: 1px solid var(--line); }
 .modes button { border: 0; background: transparent; color: var(--muted); height: 28px; padding: 0 16px; border-radius: 7px;
@@ -208,7 +218,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; text-transform: uppercase; le
 
 /* Empty state */
 .hero { max-width: 520px; text-align: center; padding: 44px 40px; border-radius: 18px; border: 1.5px dashed var(--line-2);
-  background: radial-gradient(120% 90% at 50% 0%, rgba(79, 139, 255, .09), transparent 60%), var(--panel); }
+  background: radial-gradient(120% 90% at 50% 0%, rgba(63, 169, 245, .09), transparent 60%), var(--panel); }
 .hero .glyph { width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 16px; display: flex; align-items: center;
   justify-content: center; background: var(--accent-soft); color: var(--accent-2); }
 .hero .glyph i { width: 26px; height: 26px; }
@@ -301,7 +311,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; text-transform: uppercase; le
 .look .badge { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 4px; }
 .look .badge span { font-size: 10px; font-weight: 650; padding: 2px 6px; border-radius: 5px; background: rgba(0, 0, 0, .66);
   color: #fff; backdrop-filter: blur(6px); }
-.look .badge span.ai { background: linear-gradient(135deg, rgba(79, 139, 255, .9), rgba(138, 92, 255, .9)); }
+.look .badge span.ai { background: linear-gradient(135deg, rgba(63, 169, 245, .9), rgba(0, 119, 192, .9)); }
 .look .check { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%;
   border: 1.5px solid rgba(255, 255, 255, .85); background: rgba(0, 0, 0, .3); display: flex; align-items: center;
   justify-content: center; font-size: 11px; font-weight: 700; color: #fff; opacity: 0; transition: opacity .12s; }
@@ -444,7 +454,7 @@ details.more .inner { display: flex; flex-direction: column; gap: 12px; padding-
 .drop { position: fixed; inset: 0; z-index: 150; background: rgba(11, 12, 14, .78); display: flex; align-items: center;
   justify-content: center; pointer-events: none; }
 .drop div { padding: 40px 60px; border: 2px dashed var(--accent); border-radius: 20px; display: flex; flex-direction: column;
-  align-items: center; gap: 12px; font-size: 18px; color: var(--accent-2); background: rgba(79, 139, 255, .06); }
+  align-items: center; gap: 12px; font-size: 18px; color: var(--accent-2); background: rgba(63, 169, 245, .06); }
 .drop i { width: 30px; height: 30px; }
 
 @media (max-width: 1100px) {
@@ -543,7 +553,7 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .tool-text .texts { pointer-events: auto; }
 .tool-text .tx { cursor: move; outline: 1px dashed rgba(255, 255, 255, .35); outline-offset: .12em; }
 .tool-text .tx.sel { outline: 1.5px dashed #fff; }
-.frame.snap-x::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(79, 139, 255, .9);
+.frame.snap-x::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(63, 169, 245, .9);
   z-index: 3; pointer-events: none; }
 
 /* Help: tips, reasons, framing preview --------------------------------------------------------- */
@@ -639,7 +649,7 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .frame.finding .people { position: absolute; inset: 0; z-index: 3; }
 .frame.finding .who { position: absolute; border: 2px solid rgba(255, 255, 255, .55); border-radius: 6px; background: transparent;
   cursor: pointer; transition: background .12s, border-color .12s; }
-.frame.finding .who:hover { border-color: var(--accent); background: rgba(79, 139, 255, .18); }
+.frame.finding .who:hover { border-color: var(--accent); background: rgba(63, 169, 245, .18); }
 .frame.finding .people .tag { top: 10px; left: 10px; display: flex; gap: 6px; align-items: center; }
 .player-panel { margin: 0 10px 10px; padding: 10px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line);
   display: flex; flex-direction: column; gap: 8px; }
@@ -661,7 +671,7 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
   background: rgba(0, 0, 0, .35); display: none; padding: 3px; color: transparent; }
 .ph:hover .ck { display: inline-flex; }
 .ph.chosen .ck { display: inline-flex; background: var(--accent); border-color: var(--accent); color: #fff; }
-.ph.chosen { outline-color: rgba(79, 139, 255, .6); }
+.ph.chosen { outline-color: rgba(63, 169, 245, .6); }
 .chosen-bar { margin: 0 10px 8px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .chosen-bar b { color: var(--text); }
 .seg.full button { padding: 0 6px; white-space: nowrap; min-width: 0; }
@@ -1390,3 +1400,27 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .pc-r.below { top: auto; bottom: -30px; }
 .pc-r.below::after { top: auto; bottom: 12px; }
 .tx .pc-r.below { top: auto; bottom: -34px; }
+
+
+/* ---- The VectorShots brand: tall heavy capitals for names, spaced tech capitals for labels and tabs,
+   blue buttons with a clipped corner (as on vectorshotsdigital.com) ---- */
+.word b { color: var(--accent-2); font-weight: 900; }
+.modes { border-radius: 2px; background: transparent; border-color: var(--line); }
+.modes button { font: 600 11px/1 var(--font-tech); text-transform: uppercase; letter-spacing: .18em; border-radius: 1px; }
+.modes button.on { background: var(--accent-soft); color: #fff; box-shadow: inset 0 -2px 0 var(--accent-2); }
+.tabs button { font: 600 11.5px/1 var(--font-tech); text-transform: uppercase; letter-spacing: .14em; }
+.tabs button.on { border-bottom-color: var(--accent-2); }
+.btn { border-radius: var(--radius-sm); }
+.btn.primary { background: var(--accent); font: 700 12px/1 var(--font-tech); text-transform: uppercase; letter-spacing: .1em;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%); }
+.btn.primary:hover:not(:disabled) { background: #1688d4; }
+.btn.big { border-radius: var(--radius-sm); }
+.section > h3, .group summary h3 { font-family: var(--font-tech); text-transform: uppercase; letter-spacing: .16em; }
+.tool { border-radius: var(--radius-sm); }
+.tool.on { border-color: var(--accent-2); }
+.modal { border-radius: 6px; }
+.modal h2, .empty h2, .hero h1, .hero h2 { font-family: var(--font-display); font-weight: 900; text-transform: uppercase; letter-spacing: .01em; }
+h2 { font-family: var(--font-tech); letter-spacing: .14em; }
+.hero h1 { font-size: 34px; line-height: 1; margin-bottom: 10px; }
+.hero h1 b, .hero h1 em { color: var(--accent-2); font-style: normal; }
+.hero { border-radius: 4px; }

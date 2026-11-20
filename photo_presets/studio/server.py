@@ -702,6 +702,15 @@ def static(name: str):
                     headers={"Cache-Control": "no-store"})
 
 
+@app.get("/brand/{name}.ttf")
+def brand_font(name: str):
+    """VS Digital Pro's own fonts (Big Shoulders Display, Chakra Petch, Manrope: open fonts, kept in the app)."""
+    p = WEB / "fonts" / f"{name}.ttf"
+    if not name.replace("-", "").isalnum() or not p.is_file():
+        raise HTTPException(404)
+    return Response(p.read_bytes(), media_type="font/ttf", headers={"Cache-Control": "max-age=86400"})
+
+
 @app.get("/font/{key}.ttf")
 def font_file(key: str):
     """One of the fonts words can be set in, for the page to show it as it's exported."""

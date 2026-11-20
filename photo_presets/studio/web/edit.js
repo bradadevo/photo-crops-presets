@@ -158,7 +158,7 @@ const SLIDER_TIPS = {
 const TEXT_STYLES = [["clean", "Clean"], ["bold", "Bold"], ["spaced", "Spaced"], ["banner", "Banner"]];
 const TEXT_COLORS = ["#ffffff", "#111111", "#f5c443", "#1f2a44", "#e63946", "#86d0d8"];
 /* The fonts any word can be set in (fonts.py), each shown in its own face, as it's exported */
-const FONTS = [["avenir-heavy", "Avenir Heavy"], ["avenir-bold", "Avenir Bold"], ["avenir-light", "Avenir Light"], ["condensed", "Condensed"],
+const FONTS = [["vs-display", "VS Display"], ["vs-tech", "VS Tech"], ["avenir-heavy", "Avenir Heavy"], ["avenir-bold", "Avenir Bold"], ["avenir-light", "Avenir Light"], ["condensed", "Condensed"],
   ["sport-italic", "Sport Italic"], ["futura", "Futura"], ["futura-tall", "Futura Tall"], ["impact", "Impact"], ["din", "DIN Condensed"],
   ["gill-light", "Gill Sans Light"], ["rockwell", "Varsity Slab"], ["copperplate", "Copperplate"], ["didot", "Didot"], ["bodoni", "Bodoni"],
   ["baskerville", "Baskerville Italic"], ["script", "Script"], ["brush", "Brush Script"]];

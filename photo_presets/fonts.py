@@ -7,14 +7,18 @@ from __future__ import annotations
 
 import io
 from functools import lru_cache
+from pathlib import Path
 
 from PIL import Image, ImageFont
 
 SYS = "/System/Library/Fonts/"
+BRAND = str(Path(__file__).parent / "studio" / "web" / "fonts") + "/"  # VS Digital Pro's own (open fonts, in the app)
 SUPP = SYS + "Supplemental/"
 
 # key: (name shown, file, face index in it)
 FONTS: dict[str, tuple[str, str, int]] = {
+    "vs-display": ("VS Display", BRAND + "BigShouldersDisplay-900.ttf", 0),
+    "vs-tech": ("VS Tech", BRAND + "ChakraPetch-700.ttf", 0),
     "avenir-heavy": ("Avenir Heavy", SYS + "Avenir Next.ttc", 8),
     "avenir-bold": ("Avenir Bold", SYS + "Avenir Next.ttc", 0),
     "avenir-light": ("Avenir Light", SYS + "Avenir Next.ttc", 10),

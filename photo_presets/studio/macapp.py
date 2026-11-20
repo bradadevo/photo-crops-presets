@@ -25,8 +25,7 @@ LOG = Path("~/Library/Logs/VS Digital Pro.log").expanduser()
 
 
 def icon(size: int = 1024) -> Image.Image:
-    """The app's icon: VS, heavy and italic like a jersey, on a deep navy-to-blue Mac-style tile with a
-    light speed stripe across it (the same mark as the page's corner)."""
+    """The app's icon: the VectorShots mark (VS in blue in a blue square) on a black Mac-style tile."""
     from PIL import ImageFont
     s = size
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -34,30 +33,19 @@ def icon(size: int = 1024) -> Image.Image:
     shadow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     ImageDraw.Draw(shadow).rounded_rectangle((pad, pad + s * 0.015, s - pad, s - pad + s * 0.015), r, fill=(0, 0, 0, 110))
     img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(s * 0.02)))
-    tile = Image.new("RGBA", (s, s))
-    a, b = (12, 24, 56), (47, 107, 255)  # navy at the top left, the app's blue at the bottom right
-    px = tile.load()
-    for y in range(s):
-        for x in range(0, s, 4):
-            t = min(1.0, max(0.0, (x + y) / (2 * s) * 1.25 - 0.1))
-            c = tuple(int(p + (q - p) * t) for p, q in zip(a, b)) + (255,)
-            for k in range(4):
-                if x + k < s:
-                    px[x + k, y] = c
-    over = Image.new("RGBA", (s, s), (0, 0, 0, 0))  # a light speed stripe behind the letters
-    ImageDraw.Draw(over).polygon([(s * 0.08, s * 0.71), (s * 0.92, s * 0.43), (s * 0.92, s * 0.48), (s * 0.08, s * 0.76)],
-                                 fill=(140, 180, 255, 70))
-    tile.alpha_composite(over)
+    tile = Image.new("RGBA", (s, s), (3, 5, 9, 255))
+    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))  # a faint blue light from the top
+    ImageDraw.Draw(glow).ellipse((s * 0.1, -s * 0.5, s * 0.9, s * 0.45), fill=(0, 119, 192, 70))
+    tile.alpha_composite(glow.filter(ImageFilter.GaussianBlur(s * 0.12)))
+    blue = (0, 119, 192, 255)
+    d = ImageDraw.Draw(tile)
+    box = s * 0.27  # the square: its inside from s*0.27 to s*0.73
+    d.rectangle((box, box, s - box, s - box), outline=blue, width=int(s * 0.035))
     try:
-        font = ImageFont.truetype("/System/Library/Fonts/Avenir Next Condensed.ttc", int(s * 0.46), index=9)  # Heavy Italic
+        font = ImageFont.truetype(str(WEB / "fonts" / "BigShouldersDisplay-900.ttf"), int(s * 0.3))
     except OSError:
         font = ImageFont.load_default()
-    sh = Image.new("RGBA", (s, s), (0, 0, 0, 0))  # a soft shadow under the letters
-    ImageDraw.Draw(sh).text((s * 0.5, s * 0.515), "VS", font=font, fill=(0, 8, 30, 150), anchor="mm")
-    tile.alpha_composite(sh.filter(ImageFilter.GaussianBlur(s * 0.018)))
-    ink = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    ImageDraw.Draw(ink).text((s * 0.49, s * 0.5), "VS", font=font, fill=(255, 255, 255, 255), anchor="mm")
-    tile.alpha_composite(ink)
+    d.text((s / 2, s / 2), "VS", font=font, fill=blue, anchor="mm")
     mask = Image.new("L", (s, s), 0)
     ImageDraw.Draw(mask).rounded_rectangle((pad, pad, s - pad, s - pad), r, fill=255)
     img.paste(tile, (0, 0), mask)
