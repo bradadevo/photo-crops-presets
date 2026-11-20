@@ -27,6 +27,11 @@ and everything runs free on your Mac: no AI service, no cost.
 This repo started as a copy of photo-crops and is self-contained; the two
 change separately.
 
+**New to the AI side?** [AI.md](AI.md) explains, in plain language, every AI
+model the app uses: what it does, why it was chosen, where it runs and what
+it costs (almost everything is free and on your Mac). **How the software is
+built** is under [Architecture](#architecture) below.
+
 ## Setup
 
 ```bash
@@ -38,7 +43,9 @@ The first run downloads two free models (about 250 MB, once) to
 once) to `~/.rembg` the first time a look separates player and background
 (already there if you use ai-versions). The illustration looks download
 their drawing models (about 5 GB, once) to `~/.cache/huggingface` the first
-time one is used. Reels and video overlays need ffmpeg
+time one is used. The detail enlarger for tight crops (Real-ESRGAN, 67 MB)
+downloads once to `~/.cache/photo-crops` the first time an export enlarges a
+crop. Reels and video overlays need ffmpeg
 (`brew install ffmpeg`).
 
 ## The VS Digital Pro app
@@ -159,7 +166,10 @@ the tab too). Tools used on the picture itself:
   kit, a line); Warmth and Tint are set so it is.
 - **Text** (**T**): a name, a score or a date, dragged into place (it snaps
   to the middle), typed in the tab (two lines are fine), in **Clean**,
-  **Bold**, **Spaced** or **Banner** (on a dark bar), its size and color.
+  **Bold**, **Spaced** or **Banner** (on a dark bar), its size and color, in
+  any of 19 **fonts** (VS Display and VS Tech from the brand, Avenir,
+  Futura, Impact, DIN, Didot, scripts...) and turned to **any angle** (drag
+  the round handle above it, or type the degrees; it stays on the picture).
   The page draws it with the same font as the export, so what you place is
   what you get; every export size has it in the same place.
 - **Logo**: your **brand kit** (a team crest, a sponsor, your own mark).
@@ -191,6 +201,16 @@ Sliders:
   a player darker than the scene around them, backlit or in shade, up to +0.75
   stops; it compares the player with their own background, so it corrects the
   light, not anyone's skin tone or kit). Double-click a slider to reset it.
+- **Advanced** (folded away, so the panel stays clean): **Clarity and punch**
+  (Vibrance, Clarity, Texture, Dehaze, Whites, Blacks); **Player and
+  background** (the player's clarity, vibrance, warmth and sharpness, Face
+  light, Rim light, Background blur, color and warmth, using the cut-out);
+  **Color mixer** (hue, saturation and lightness for eight colors, and **Kit
+  color pop**: pick a kit color and make it richer); **Color grading** (a
+  color and amount for shadows, midtones and highlights); **Finishing** (Noise
+  reduction, Sharpen, Vignette). The picture side of these is in; their panel
+  in the Edit tab is being added next. Until then they work in a recipe's
+  `"adjust"` (below).
 - **Reset all**, and **Use on all N** (these sliders on every picture with
   this look; crops, parts and text stay with each picture).
 
@@ -233,8 +253,13 @@ exports just that one. The export window:
   14** (turned to match the photo). Each size is cropped to its shape around
   the players (kept whole whenever the shape allows; a cut-out fix that adds a
   teammate keeps them in too), then resized; Instagram sizes get a light
-  output sharpening. A print size bigger than the photo's own pixels is
-  enlarged, and the export says so. Files are named with the size, e.g.
+  output sharpening. A size bigger than the crop's own pixels (a tight crop
+  posted to Instagram, a big print) is enlarged with the **AI detail
+  enlarger** (Real-ESRGAN, on this Mac, about 7 s a photo): crisp hair, skin,
+  numbers and kit instead of a soft blow-up, with a little of the plain
+  enlargement mixed back so skin keeps its real texture; it never redraws
+  faces. Crops over 4 megapixels, or a Mac without the model, use plain
+  enlarging. The export says when a size was enlarged. Files are named with the size, e.g.
   `DSC03424_vivid-pro_ig-4x5.jpg`.
 - **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
   prints, further editing in Lightroom or Photoshop; about 6 times bigger), or
@@ -393,11 +418,22 @@ see-through (its letters show the picture), not a blank shape.
 **Click what you built to edit it**: a text, a logo or a poster on the
 picture opens its tool with it chosen (a text is ready to type in).
 
-Posters come in nine layouts: Game Day, Spotlight, Final Score, MVP, Name
-Stack (the name three times behind the player), Goal (GOAL behind the scorer,
-their name and the minute), Team Color (the background in the team color, the
-player in full color), Matchday (the opponent on a team-color band, when and
-where below) and Champions (a gold title, the event between gold rules).
+Posters come in 26 layouts plus Custom. The bold ones: Game Day, Spotlight,
+Final Score, MVP, Name Stack (the name three times behind the player), Goal
+(GOAL behind the scorer, their name and the minute), Team Color, Matchday,
+Champions, Jersey Number, Cover Story, Diagonal Split, Player Card, Cinematic,
+and the ★ designs Stadium Banner, Smoke Burst, Featured Split, Storm Night and
+Collector's Edition. **Clean overlays** (your photo as it is, the words on a
+quiet fill): Fill Band, Lower Third, Knockout (the words cut out of a solid
+panel), Side Label (the name standing up by the edge), Corner Tag, Outline
+Stack and Frosted Panel.
+
+**Every word, any font, any angle**: on every layout, each word (titles,
+names, numbers, the ribbon and the badge too) takes its own color, font and
+angle: the **Aa** button beside it opens its style, and the round handle
+above a selected word turns it. Words are drawn whole before they are turned,
+so a word stood up by an edge never loses letters. Custom poster pieces turn
+the same way. Moves are kept when you switch layouts.
 
 **Save a poster, put any picture in it**: in the Poster panel, name it and
 press **Save poster** (its layout, words, color, text and logo are kept in
@@ -662,7 +698,23 @@ frame (the most visible effect).
 
 A look is a recipe: a list of steps, run in order, then its quick
 adjustments (`"adjust"`: `strength` 0-1, `subject` and `background` stops,
-`warmth` -1 to 1, `auto_fill` true/false), applied over the finished look.
+`warmth` -1 to 1, `auto_fill` true/false, and the Light and Color sliders),
+applied over the finished look. The Advanced adjustments are `"adjust"` keys
+too: `vibrance`, `clarity`, `texture`, `dehaze`, `whites`, `blacks`;
+`p_clarity`, `p_vibrance`, `p_warmth`, `p_sharpen`, `face_light`, `rim_light`,
+`bg_blur`, `bg_saturation`, `bg_warmth`; `mix_<color>_h`/`_s`/`_l` for red,
+orange, yellow, green, aqua, blue, purple and magenta; `kit_color` (#rrggbb)
+and `kit_pop`; `grade_sh_hue`/`grade_sh`, `grade_mid_hue`/`grade_mid`,
+`grade_hi_hue`/`grade_hi`; `noise`, `sharpen`, `vignette`. Most run -1 to 1
+(0: off).
+
+**Pro color grades**: ten of VS Digital Pro's own, made here as real 3D LUTs
+(`photo_presets/grades.py` writes them to `photo_presets/luts_builtin/`), so
+the same grade works in Final Cut, Lightroom and Photoshop: VS Prime Time,
+Golden Hour, Night Match, Blockbuster, Bleach Bypass, Film Stock, Heritage
+Chrome, Ice Cold, Lush Pitch and Matte Editorial. Each is a short list of
+film-style moves (tone curve, highlight roll-off, color by hue, split toning,
+matte blacks), always kind to skin.
 
 ```json
 {"protect_faces": true,
@@ -793,34 +845,92 @@ uv run photo-crops ~/Movies/"Game day"
 Pro crops, face close-ups and rebuilt screenshots, exactly as in the
 [photo-crops README](https://github.com/bradadevo/photo-crops#readme).
 
+## Architecture
+
+How the parts fit, in plain terms.
+
+```text
+ You ──► the page (studio/web: plain HTML, CSS, JavaScript)
+            │  clicks, sliders, drags become small requests
+            ▼
+         the local server (studio/server.py, only on this Mac)
+            │  keeps the session: your photos, the looks made, edits, picks
+            ▼
+         the engine (engine.py)
+            ├─ scene.py      what is in the photo: players, faces, ball, the cut-out   ◄─ AI models
+            ├─ pipeline.py   runs a look's recipe, step by step (effects.py, luts.py…)
+            ├─ edits.py      after the look: crop, parts, text, removals (retouch.py)  ◄─ AI models
+            ├─ poster.py     posters and custom posters (custom_poster.py, fonts.py)
+            └─ deliver.py    export sizes, AI enlarging (enlarge.py), credit, watermark ◄─ AI model
+```
+
+- **The page** is the whole app you see. It draws previews quickly (about
+  1600 px) and shows edits live, using the same fonts and maths as the
+  export, so what you see is what you get.
+- **The server** runs on your Mac only (nothing goes to the internet). It
+  saves the session as you go, so quitting loses nothing, and runs slow work
+  (looks, AI drawings, exports) in the background with progress.
+- **A look is a recipe**: plain JSON, a list of steps plus slider values. The
+  same recipe makes the preview, the zoom (3600 px) and the full-size export,
+  which is how they match. Recipes are saved as presets and written next to
+  exports.
+- **Understanding the photo comes first** (`scene.py`): where the players,
+  faces, feet and ball are, and a precise cut-out of the players. Every
+  "player only" or "background only" setting, face protection and overlay
+  placement depends on it. It is made once per photo and reused.
+- **Edits come after the look** (crop, text, logos, posters, removals), so a
+  look can be swapped without losing them; "Add a look on top of this edit"
+  goes the other way.
+- **Export** renders again from the full-size (16-bit when RAW) photo, in
+  floating point to the end, then crops each size around the players, enlarges
+  with AI when needed, and writes your credit into the file.
+- **Culling** (`cull/`), **Check** (`clipcheck/`) and **Find a player**
+  (`players.py`) are separate parts sharing the same photo understanding.
+- **Where things live**: settings, presets, logos and posters in
+  `~/.config/photo-crops-presets`; caches (looks made, edited photos, assets) in
+  `~/.cache/photo-crops-presets`; AI models in `~/.cache/photo-crops`,
+  `~/.rembg` and `~/.cache/huggingface`. Your original photos are never
+  changed.
+
 ## Development
 
 ```bash
 uv run pytest
 ```
 
-The tests never load the large models.
+The tests never load the large models (and never touch your real settings:
+they use a folder of their own).
 
 ```text
-photo_crops/          photo-crops (see its README)
+photo_crops/          photo-crops (see its README): pose and outline models (YOLO), crops
 photo_presets/
   studio/             The VS Digital Pro app
     server.py         Its local server: the session (photos, looks made, kept), the worker, the page's API
-    web/              The page: index.html, app.css, app.js, edit.js (plain JavaScript, no build step)
+    web/              The page: index.html, app.css, app.js, edit.js, custom.js, background.js (no build step); fonts/
+    cull.py           The Culling tab
+    check.py          The Check tab
     macapp.py         vsdigitalpro-install-app: VS Digital Pro.app in ~/Applications
     share.py          AirDrop, Messages and Mail, the Mac's own share windows
-  edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling
-  retouch.py          Removing distractions with LaMa
-  app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
-  cli.py              vsdigitalpro-batch
   engine.py           Random and preset modes, previews, full-size export
-  pipeline.py         Running recipes, the step registry, plugins, keeping faces clean
+  scene.py            Faces, ball, feet, outlines and the player cut-out (BiRefNet, SAM 2.1); crop first
+  pipeline.py         Running recipes, the step registry, plugins, keeping faces clean, the adjustments
   effects.py          The built-in steps
   blend.py            Blend modes
   luts.py             .cube LUTs (from match-cull)
+  grades.py           VS Digital Pro's own pro color grades, written as LUTs to luts_builtin/
   procedural.py       Generated textures
+  backgrounds.py      Backgrounds made on this Mac (night stadium, smoke, storm, studio)
   assets.py           Finding, fetching and caching LUTs, textures and overlays
-  scene.py            Faces, ball, feet, outlines and the player cut-out; crop first
+  edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling
+  retouch.py          Removing distractions with LaMa
+  poster.py           The poster layouts
+  custom_poster.py    Custom posters built from pieces
+  fonts.py            The fonts any word can use, and drawing words at any angle
+  brand.py            Your brand kit: logos
+  enlarge.py          The AI detail enlarger for tight crops (Real-ESRGAN)
+  deliver.py          Export sizes, file types, name, copyright and watermark
+  players.py          Find a player across a game (face, number, kit)
+  match.py            Match the game (exposure and white balance across photos)
   presetform.py       The preset manager's form (tabs, explanations), to and from recipes
   explore.py          Random looks
   presets.py          Saved and starter presets, their groups and descriptions
@@ -829,11 +939,13 @@ photo_presets/
   technique.py        Artist techniques (oil, pencil, charcoal, ink, cel, comic)
   art.py              Illustration backgrounds
   watercolor.py       The watercolor steps
-  match.py            Match the game (exposure and white balance across photos)
-  deliver.py          Export sizes, file types, name, copyright and watermark
+  textguard.py        No invented numbers or letters in AI drawings; the photo's real text kept
   lightroom.py        Lightroom presets to LUTs (HALD charts)
   reel.py             Instagram reels: timing, beat sync, framing, titles, MP4
   timing.py           How long each look takes (measured, then learned from your runs)
-  textguard.py        No invented numbers or letters in AI drawings; the photo's real text kept
+  app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
+  cli.py              vsdigitalpro-batch
+  cull/               Culling: measuring every photo, ranking, your taste, crops, export, optional Gemini
+  clipcheck/          Check: how a video or photo was shot, fixes, reports
 tests/
 ```
