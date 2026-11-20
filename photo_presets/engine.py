@@ -243,7 +243,7 @@ class Engine:
             return look
         before = self.removed(r, pipeline.matched(pipeline.to_array(r.before), r.recipe))
         alpha = self.cutout(r) if pipeline.needs_cutout({"adjust": r.recipe.get("adjust")}) else None
-        done, _ = pipeline.finish(before, look, r.recipe, alpha)
+        done, _ = pipeline.finish(before, look, r.recipe, alpha, self.faces(r) if pipeline.adjustments(r.recipe)["face_light"] else None)
         return done
 
     def background_image(self, bg: dict, w: int, h: int) -> np.ndarray:
@@ -380,13 +380,19 @@ class Engine:
         m = self._cutouts[key]
         return None if m is None else m.astype(np.float32) / 255
 
+    def faces(self, r: Result) -> list:
+        """The players' faces in the result's photo: (x, y, radius), x and radius shares of its width, y of its height."""
+        p = self.ready(r.source, r.crop, dict(r.recipe, adjust={"subject": 1}))
+        return list(p.scene.faces)
+
     def adjust(self, r: Result, adj: dict) -> Result:
         """The result with new quick adjustments: instant, the look is not made again."""
         recipe = pipeline.with_adjust(r.recipe, adj)
         alpha = self.cutout(r) if pipeline.needs_cutout({"adjust": recipe.get("adjust")}) else None
         look = r.look or r.after
         before = pipeline.matched(pipeline.to_array(r.before), recipe)
-        done, notes = pipeline.finish(before, pipeline.to_array(look), recipe, alpha)
+        faces = self.faces(r) if pipeline.adjustments(recipe)["face_light"] else None
+        done, notes = pipeline.finish(before, pipeline.to_array(look), recipe, alpha, faces)
         kept = [n for n in r.notes if not n.startswith(("fill light", "no player cut-out here, so the player/"))]
         return dataclasses.replace(r, recipe=recipe, after=pipeline.to_image(done), notes=kept + notes, look=look)
 
