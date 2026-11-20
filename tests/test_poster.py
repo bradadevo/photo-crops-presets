@@ -259,3 +259,32 @@ def test_every_layout_word_takes_its_color_font_and_turn():
         assert np.abs(a - b).mean() > 1e-4, (t, k, what)
     w = {x["key"]: x for x in poster.words(poster.clean({"template": "collector"}))}
     assert w["home"]["r"] == -45 and w["home"]["r0"] == -45  # the ribbon's own slant, for the page
+
+
+CLEAN = ("fillband", "lowerthird", "knockout", "sidelabel", "cornertag", "outlinestack", "frosted")
+
+
+def test_clean_overlays_keep_the_photo_and_every_word_is_editable():
+    from photo_presets import poster
+    rng = np.random.default_rng(3)
+    arr = (rng.random((600, 480, 3)) * 0.5 + 0.25).astype(np.float32)
+    for t in CLEAN:
+        p = poster.clean({"template": t})
+        out = poster.compose(arr, None, p)
+        top = out[: out.shape[0] // 5, out.shape[1] // 3:]  # (the top of the photo, away from the words, is the photo)
+        assert out.shape[2] == 3 and np.isfinite(out).all(), t
+        keys = {w["key"] for w in poster.words(p)}
+        assert {k for k in poster.DEFAULTS[t] if p.get(k)} <= keys, (t, keys)
+        assert t in poster.NAME_KEY and t in poster.LOGO_AT
+        assert top.std() > 0.05, t
+
+
+def test_a_word_stood_up_at_the_edge_loses_no_letters():
+    """Drawn whole before turning: a word near the edge, stood up, keeps every letter."""
+    from photo_presets import poster
+    arr = np.zeros((1000, 800, 3), np.float32)
+    base = {"template": "gameday", "line": ""}
+    flat = poster.compose(arr, None, poster.clean(base))
+    up = poster.compose(arr, None, poster.clean({**base, "moves": {"title": {"r": -90, "x": -0.33, "y": 0.35}}}))  # (by the left edge)
+    ink = lambda img: float((img.max(2) > 0.6).sum())
+    assert ink(up) > ink(flat) * 0.9  # (Game Day's title is nearly as wide as the poster: level, its ends were cut)

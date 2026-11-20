@@ -12,6 +12,8 @@ crop and parts), so the same layout comes out in the preview and the export.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -40,6 +42,13 @@ TEMPLATES = {
     "featured": "Featured Split",
     "storm": "Storm Night",
     "collector": "Collector's Edition",
+    "fillband": "Fill Band",
+    "lowerthird": "Lower Third",
+    "knockout": "Knockout",
+    "sidelabel": "Side Label",
+    "cornertag": "Corner Tag",
+    "outlinestack": "Outline Stack",
+    "frosted": "Frosted Panel",
     "custom": "Custom",
 }
 SHAPES = {"post": 4 / 5, "square": 1.0, "story": 9 / 16, "wide": 16 / 9}  # width / height
@@ -64,6 +73,13 @@ DEFAULTS = {
     "featured": {"line": "2026", "title": "Featured", "away": "athlete", "number": "10", "home": "CAPTAIN", "name": "LINCOLN HAYES"},
     "storm": {"line": "PSG LAKE NONA  ·  U11", "title": "LINCOLN", "number": "7"},
     "collector": {"title": "SOCCER", "line": "THE SEASON ISSUE", "minute": "2026", "away": "All-Star", "home": "COLLECTOR'S EDITION"},
+    "fillband": {"title": "LINCOLN HAYES", "line": "PSG LAKE NONA  ·  #7"},
+    "lowerthird": {"title": "Lincoln Hayes", "line": "MIDFIELD  ·  PSG LAKE NONA"},
+    "knockout": {"title": "HAYES", "line": "LINCOLN  ·  NUMBER 7"},
+    "sidelabel": {"title": "LINCOLN HAYES", "line": "FALL SEASON 2026"},
+    "cornertag": {"title": "GAME DAY", "name": "Lincoln Hayes", "line": "PSG LAKE NONA"},
+    "outlinestack": {"title": "LINCOLN", "name": "HAYES", "line": "PSG LAKE NONA  ·  U11"},
+    "frosted": {"title": "Lincoln Hayes", "line": "PSG LAKE NONA  ·  FALL 2026"},
     "custom": {},
 }
 GOLD = (212, 175, 55)
@@ -284,11 +300,12 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, turn: float = 0.
         turns[key] = (angle, turn)
     image = getattr(d, "_image", None)
     if angle and image is not None and image.mode == "RGBA":  # turned around its middle (a word in parts: the whole word's)
-        lay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        ImageDraw.Draw(lay).text(xy, text, font=font, **kw)
         mid = (getattr(_NOTE, "middles", None) or {}).get(key)
         mid = (mid[0] * image.size[0], mid[1] * image.size[1]) if mid else ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
-        image.alpha_composite(fonts.turned(lay, angle, mid))
+        side = fonts.room(box, mid, font.size * 0.2 + kw.get("stroke_width", 0))  # (all of it, even past the edge, before turning)
+        lay = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        ImageDraw.Draw(lay).text((xy[0] - mid[0] + side / 2, xy[1] - mid[1] + side / 2), text, font=font, **kw)
+        fonts.paste(image, fonts.turned(lay, angle, (side / 2, side / 2)), mid[0] - side / 2, mid[1] - side / 2)
     else:
         d.text(xy, text, font=font, **kw)
     boxes = getattr(_NOTE, "boxes", None)
@@ -1112,12 +1129,181 @@ def _collector(pic, m, p, W, H, color, has_logo):
     return out
 
 
+# Clean overlays: the photo as it is, the words set on a quiet fill (a band, a plate, a tag, glass) ---------
+
+def _soft_bottom(pic, H, start=0.55, strength=0.55):
+    """A gentle dark fade at the bottom, for white words to read on any photo."""
+    y = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
+    return pic * (1 - strength * np.clip((y - start) / (1 - start), 0, 1) ** 1.4)
+
+
+def _fill_band(pic, m, p, W, H, color, has_logo):
+    """A see-through dark band across the lower third, a thin team-color edge on top, the name big and clean
+    in it, a spaced line under it."""
+    u = _NOTE.u
+    out = pic.copy()
+    title, line = p.get("title", ""), p.get("line", "")
+    tf = _fit_font(title, HEAVY, W * 0.86, u * 0.085)
+    lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.024) if line else None
+    band_h = tf.size * 1.25 + (lf.size * 2.2 if lf else 0) + u * 0.05
+    y1 = H - u * 0.07
+    y0 = y1 - band_h
+    out[int(y0):int(y1)] = out[int(y0):int(y1)] * 0.3 + np.array([0.02, 0.025, 0.035], np.float32) * 0.7
+    out[int(y0):int(y0 + max(2, u * 0.005))] = color
+    lay, d = _layer((W, H))
+    _say(d, "title", (W / 2, y0 + u * 0.03 + tf.size * 0.55), title, font=tf, fill=(255, 255, 255, 255), anchor="mm")
+    if lf:
+        _say(d, "line", (W / 2, y1 - u * 0.03 - lf.size * 0.5), _spaced(line), font=lf, fill=(225, 230, 238, 235), anchor="mm")
+    return _over(out, lay)
+
+
+def _lower_third(pic, m, p, W, H, color, has_logo):
+    """A broadcast lower third: a team-color plate with the name, a slim dark strip under it with the line."""
+    u = _NOTE.u
+    out = _soft_bottom(pic, H, 0.6, 0.35)
+    title, line = p.get("title", ""), p.get("line", "")
+    tf = _fit_ff(title, COND, 8, W * 0.62, u * 0.07)
+    lf = _fit_font(_spaced(line), DEMI, W * 0.6, u * 0.021) if line else None
+    x0, pad = W * 0.06, u * 0.025
+    pw = (tf.getlength(title) if title else W * 0.3) + pad * 2.4
+    ph = tf.size * 1.25
+    y0 = H - u * 0.12 - ph - (lf.size * 2.0 if lf else 0)
+    lay, d = _layer((W, H))
+    d.rectangle((x0, y0, x0 + pw, y0 + ph), fill=_c255(color, 240))
+    d.rectangle((x0, y0, x0 + max(3, u * 0.008), y0 + ph), fill=(255, 255, 255, 255))
+    if lf:
+        sw = max(pw * 0.8, lf.getlength(_spaced(line)) + pad * 2)
+        d.rectangle((x0, y0 + ph, x0 + sw, y0 + ph + lf.size * 2.0), fill=(8, 10, 14, 225))
+        _say(d, "line", (x0 + pad, y0 + ph + lf.size), _spaced(line), font=lf, fill=(230, 233, 240, 240), anchor="lm")
+    _say(d, "title", (x0 + pad * 1.2, y0 + ph / 2), title, font=tf, fill=(255, 255, 255, 255), anchor="lm")
+    return _over(out, _shadowed(lay, u * 0.008, 0.35))
+
+
+def _knockout(pic, m, p, W, H, color, has_logo):
+    """A solid panel across the bottom with the name cut out of it: the photo shows through the letters.
+    The name's color is the panel's."""
+    u = _NOTE.u
+    out = pic.copy()
+    title, line = p.get("title", ""), p.get("line", "")
+    tf = _fit_ff(title, COND, 8, W * 0.9, u * 0.2)
+    lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.022) if line else None
+    ph = tf.size * 1.05 + (lf.size * 2.6 if lf else u * 0.03)
+    y0 = H - ph - u * 0.04
+    panel = word_color("title", (245, 245, 242))
+    cut, cd = _layer((W, H))
+    colors, _NOTE.colors = getattr(_NOTE, "colors", None), None  # (the cut-out is a stencil; the color is the panel's)
+    try:
+        _say(cd, "title", (W / 2, y0 + u * 0.01 + tf.size * 0.52), title, font=tf, fill=(255, 255, 255, 255), anchor="mm")
+    finally:
+        _NOTE.colors = colors
+    hole = np.asarray(cut).astype(np.float32)[..., 3:4] / 255
+    fill = np.zeros((H, W, 1), np.float32)
+    fill[int(y0):int(H - u * 0.04), int(W * 0.04):int(W * 0.96)] = 1
+    a = np.clip(fill - hole, 0, 1) * 0.94
+    out = out * (1 - a) + np.array(panel, np.float32) / 255 * a
+    if lf:
+        lay, d = _layer((W, H))
+        ink = (20, 22, 26, 255) if sum(panel) > 380 else (245, 245, 245, 255)
+        _say(d, "line", (W / 2, H - u * 0.04 - lf.size * 1.3), _spaced(line), font=lf, fill=ink, anchor="mm")
+        out = _over(out, lay)
+    return out
+
+
+def _side_label(pic, m, p, W, H, color, has_logo):
+    """The name standing up along the left edge on a slim team-color strip, a small line at the bottom."""
+    u = _NOTE.u
+    out = pic.copy()
+    title, line = p.get("title", ""), p.get("line", "")
+    tf = _fit_ff(_spaced(title), str(Path(__file__).parent / "studio/web/fonts/BigShouldersDisplay-900.ttf"), 0, H * 0.8, u * 0.07)
+    strip = tf.size * 1.5
+    x0 = W * 0.035
+    out[:, int(x0):int(x0 + strip)] = out[:, int(x0):int(x0 + strip)] * 0.15 + np.array(color, np.float32) * 0.85
+    lay, d = _layer((W, H))
+    _say(d, "title", (x0 + strip / 2, H / 2), _spaced(title), font=tf, turn=-90, fill=(255, 255, 255, 255), anchor="mm")
+    if line:
+        lf = _fit_font(_spaced(line), DEMI, W * 0.6, u * 0.022)
+        _say(d, "line", (x0 + strip + W * 0.04, H - u * 0.05), _spaced(line), font=lf, fill=(255, 255, 255, 235), anchor="ls")
+    out = _soft_bottom(out, H, 0.75, 0.3) if line else out
+    return _over(out, _shadowed(lay, u * 0.006, 0.3))
+
+
+def _corner_tag(pic, m, p, W, H, color, has_logo):
+    """A small solid tag in the top left corner, the name clean and large at the bottom left, a line under it."""
+    u = _NOTE.u
+    out = _soft_bottom(pic, H, 0.58, 0.5)
+    lay, d = _layer((W, H))
+    title = p.get("title", "")
+    if title:
+        tf = _ff(str(Path(__file__).parent / "studio/web/fonts/ChakraPetch-700.ttf"), 0, u * 0.03)
+        tw = tf.getlength(_spaced(title))
+        x0, y0 = W * 0.05, u * 0.045
+        d.rectangle((x0, y0, x0 + tw + u * 0.05, y0 + tf.size * 1.9), fill=_c255(color, 245))
+        _say(d, "title", (x0 + u * 0.025, y0 + tf.size * 0.95), _spaced(title), font=tf, fill=(255, 255, 255, 255), anchor="lm")
+    name, line = p.get("name", ""), p.get("line", "")
+    nf = _fit_font(name, BOLD, W * 0.86, u * 0.08)
+    lf = _fit_font(_spaced(line), MEDIUM, W * 0.8, u * 0.022) if line else None
+    ny = H - u * 0.07 - (lf.size * 1.8 if lf else 0)
+    _say(d, "name", (W * 0.05, ny), name, font=nf, fill=(255, 255, 255, 255), anchor="ls")
+    if lf:
+        _say(d, "line", (W * 0.05, H - u * 0.065), _spaced(line), font=lf, fill=(225, 228, 235, 235), anchor="ls")
+    return _over(out, _shadowed(lay, u * 0.006, 0.35))
+
+
+def _outline_stack(pic, m, p, W, H, color, has_logo):
+    """Two lines at the bottom left: the first outlined, the second solid, a small line under them."""
+    u = _NOTE.u
+    out = _soft_bottom(pic, H, 0.5, 0.6)
+    lay, d = _layer((W, H))
+    title, name, line = p.get("title", ""), p.get("name", ""), p.get("line", "")
+    big = min(u * 0.16, W * 0.2)
+    tf = _fit_ff(title, COND, 8, W * 0.9, big)
+    nf = _fit_ff(name, COND, 8, W * 0.9, big)
+    lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.022) if line else None
+    y = H - u * 0.07 - (lf.size * 1.9 if lf else 0)
+    _say(d, "name", (W * 0.05, y), name, font=nf, fill=(255, 255, 255, 255), anchor="ls")
+    _say(d, "title", (W * 0.05, y - nf.size * 0.98), title, font=tf, fill=(255, 255, 255, 0), anchor="ls",
+         stroke_width=max(2, int(tf.size * 0.03)), stroke_fill=(255, 255, 255, 255))
+    if lf:
+        _say(d, "line", (W * 0.05, H - u * 0.065), _spaced(line), font=lf, fill=_c255(color + (1 - color) * 0.55), anchor="ls")
+    return _over(out, _shadowed(lay, u * 0.006, 0.3))
+
+
+def _frosted(pic, m, p, W, H, color, has_logo):
+    """A frosted-glass panel near the bottom (the photo behind it softly blurred and dimmed, a fine light edge),
+    the name and a line in it."""
+    u = _NOTE.u
+    out = pic.copy()
+    title, line = p.get("title", ""), p.get("line", "")
+    tf = _fit_font(title, BOLD, W * 0.74, u * 0.065)
+    lf = _fit_font(_spaced(line), MEDIUM, W * 0.72, u * 0.021) if line else None
+    pw = W * 0.86
+    ph = tf.size * 1.5 + (lf.size * 2.2 if lf else 0) + u * 0.03
+    x0, y1 = (W - pw) / 2, H - u * 0.07
+    y0 = y1 - ph
+    box = (int(x0), int(y0), int(x0 + pw), int(y1))
+    glass = cv2.GaussianBlur(pic, (0, 0), max(4.0, u * 0.03)) * 0.62 + 0.06
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(box, radius=u * 0.02, fill=255)
+    mk = np.asarray(mask).astype(np.float32)[..., None] / 255
+    out = out * (1 - mk) + glass * mk
+    lay, d = _layer((W, H))
+    d.rounded_rectangle(box, radius=u * 0.02, outline=(255, 255, 255, 70), width=max(1, int(u * 0.002)))
+    _say(d, "title", (W / 2, y0 + u * 0.02 + tf.size * 0.7), title, font=tf, fill=(255, 255, 255, 255), anchor="mm")
+    if lf:
+        _say(d, "line", (W / 2, y1 - u * 0.02 - lf.size * 0.9), _spaced(line), font=lf, fill=(230, 233, 240, 230), anchor="mm")
+    return _over(out, lay)
+
+
 MORE = {"name": _name_stack, "goal": _goal, "teamcolor": _team_color, "matchday": _matchday, "champions": _champions,
         "jersey": _jersey, "cover": _cover_story, "split": _split, "card": _player_card, "cinematic": _cinematic,
-        "banner": _banner, "smoke": _smoke_burst, "featured": _featured, "storm": _storm, "collector": _collector}
+        "banner": _banner, "smoke": _smoke_burst, "featured": _featured, "storm": _storm, "collector": _collector,
+        "fillband": _fill_band, "lowerthird": _lower_third, "knockout": _knockout, "sidelabel": _side_label,
+        "cornertag": _corner_tag, "outlinestack": _outline_stack, "frosted": _frosted}
 LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "champions": "bc",
            "jersey": "br", "cover": "br", "split": "tl", "card": "br", "cinematic": "tl",
-           "banner": "tr", "smoke": "tl", "featured": "tl", "storm": "tr", "collector": "tr"}
+           "banner": "tr", "smoke": "tl", "featured": "tl", "storm": "tr", "collector": "tr",
+           "fillband": "tr", "lowerthird": "tr", "knockout": "tr", "sidelabel": "tr", "cornertag": "tr", "outlinestack": "tr",
+           "frosted": "tr"}
 
 
 def _logo_placed(out: np.ndarray, logo: Image.Image, W: int, H: int, at: dict) -> np.ndarray:
@@ -1175,7 +1361,9 @@ def customized(p: dict, has_logo: bool = False) -> dict:
 # A team's posters: where each player's name and number go -------------------------------------
 NAME_KEY = {"spotlight": "title", "name": "title", "teamcolor": "title", "goal": "name", "mvp": "line",
             "jersey": "title", "cover": "name", "split": "title", "card": "title", "cinematic": "title",
-            "banner": "name", "smoke": "name", "featured": "name", "storm": "title"}
+            "banner": "name", "smoke": "name", "featured": "name", "storm": "title",
+            "fillband": "title", "lowerthird": "title", "knockout": "title", "sidelabel": "title", "cornertag": "name",
+            "outlinestack": "title", "frosted": "title"}
 NUMBER_KEY = {"spotlight": "number", "jersey": "number", "split": "number", "card": "number", "featured": "number", "storm": "number"}
 
 

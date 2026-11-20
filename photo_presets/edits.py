@@ -143,21 +143,28 @@ def _line_width(font, line: str, track: float) -> float:
     return sum(font.getlength(ch) for ch in line) + track * max(0, len(line) - 1)
 
 
-def text_layer(size: tuple[int, int], t: dict) -> Image.Image:
-    """One text, drawn on a clear layer the picture's size (RGBA)."""
+def text_layer(size: tuple[int, int], t: dict, base_w: int | None = None) -> Image.Image:
+    """One text, drawn on a clear layer the picture's size (RGBA). base_w: the picture's width, when drawing
+    on a square of its own (a turned text, so none of it is lost past the picture's edge before turning)."""
     w, h = size
     style = t.get("style", "clean")
     words = str(t.get("text", "")).strip("\n")
     if style in UPPER:
         words = words.upper()
     lines = words.split("\n") or [""]
-    px = max(6, int(float(t.get("size", 0.06)) * w))
+    px = max(6, int(float(t.get("size", 0.06)) * (base_w or w)))
     font = fonts.load(t.get("font"), px) or _font(style, px)
     track = TRACKING.get(style, 0.0) * px
     line_h = px * 1.15
     widths = [_line_width(font, line, track) for line in lines]
     block_w, block_h = max(widths or [0]), line_h * len(lines)
     cx, cy = float(t.get("x", 0.5)) * w, float(t.get("y", 0.5)) * h
+    if t.get("angle") and base_w is None:  # turned: drawn whole on its own square, then laid on the picture
+        side = fonts.room((cx - block_w / 2 - px, cy - block_h / 2 - px, cx + block_w / 2 + px, cy + block_h / 2 + px), (cx, cy))
+        own = text_layer((side, side), {**t, "x": 0.5, "y": 0.5}, base_w=w)
+        layer = Image.new("RGBA", size, (0, 0, 0, 0))
+        fonts.paste(layer, own, cx - side / 2, cy - side / 2)
+        return layer
     left, top = cx - block_w / 2, cy - block_h / 2
     color = str(t.get("color", "#ffffff"))
     layer = Image.new("RGBA", size, (0, 0, 0, 0))

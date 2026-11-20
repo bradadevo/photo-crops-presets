@@ -89,3 +89,19 @@ def turned(layer: Image.Image, angle: float, center: tuple[float, float]) -> Ima
     if not angle:
         return layer
     return layer.rotate(-angle, resample=Image.BICUBIC, center=center)
+
+
+def paste(dst: Image.Image, src: Image.Image, x: float, y: float) -> None:
+    """src laid over dst (both RGBA) with its top left at x, y: parts off dst are left off."""
+    x, y = int(round(x)), int(round(y))
+    sx, sy = max(0, -x), max(0, -y)
+    w, h = min(src.width - sx, dst.width - x - sx), min(src.height - sy, dst.height - y - sy)
+    if w > 0 and h > 0:
+        dst.alpha_composite(src.crop((sx, sy, sx + w, sy + h)), (x + sx, y + sy))
+
+
+def room(box, mid, pad: float = 4) -> int:
+    """The side of a square, centered on mid, that holds box however it is turned."""
+    import math
+    far = max(math.hypot(px - mid[0], py - mid[1]) for px in (box[0], box[2]) for py in (box[1], box[3]))
+    return int(2 * far + 2 * pad) + 2

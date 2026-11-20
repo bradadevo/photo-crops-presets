@@ -804,7 +804,19 @@ const POSTER_FIELDS = { gameday: [["title", "Title"], ["line", "Line under it"]]
   smoke: [["line", "Club (small, above)"], ["title", "Team name"], ["name", "Player's name (first last)"]],
   featured: [["line", "Year"], ["title", "Script word"], ["away", "Small script word"], ["number", "Number"], ["home", "Role"], ["name", "Player's name"]],
   storm: [["title", "Name"], ["line", "Line under it"], ["number", "Number (faint, behind)"]],
-  collector: [["title", "Magazine title"], ["line", "Issue line"], ["minute", "Year"], ["away", "Script badge"], ["home", "Ribbon"]] };
+  collector: [["title", "Magazine title"], ["line", "Issue line"], ["minute", "Year"], ["away", "Script badge"], ["home", "Ribbon"]],
+  fillband: [["title", "Name"], ["line", "Line under it"]], lowerthird: [["title", "Name"], ["line", "Role or team"]],
+  knockout: [["title", "Cut-out word (its color is the panel's)"], ["line", "Line under it"]], sidelabel: [["title", "Name (standing up)"], ["line", "Small line"]],
+  cornertag: [["title", "Corner tag"], ["name", "Name"], ["line", "Small line"]], outlinestack: [["title", "First line (outlined)"], ["name", "Second line (solid)"], ["line", "Small line"]],
+  frosted: [["title", "Name"], ["line", "Line under it"]] };
+/* Clean overlays: the photo as it is, the words on a quiet fill */
+const CLEAN_POSTERS = [["fillband", "Fill Band", "A see-through dark band across the lower third, the name big and clean in it"],
+  ["lowerthird", "Lower Third", "A broadcast name plate in the team color, a slim strip with the role under it"],
+  ["knockout", "Knockout", "A solid panel with the name cut out of it: the photo shows through the letters"],
+  ["sidelabel", "Side Label", "The name standing up along the left edge on a slim team-color strip"],
+  ["cornertag", "Corner Tag", "A small team-color tag in the corner, the name clean and large at the bottom"],
+  ["outlinestack", "Outline Stack", "Two lines at the bottom: the first outlined, the second solid"],
+  ["frosted", "Frosted Panel", "A frosted-glass panel over the photo with the name and a line"]];
 const POSTER_SHAPES = [["post", "Post", "Instagram post, 4:5", 4, 5], ["square", "Square", "Instagram or Facebook square, 1:1", 1, 1],
   ["story", "Story", "Instagram or TikTok story or reel, 9:16", 9, 16], ["wide", "Wide", "YouTube, X or Facebook, 16:9", 16, 9]];
 const WORD_COLORS = ["#ffffff", "#111111", "#d4af37", "#c8102e", "#0b3d91", "#1f2a44", "#0f5f3a", "#d97706", "#5b2a86", "#7dd3fc"];
@@ -817,6 +829,8 @@ function posterSection(e) {
     ${p && cur ? teamSection(cur, p) : ""}
     ${(st.posters || []).length ? `<h4 class="sub">Your posters <small>click one to put this picture in it</small></h4><div class="my-posters">${st.posters.map((q) => `<span class="chip-x"><button data-my-poster="${esc(q.name)}" title="${esc(q.about)}">${esc(q.name)}</button><button class="x" data-del-poster="${esc(q.name)}" title="Delete this saved poster">${icon("x")}</button></span>`).join("")}</div>` : ""}
     <div class="poster-picks">${POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
+    <label class="sub-label">Clean overlays <small class="faint">· your photo as it is, the words on a quiet fill</small></label>
+    <div class="poster-picks">${CLEAN_POSTERS.map(([v, l, tip]) => `<button data-poster="${v}" class="${p?.template === v ? "on" : ""}" title="${esc(tip)}">${l}</button>`).join("")}</div>
     ${p ? `<div class="fld"><label>Shape <small class="faint">· what you see is what's exported</small></label><div class="shape-picks" id="pp-shape">${POSTER_SHAPES.map(([v, l, sub, w, h]) => `<button data-v="${v}" class="${p.shape === v ? "on" : ""}" title="${esc(sub)}"><i style="aspect-ratio:${w}/${h}"></i><b>${l}</b><small>${esc(sub)}</small></button>`).join("")}</div></div>
       <div class="slider"><label title="Drag the photo on the poster to move it; pinch on the trackpad to zoom too">Photo zoom</label><output>${Math.round((p.pic?.zoom || 1) * 100)}%</output><input type="range" id="pp-zoom" min="1" max="4" step="0.05" value="${p.pic?.zoom || 1}"></div>
       ${p.pic ? `<button class="btn ghost small-btn" id="pp-pic-reset" title="The photo placed as the layout had it">${icon("undo")} Photo back to its place</button>` : `<p class="notes">Drag the photo on the poster to move it in its frame.</p>`}

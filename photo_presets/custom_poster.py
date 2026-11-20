@@ -119,10 +119,13 @@ def _pieces(out, pic, m, els, W, H, u, color, logos, over, shadowed, say, font, 
 
 
 def _piece(lay: Image.Image, e: dict, W: int, H: int, u: float, team: tuple, logos, say, font, boxes) -> None:
-    if e.get("angle"):  # drawn on its own, then turned around its middle
-        own = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        _piece(own, {**e, "angle": 0}, W, H, u, team, logos, say, font, boxes)
-        lay.alpha_composite(fonts.turned(own, e["angle"], (e["x"] * W, e["y"] * H)))
+    if e.get("angle"):  # drawn on its own (with room past the edges, so none of it is lost), then turned
+        P = max(W, H) // 2
+        own = Image.new("RGBA", (W + 2 * P, H + 2 * P), (0, 0, 0, 0))
+        n = len(boxes)
+        _piece(own, {**e, "angle": 0, "x": (e["x"] * W + P) / W, "y": (e["y"] * H + P) / H}, W, H, u, team, logos, say, font, boxes)
+        boxes[n:] = [(k, (b[0] - P, b[1] - P, b[2] - P, b[3] - P)) for k, b in boxes[n:]]
+        fonts.paste(lay, fonts.turned(own, e["angle"], (e["x"] * W + P, e["y"] * H + P)), -P, -P)
         return
     d = ImageDraw.Draw(lay)
     cx, cy = e["x"] * W, e["y"] * H
