@@ -213,6 +213,34 @@ function showTurnTip(el, text) {
   turnTipEl.style.left = b.left + b.width / 2 + "px"; turnTipEl.style.top = Math.max(8, b.top - 34) + "px";
 }
 function hideTurnTip() { turnTipEl?.remove(); }
+/* Turning a word stands it up: a long one near an edge would run off the picture. How far to move its
+   middle (shares of the frame) so all of it stays on: box in shares (as it is, level), a in degrees. */
+function keepOn(box, a) {
+  const f = $("#frame");
+  if (!f || !box) return [0, 0];
+  const W = f.clientWidth, H = f.clientHeight, t = (a * Math.PI) / 180, c = Math.abs(Math.cos(t)), s = Math.abs(Math.sin(t));
+  const w = (box.x1 - box.x0) * W, h = (box.y1 - box.y0) * H, hw = (w * c + h * s) / 2, hh = (w * s + h * c) / 2;
+  const cx = ((box.x0 + box.x1) / 2) * W, cy = ((box.y0 + box.y1) / 2) * H, m = Math.min(W, H) * 0.015;
+  const fit = (v, half, size) => (half * 2 > size - 2 * m ? size / 2 : Math.min(Math.max(v, half + m), size - half - m));
+  return [(fit(cx, hw, W) - cx) / W, (fit(cy, hh, H) - cy) / H];
+}
+const unionBox = (parts) => parts.length ? { x0: Math.min(...parts.map((p) => p.x0)), y0: Math.min(...parts.map((p) => p.y0)),
+  x1: Math.max(...parts.map((p) => p.x1)), y1: Math.max(...parts.map((p) => p.y1)) } : null;
+/* A layout word turned to a (as drawn, its own slant included), kept on the poster */
+function turnWord(cur, k, a) {
+  const parts = wordsList.filter((x) => x.key === k), r0 = parts[0]?.r0 || 0, [dx, dy] = keepOn(unionBox(parts), a);
+  setMove(cur, k, (m) => { m.r = normAngle(a - r0); m.x += dx; m.y += dy; });
+}
+/* A text on the photo turned to a, kept on the picture */
+function turnText(cur, i, a) {
+  const el = $(`#texts .tx[data-i="${i}"]`), f = $("#frame"), t = slotById(cur.id).edits.texts[i];
+  let dx = 0, dy = 0;
+  if (el && f) {
+    const w = el.offsetWidth / f.clientWidth, h = el.offsetHeight / f.clientHeight;
+    [dx, dy] = keepOn({ x0: t.x - w / 2, x1: t.x + w / 2, y0: t.y - h / 2, y1: t.y + h / 2 }, a);
+  }
+  changeEdits(slotById(cur.id), (e) => { const x = e.texts[i]; if (a) x.angle = a; else delete x.angle; x.x += dx; x.y += dy; });
+}
 /* The round handle that turns a word or piece: above it, or below it when it is at the very top */
 const turnHandle = (top) => `<span class="pc-r${top < 0.08 ? " below" : ""}" title="Drag to turn it · Shift: 15° steps"></span>`;
 const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
@@ -423,7 +451,7 @@ function bindEditPane(cur, pane) {
     const i = +box.dataset.angleOf;
     bindAngle(box.parentElement, () => slotById(cur.id).edits.texts[i].angle || 0,
       (a) => { const el = $(`#texts .tx[data-i="${i}"]`); if (el) el.style.transform = `translate(-50%, -50%) rotate(${a}deg)`; },
-      (a) => changeEdits(slotById(cur.id), (e) => { if (a) e.texts[i].angle = a; else delete e.texts[i].angle; }));
+      (a) => turnText(cur, i, a));
   });
   pane.querySelectorAll("[data-color-of] button").forEach((b) => b.onclick = () => {
     const i = +b.parentElement.dataset.colorOf;
@@ -651,7 +679,7 @@ async function paintWords(cur) {
     if (st.stylePk !== k) { st.stylePk = k; st.colorPk = null; if (st.tool === "poster") { editSig = ""; renderTabs(); } }
     if (st.tool !== "poster") openPart(cur, "poster");
     focusPosterField(k);
-  }, (a) => setMove(cur, el.dataset.pk, (m) => { m.r = a; })));
+  }, (a) => turnWord(cur, el.dataset.pk, a)));
   paintPieces(cur, f, wordsList);  // (pieces added on top of the layout: stripes, text…)
   box.querySelectorAll(".pc-logo").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
     const w = wordsList.find((x) => x.key === "logo");
@@ -699,7 +727,7 @@ function bindTexts(cur) {
     if (e.target.closest(".pc-r")) {  // its round handle: turn it
       const a0 = slotById(cur.id).edits.texts[i].angle || 0;
       return rotateDrag(el, e, a0, (a) => { el.style.transform = `translate(-50%, -50%) rotate(${a}deg)`; },
-        (a) => changeEdits(slotById(cur.id), (ed) => { if (a) ed.texts[i].angle = a; else delete ed.texts[i].angle; }));
+        (a) => turnText(cur, i, a));
     }
     if (st.textSel !== i) { st.textSel = i; editSig = ""; renderTabs(); box.querySelectorAll(".tx").forEach((x) => x.classList.toggle("sel", +x.dataset.i === i)); box.querySelectorAll(".pc-r").forEach((x) => x.remove()); const tt = slotById(cur.id).edits.texts[i]; el.insertAdjacentHTML("beforeend", turnHandle(tt.y - tt.size)); }
     const s0 = slotById(cur.id), t0 = s0.edits.texts[i];
@@ -901,7 +929,8 @@ function bindPosterSection(cur, pane) {
     size.oninput = () => { size.previousElementSibling.textContent = `${Math.round(size.value * 100)}%`; };
     size.onchange = () => setMove(cur, k, (m) => { m.s = +size.value; });  // (grown from where the layout anchors it)
     size.ondblclick = () => setMove(cur, k, (m) => { m.s = 1; });
-    bindAngle(box, () => mv().r || 0, (a) => { const el = word(); if (el) el.style.rotate = `${a}deg`; }, (a) => setMove(cur, k, (m) => { m.r = a; }));
+    const r0 = () => wordsList.find((x) => x.key === k)?.r0 || 0;
+    bindAngle(box, () => mv().r || 0, (a) => { const el = word(); if (el) el.style.rotate = `${a + r0()}deg`; }, (a) => turnWord(cur, k, a + r0()));
   });
   const wordColor = (k, c) => set((p) => { p.colors ||= {}; if (c) p.colors[k] = c; else delete p.colors[k]; });
   pane.querySelectorAll("[data-word-colors] button").forEach((b) => b.onclick = () => wordColor(b.parentElement.dataset.wordColors, b.dataset.v));

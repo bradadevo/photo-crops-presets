@@ -242,3 +242,20 @@ def test_a_word_in_parts_turns_as_one():
     ys, xs = np.nonzero(b > 0.5)
     assert len(ys) and abs(xs.mean() / W - mid[0]) < 0.06 and abs(ys.mean() / H - mid[1]) < 0.12
     assert a.shape[0] == W  # (sanity)
+
+
+def test_every_layout_word_takes_its_color_font_and_turn():
+    """Chrome titles, the collector ribbon, the badge numbers: no word ignores what you set for it."""
+    from photo_presets import poster
+    arr = np.full((500, 400, 3), 0.35, np.float32)
+    cases = [("banner", "title", "colors"), ("banner", "name", "colors"), ("smoke", "title", "colors"), ("storm", "title", "colors"),
+             ("collector", "title", "colors"), ("collector", "home", "colors"), ("collector", "home", "f"), ("collector", "home", "r"),
+             ("spotlight", "number", "f"), ("card", "number", "r")]
+    for t, k, what in cases:
+        base = poster.clean({"template": t, "number": "7"})
+        change = {"colors": {"colors": {k: "#ff0000"}}, "f": {"moves": {k: {"f": "didot"}}}, "r": {"moves": {k: {"r": 30}}}}[what]
+        a = poster.compose(arr, None, base)
+        b = poster.compose(arr, None, poster.clean({**base, **change}))
+        assert np.abs(a - b).mean() > 1e-4, (t, k, what)
+    w = {x["key"]: x for x in poster.words(poster.clean({"template": "collector"}))}
+    assert w["home"]["r"] == -45 and w["home"]["r0"] == -45  # the ribbon's own slant, for the page

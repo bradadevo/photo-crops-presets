@@ -340,10 +340,12 @@ function paintPieces(cur, f, boxes) {
   });
 }
 
-function setAngle(cur, id, a) {
+function setAngle(cur, id, a) {  // (kept on the poster: a long piece stood up near an edge is moved in)
+  const p = slotById(cur.id).edits?.poster, kind = (p?.[PK(p)] || []).find((x) => x.id === id)?.type;
+  const [dx, dy] = ["text", "badge", "logo"].includes(kind) ? keepOn(wordsList.find((w) => w.key === "el:" + id), a) : [0, 0];  // (bands may run past the edges)
   changeEdits(slotById(cur.id), (ed) => {
     const it = (ed.poster?.[PK(ed.poster)] || []).find((x) => x.id === id);
-    if (it) { if (a) it.angle = a; else delete it.angle; }
+    if (it) { if (a) it.angle = a; else delete it.angle; it.x += dx; it.y += dy; }
   });
 }
 

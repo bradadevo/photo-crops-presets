@@ -244,7 +244,14 @@ import threading
 _NOTE = threading.local()  # while words() runs (on this thread): where each word was drawn
 
 
-def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
+def _badge_moves(p: dict) -> dict:
+    """The poster's moves with the number's place and size left to its badge (its font and angle kept)."""
+    out = {k: v for k, v in (p.get("moves") or {}).items() if k != "number"}
+    own = {k: v for k, v in ((p.get("moves") or {}).get("number") or {}).items() if k in ("f", "r")}
+    return out | ({"number": {"x": 0, "y": 0, "s": 1, **own}} if own else {})
+
+
+def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, turn: float = 0.0, **kw) -> None:
     """Draws one of the poster's words (nothing when it was cleared), noting where (for words())."""
     if not text:
         return
@@ -271,7 +278,10 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, **kw) -> None:
         else:
             kw["fill"] = rgb + ((fill[3],) if len(fill) == 4 else (255,))
     box = d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))
-    angle = (move or {}).get("r", 0)
+    angle = turn + (move or {}).get("r", 0)  # the layout's own slant (a ribbon) plus your turn
+    turns = getattr(_NOTE, "turns", None)
+    if turns is not None and angle:
+        turns[key] = (angle, turn)
     image = getattr(d, "_image", None)
     if angle and image is not None and image.mode == "RGBA":  # turned around its middle (a word in parts: the whole word's)
         lay = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -295,14 +305,15 @@ def words(p: dict, has_logo: bool = False, logo_img: Image.Image | None = None) 
     W, H = size_for(800, 1000, p)
     logo = logo_img if logo_img is not None else (Image.new("RGBA", (10, 10), (255, 255, 255, 255)) if has_logo else None)
     _NOTE.boxes = found = []
+    _NOTE.turns = turned = {}
     try:
         compose(np.zeros((H, W, 3), np.float32), None, p, logo)
     finally:
-        _NOTE.boxes = None
-    turn = {k: m.get("r", 0) for k, m in (p.get("moves") or {}).items()}
+        _NOTE.boxes = _NOTE.turns = None
+    turn = {k: a for k, (a, _) in turned.items()}  # each word's angle as drawn (its own slant: r0)
     turn |= {f"el:{e['id']}": e.get("angle", 0) for e in (p.get("elements") or p.get("extras") or [])}
     return [{"key": k, "x0": b[0] / W, "y0": b[1] / H, "x1": b[2] / W, "y1": b[3] / H} | ({"r": turn[k]} if turn.get(k) else {})
-            for k, b in found]
+            | ({"r0": turned[k][1]} if k in turned and turned[k][1] else {}) for k, b in found]
 
 
 def middles(found: list[dict]) -> dict[str, tuple[float, float]]:
@@ -550,7 +561,7 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
         ring = max(3, int(u * 0.0064))
         d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_c255(color), outline=(255, 255, 255, 255), width=ring)
         f = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
-        _NOTE.moves = {k: v for k, v in (p.get("moves") or {}).items() if k != "number"}  # (placed with its badge)
+        _NOTE.moves = _badge_moves(p)  # (placed with its badge; its font and angle its own)
         _say(d, "number", (cx, cy + r * 0.04), num, font=f, fill=(255, 255, 255, 255), anchor="mm")
         _NOTE.moves = p.get("moves")
         out = _over(out, _shadowed(lay, W * 0.012, 0.5))
@@ -812,7 +823,7 @@ def _player_card(pic, m, p, W, H, color, has_logo):
         bx, by = x0 + r * 1.25, y0 + r * 1.25
         d.ellipse((bx - r, by - r, bx + r, by + r), fill=_c255(color), outline=GOLD + (255,), width=max(3, int(u * 0.006)))
         nf = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
-        _NOTE.moves = {k2: v for k2, v in (p.get("moves") or {}).items() if k2 != "number"}
+        _NOTE.moves = _badge_moves(p)
         _say(d, "number", (bx, by + r * 0.04), num, font=nf, fill=(255, 255, 255, 255), anchor="mm")
         _NOTE.moves = p.get("moves")
     return _over(out, _shadowed(lay, u * 0.01, 0.5))
@@ -886,10 +897,18 @@ def _chrome(out, key, xy, text, font, anchor, top=(1, 1, 1), bottom=(0.62, 0.66,
     """A word in polished metal (a light-to-dark sweep) with a dark edge and a soft shadow (or a glow)."""
     if not text:
         return out
+    own = (getattr(_NOTE, "colors", None) or {}).get(key)
+    if own:  # your color, as polished metal: light at the top, your color below, a dark edge of it
+        c = np.array(_rgb(own), np.float32)
+        top, bottom, edge = tuple(c + (1 - c) * 0.6), tuple(c), tuple(c * 0.22)
     H, W = out.shape[:2]
     lay, d = _layer((W, H))
     sw = stroke if stroke is not None else max(2, int(font.size * 0.06))
-    _say(d, key, xy, text, font=font, fill=(255, 255, 255, 255), anchor=anchor, stroke_width=sw, stroke_fill=(0, 0, 0, 255))
+    colors, _NOTE.colors = getattr(_NOTE, "colors", None), None  # (the stencil stays white; the color is the metal's)
+    try:
+        _say(d, key, xy, text, font=font, fill=(255, 255, 255, 255), anchor=anchor, stroke_width=sw, stroke_fill=(0, 0, 0, 255))
+    finally:
+        _NOTE.colors = colors
     a = np.asarray(lay).astype(np.float32) / 255
     alpha, inner = a[..., 3:4], a[..., :1]
     ys, xs = np.nonzero(alpha[..., 0] > 0.1)
@@ -1083,11 +1102,12 @@ def _collector(pic, m, p, W, H, color, has_logo):
         rd.rectangle((0, size - band / 2, size * 2, size - band / 2 + max(2, u * 0.004)), fill=_c255(color))
         rd.rectangle((0, size + band / 2 - max(2, u * 0.004), size * 2, size + band / 2), fill=_c255(color))
         rf = _fit_ff(rib, COND, HEAVY_IT, size * 1.2, band * 0.6)
-        rd.text((size, size), rib, font=rf, fill=_c255(color + (1 - color) * 0.35), anchor="mm")
         r = r.rotate(45, resample=Image.BICUBIC)
         lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        lay.alpha_composite(r, (int(W - size * 1.45), int(H - size * 1.45)))
-        _note_box("home", (W - size * 1.0, H - size * 1.0, W, H))
+        x0, y0 = int(W - size * 1.45), int(H - size * 1.45)
+        lay.alpha_composite(r, (x0, y0))
+        d = ImageDraw.Draw(lay)  # its words along the ribbon (your color, font, place and turn apply)
+        _say(d, "home", (x0 + size, y0 + size), rib, font=rf, turn=-45, fill=_c255(color + (1 - color) * 0.35), anchor="mm")
         out = _over(out, _shadowed(lay, u * 0.01, 0.5))
     return out
 
