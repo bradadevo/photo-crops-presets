@@ -125,7 +125,7 @@ function customSection(p) {
   if (sel) {
     const t = sel.type;
     props = `<div class="piece-props"><div class="fld"><label>${esc(PIECE_NAMES[t])}</label>
-      ${t === "text" ? `<textarea class="field" rows="1" data-prop-text placeholder="Type here">${esc(sel.text)}</textarea>
+      ${t === "text" ? `<textarea class="field" rows="1" data-prop-text placeholder="Type here" title="Return starts a new line (up to 3)">${esc(sel.text)}</textarea>
         <div class="seg full small" data-prop-style>${PIECE_STYLES.map(([v, l]) => `<button data-v="${v}" class="${sel.style === v ? "on" : ""}">${l}</button>`).join("")}</div>
         ${sl("size", "Size", 0.015, 0.4, 0.005, sel.size)}${colors("color", sel.color)}${fontPicker(sel.font, "Style's own")}` : ""}
       ${t === "badge" ? `<input class="field" data-prop-text value="${esc(sel.text)}" maxlength="4" placeholder="Number">

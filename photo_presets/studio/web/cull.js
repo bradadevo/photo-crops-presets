@@ -591,6 +591,7 @@ function cuJobDone(j) {
   const f = j.folder || "";
   return `<div class="cu-done">${icon("check")}<div><b>All done! ${plural(j.done, j.what === "copy" ? "photo" : "keeper")} ${j.what === "copy" ? "copied" : "made"}</b>
     <span class="next">Next: open the folder to see them, post them or send them.</span>
+    ${j.enlarged ? `<span class="ai-used">✦ ${esc(j.enlarged)}</span>` : ""}
     <span>${esc(f.replace(/^\/Users\/[^/]+/, "~"))}</span></div><button class="btn primary" data-open="${esc(f)}">${icon("folder")} Open the folder</button>
     ${j.what === "edit" ? `<button class="btn ghost" id="fin-again">Make another size</button>` : ""}</div>
     ${(() => { const best = [...cu.photos.values()].filter((p) => alive(p) && flagOf(p) === "keep").sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 6);

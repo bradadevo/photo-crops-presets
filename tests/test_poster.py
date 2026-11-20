@@ -288,3 +288,22 @@ def test_a_word_stood_up_at_the_edge_loses_no_letters():
     up = poster.compose(arr, None, poster.clean({**base, "moves": {"title": {"r": -90, "x": -0.33, "y": 0.35}}}))  # (by the left edge)
     ink = lambda img: float((img.max(2) > 0.6).sum())
     assert ink(up) > ink(flat) * 0.9  # (Game Day's title is nearly as wide as the poster: level, its ends were cut)
+
+
+def test_every_layout_takes_words_on_several_lines():
+    from photo_presets import fonts
+    assert fonts.lines("A\r\nB\nC\nD") == "A\nB\nC"  # at most three lines
+    f = fonts.load("vs-display", 40)
+    assert abs(f.getlength("AB\nC") - f.getlength("AB")) < 1  # the longest line's length
+    pic = np.full((500, 400, 3), 0.4, np.float32)
+    for t in [t for t in poster.TEMPLATES if t != "custom"]:
+        p = poster.clean({"template": t, "shape": "post", **poster.DEFAULTS[t]})
+        one = {k: p[k] for k in ("title", "name", "line") if p.get(k)}
+        two = poster.clean({**p, **{k: v + "\nTWO" for k, v in one.items()}})
+        assert all("\nTWO" in two[k] for k in one)
+        poster.compose(pic, None, two)  # draws without error
+        boxes = {b["key"]: b for b in poster.words(two)}
+        single = {b["key"]: b for b in poster.words(p)}
+        for k in one:
+            if k in boxes and k in single and (t, k) != ("featured", "name"):  # (featured: the name is drawn in two parts)
+                assert boxes[k]["y1"] - boxes[k]["y0"] > single[k]["y1"] - single[k]["y0"], (t, k)

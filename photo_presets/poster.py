@@ -98,7 +98,7 @@ def clean(p: dict | None) -> dict | None:
         out["size"] = round(float(np.clip(size, *SIZE_RANGE)), 3)
     for k in ("title", "line", "number", "home", "away", "home_score", "away_score", "name", "minute"):
         if k in p or k in DEFAULTS[p["template"]]:
-            out[k] = str(p.get(k, DEFAULTS[p["template"]].get(k, "")))[:40]
+            out[k] = fonts.lines(str(p.get(k, DEFAULTS[p["template"]].get(k, "")))[:60])
     colors = {k: v for k, v in (p.get("colors") or {}).items()
               if isinstance(v, str) and len(v) == 7 and v.startswith("#") and k in WORD_KEYS}
     if colors:
@@ -193,7 +193,7 @@ def _rgb(hexcolor: str) -> tuple[float, float, float]:
 
 
 def _font(index: int, px: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(FONT, max(6, int(px)), index=index)
+    return fonts.MultiFont(FONT, max(6, int(px)), index=index)
 
 
 def _fit_font(text: str, index: int, width: float, max_px: float) -> ImageFont.FreeTypeFont:
@@ -293,7 +293,17 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, turn: float = 0.
             kw["stroke_fill"] = rgb + (kw["stroke_fill"][3] if len(kw["stroke_fill"]) == 4 else 255,)
         else:
             kw["fill"] = rgb + ((fill[3],) if len(fill) == 4 else (255,))
-    box = d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0))
+    font = fonts.multi(font)
+    if "\n" in text:  # several lines: centered on each other, the block growing away from where the line was set
+        a = kw.get("anchor") or "la"
+        a = a[0] + {"t": "a", "b": "d"}.get(a[1], a[1])
+        kw.update(anchor=a, align={"l": "left", "r": "right"}.get(a[0], "center"), spacing=int(font.size * 0.12))
+        one = d.textbbox(xy, text.split("\n")[0], font=font, anchor=a)
+        whole = d.textbbox(xy, text, font=font, anchor=a, align=kw["align"], spacing=kw["spacing"])
+        extra = (whole[3] - whole[1]) - (one[3] - one[1])
+        xy = (xy[0], xy[1] - (extra if a[1] == "s" else 0))  # (on a baseline: the lines go up; "m" is centered already)
+    box = d.textbbox(xy, text, font=font, anchor=kw.get("anchor"), stroke_width=kw.get("stroke_width", 0),
+                     **{k: kw[k] for k in ("align", "spacing") if k in kw})
     angle = turn + (move or {}).get("r", 0)  # the layout's own slant (a ribbon) plus your turn
     turns = getattr(_NOTE, "turns", None)
     if turns is not None and angle:
@@ -767,7 +777,7 @@ def _cover_story(pic, m, p, W, H, color, has_logo):
     nf = _fit_font(name, HEAVY, wid, u * 0.11)
     if name:
         d.rectangle((W * 0.05, H - u * 0.24, W * 0.05 + u * 0.07, H - u * 0.232), fill=_c255(color))
-    _say(d, "name", (W * 0.05, H - u * 0.195), name, font=nf, fill=(255, 255, 255, 255), anchor="lt")
+    _say(d, "name", (W * 0.05, H - u * 0.195 - _more(nf, name)), name, font=nf, fill=(255, 255, 255, 255), anchor="lt")
     sub = p.get("away", "")
     if sub:
         sf = _fit_font(sub, DEMI, wid, u * 0.032)
@@ -878,7 +888,7 @@ HEAVY_IT = 9  # Avenir Next (and Condensed) Heavy Italic
 
 def _ff(path: str, index: int, px: float) -> ImageFont.FreeTypeFont:
     try:
-        return ImageFont.truetype(path, max(6, int(px)), index=index)
+        return fonts.MultiFont(path, max(6, int(px)), index=index)
     except OSError:
         return _font(HEAVY, px)
 
@@ -892,8 +902,18 @@ def _fit_ff(text: str, path: str, index: int, width: float, max_px: float) -> Im
     return f
 
 
+def _more(font, text: str) -> float:
+    """How much taller text typed on several lines is than its first line (0 for one line)."""
+    if "\n" not in (text or ""):
+        return 0.0
+    d = ImageDraw.Draw(Image.new("L", (8, 8)))
+    one = d.textbbox((0, 0), text.split("\n")[0], font=font)
+    whole = d.textbbox((0, 0), text, font=font, spacing=int(font.size * 0.12))
+    return float((whole[3] - whole[1]) - (one[3] - one[1]))
+
+
 def _spaced(text: str) -> str:
-    return " ".join(text)  # (letter-spaced, for small lines in capitals)
+    return "\n".join(" ".join(r) for r in text.split("\n"))  # (letter-spaced, for small lines in capitals)
 
 
 def _hex(color) -> str:
@@ -1187,13 +1207,14 @@ def _knockout(pic, m, p, W, H, color, has_logo):
     title, line = p.get("title", ""), p.get("line", "")
     tf = _fit_ff(title, COND, 8, W * 0.9, u * 0.2)
     lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.022) if line else None
-    ph = tf.size * 1.05 + (lf.size * 2.6 if lf else u * 0.03)
+    ph = tf.size * 1.05 + _more(tf, title) + (lf.size * 2.6 if lf else u * 0.03) + _more(lf, _spaced(line)) if lf else \
+        tf.size * 1.05 + _more(tf, title) + u * 0.03
     y0 = H - ph - u * 0.04
     panel = word_color("title", (245, 245, 242))
     cut, cd = _layer((W, H))
     colors, _NOTE.colors = getattr(_NOTE, "colors", None), None  # (the cut-out is a stencil; the color is the panel's)
     try:
-        _say(cd, "title", (W / 2, y0 + u * 0.01 + tf.size * 0.52), title, font=tf, fill=(255, 255, 255, 255), anchor="mm")
+        _say(cd, "title", (W / 2, y0 + u * 0.01 + tf.size * 0.52 + _more(tf, title) / 2), title, font=tf, fill=(255, 255, 255, 255), anchor="mm")
     finally:
         _NOTE.colors = colors
     hole = np.asarray(cut).astype(np.float32)[..., 3:4] / 255
@@ -1261,7 +1282,7 @@ def _outline_stack(pic, m, p, W, H, color, has_logo):
     lf = _fit_font(_spaced(line), DEMI, W * 0.8, u * 0.022) if line else None
     y = H - u * 0.07 - (lf.size * 1.9 if lf else 0)
     _say(d, "name", (W * 0.05, y), name, font=nf, fill=(255, 255, 255, 255), anchor="ls")
-    _say(d, "title", (W * 0.05, y - nf.size * 0.98), title, font=tf, fill=(255, 255, 255, 0), anchor="ls",
+    _say(d, "title", (W * 0.05, y - nf.size * 0.98 - _more(nf, name)), title, font=tf, fill=(255, 255, 255, 0), anchor="ls",
          stroke_width=max(2, int(tf.size * 0.03)), stroke_fill=(255, 255, 255, 255))
     if lf:
         _say(d, "line", (W * 0.05, H - u * 0.065), _spaced(line), font=lf, fill=_c255(color + (1 - color) * 0.55), anchor="ls")

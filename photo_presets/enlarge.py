@@ -64,30 +64,59 @@ def ai_4x(img: np.ndarray) -> np.ndarray:
     return out
 
 
-def fit(img: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+def fit(img: np.ndarray, size: tuple[int, int], report: list | None = None) -> np.ndarray:
     """The picture (floats 0-1, RGB) at size (w, h). Shrinking or a small enlargement: plain resizing.
-    A real enlargement: the AI detail enlarger (plain enlarging if it can't run)."""
+    A real enlargement: the AI detail enlarger (plain enlarging if it can't run). report, when given,
+    gets {"grow", "ai", "why"} for any enlargement, so the export can say what was done."""
     import cv2
     h, w = img.shape[:2]
     grow = max(size[0] / w, size[1] / h)
     plain = cv2.resize(img, size, interpolation=cv2.INTER_AREA if grow < 1 else cv2.INTER_LANCZOS4)
     plain = np.clip(plain, 0, 1).astype(np.float32)
-    if not USE_AI or grow < MIN_GROW or w * h > MAX_PIXELS or img.ndim != 3 or img.shape[2] != 3:
+    def note(ai: bool, why: str = ""):
+        if report is not None and grow > 1.05:
+            report.append({"grow": round(grow, 2), "ai": ai, "why": why})
+
+    why = ("only slightly enlarged: plain enlarging is already clean" if grow < MIN_GROW
+           else "a large crop: plain enlarging (the AI would take minutes)" if w * h > MAX_PIXELS
+           else "the AI enlarger is switched off" if not USE_AI
+           else "" if img.ndim == 3 and img.shape[2] == 3 else "not a color picture")
+    if why:
+        note(False, why)
         return plain
     try:
         big = ai_4x(img)
     except Exception:  # no model, no download, out of memory: plain enlarging still works
+        note(False, "the AI enlarger couldn't run on this Mac")
         return plain
     interp = cv2.INTER_AREA if big.shape[1] >= size[0] else cv2.INTER_LANCZOS4
     sharp = np.clip(cv2.resize(big, size, interpolation=interp), 0, 1)
+    note(True)
     return ((1 - KEEP_REAL) * sharp + KEEP_REAL * plain).astype(np.float32)
 
 
-def fit_pil(im, size: tuple[int, int]):
+def fit_pil(im, size: tuple[int, int], report: list | None = None):
     """fit() for a PIL picture (RGB)."""
     from PIL import Image
     if im.size == tuple(size):
         return im
     arr = np.asarray(im.convert("RGB"), np.float32) / 255
-    out = Image.fromarray((fit(arr, size) * 255).round().astype(np.uint8))
+    out = Image.fromarray((fit(arr, size, report) * 255).round().astype(np.uint8))
     return out.convert(im.mode) if im.mode != "RGB" else out
+
+
+def summary(items: list[dict]) -> str:
+    """One plain line on what an export enlarged, and how ("" when nothing was enlarged)."""
+    if not items:
+        return ""
+    ai = [x for x in items if x["ai"]]
+    plain = [x for x in items if not x["ai"]]
+    parts = []
+    if ai:
+        top = max(ai, key=lambda x: x["grow"])
+        parts.append(f"AI detail enlarger sharpened {len(ai)} file{'s' if len(ai) != 1 else ''} "
+                     f"(up to {top['grow']:.1f}x: {top['photo']}, {top['size']})")
+    if plain:
+        whys = sorted({x["why"] for x in plain})
+        parts.append(f"{len(plain)} enlarged the plain way ({'; '.join(whys)})")
+    return ". ".join(parts)

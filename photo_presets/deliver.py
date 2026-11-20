@@ -85,7 +85,7 @@ def crop_box(w: int, h: int, aspect: float, focus: tuple[float, float],
 
 
 def sized(arr: np.ndarray, size: Size, focus: tuple[float, float],
-          keep: tuple[float, float, float, float] | None = None) -> tuple[np.ndarray, float]:
+          keep: tuple[float, float, float, float] | None = None, report: list | None = None) -> tuple[np.ndarray, float]:
     """The picture (floats 0-1) cropped and resized for this size, and how
     much it was enlarged (1 or less = no enlarging)."""
     h, w = arr.shape[:2]
@@ -93,7 +93,7 @@ def sized(arr: np.ndarray, size: Size, focus: tuple[float, float],
     x0, y0, x1, y1 = crop_box(w, h, tw / th, focus, keep)
     part = arr[y0:y1, x0:x1]
     grow = tw / (x1 - x0)
-    out = enlarge.fit(part, (tw, th))  # (a real enlargement: the AI detail enlarger)
+    out = enlarge.fit(part, (tw, th), report)  # (a real enlargement: the AI detail enlarger)
     if size.web and grow < 1:
         blur = cv2.GaussianBlur(out, (0, 0), 0.8)
         out = out + (out - blur) * 0.35

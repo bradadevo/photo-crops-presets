@@ -606,6 +606,7 @@ class Engine:
         sizes = sizes or [deliver.FULL]
         credit = credit or deliver.Credit()
         saved, notes_out = [], []
+        enlarged, how = [], []  # every size made bigger than its crop, and how (the AI detail enlarger or plain)
         for i, r in enumerate(results):
             p = self.ready(r.source, r.crop, r.recipe)
             full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
@@ -631,13 +632,15 @@ class Engine:
                     if poster_here and abs(tw / th - full.shape[1] / full.shape[0]) > 0.02:
                         # a poster in another shape: laid out again for it (never cropped: no words cut off)
                         again = dataclasses.replace(r, edits={**r.edits, "poster": {**poster_here, "aspect": tw / th}})
-                        arr, grow = deliver.sized(self.finalize(again, made, texts=False), size, where, players)
+                        arr, grow = deliver.sized(self.finalize(again, made, texts=False), size, where, players,
+                                                  report=how)
                     else:
-                        arr, grow = deliver.sized(full, size, where, players)
+                        arr, grow = deliver.sized(full, size, where, players, report=how)
                     name = f"{stem}_{deliver.SHORT[key]}"
-                    if grow > 1.05:
-                        notes_out.append(f"{r.source.name} {size.label.split(' (')[0]}: enlarged {grow:.1f}x "
-                                         "(the photo has fewer pixels than this print size)")
+                    if how:
+                        h = how.pop()
+                        label = size.label.split(' (')[0]
+                        enlarged.append({"file": f"{name}", "photo": r.source.name, "size": label, **h})
                 arr = edits.draw_texts(arr, (r.edits or {}).get("texts"))
                 arr = brand.draw(arr, (r.edits or {}).get("logos") or self._kit_logo(logo, arr), self.brand_dir)
                 if mark is not None:
@@ -664,6 +667,7 @@ class Engine:
                 saved.append(dest)
             if progress:
                 progress(i + 1, len(results), r.title)
+        self.last_enlarged = enlarged  # (the app tells you which pictures the AI detail enlarger sharpened)
         return saved, notes_out
 
 def frame_box(scene, w: int, h: int, aspect: float, fill: float) -> tuple[int, int, int, int] | None:

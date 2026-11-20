@@ -40,7 +40,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import brand, deliver, edits, engine, pipeline, players, presets, reel, timing, poster
+from photo_presets import brand, deliver, edits, engine, enlarge, pipeline, players, presets, reel, timing, poster
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
 
@@ -166,12 +166,13 @@ class Task:
     now: str = ""
     state: str = "running"
     message: str = ""
+    detail: str = ""  # a second line (an export: what the AI detail enlarger sharpened)
     path: str = ""
     video: str = ""
     started: float = field(default_factory=time.time)
 
     def public(self) -> dict:
-        return {k: getattr(self, k) for k in ("id", "kind", "total", "done", "now", "state", "message", "path",
+        return {k: getattr(self, k) for k in ("id", "kind", "total", "done", "now", "state", "message", "detail", "path",
                                               "video")} | {"elapsed": round(time.time() - self.started)}
 
 
@@ -1662,8 +1663,10 @@ def _export(task: Task, chosen, dest: Path, how, kind, sizes, credit, mark, logo
         else:
             task.path = str(saved[0]) if saved else str(into)
             task.message = f"Saved {photos} in {dest.name} › {into.name}" + (f" ({len(saved)} files)" if len(saved) != n else "")
+        notes = [n for n in notes if "fewer pixels than this print size" not in n]
         if notes:
             task.message += ". " + "; ".join(notes)
+        task.detail = enlarge.summary(getattr(E, "last_enlarged", []))
         task.state = "done"
     except Exception as e:
         task.state, task.message = "failed", f"Export failed: {e}"

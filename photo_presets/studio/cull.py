@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageOps
 
 from photo_crops import images
+from photo_presets import enlarge
 from photo_presets.cull import ai, export, files, measure, rank, taste
 from photo_presets.cull import people as cull_people
 
@@ -490,6 +491,7 @@ async def export_keepers(sid: int, req: Request):
     sh.job = {"state": "now", "what": what, "done": 0, "total": len(chosen), "folder": str(folder), "started": time.time()}
 
     def run():
+        enlarged = []
         try:
             for i, p in enumerate(chosen, 1):
                 if what == "copy":
@@ -503,7 +505,9 @@ async def export_keepers(sid: int, req: Request):
                     crop = shown.get(p["id"]) if size != "ai" or not ai_crop else None
                     if crop is None and size != "ai":
                         crop = C.marks.get(p["path"], {}).get("crop")
-                    export.edit_one(Path(p["path"]), p.get("m") or {}, size, versions, folder, crop, ai_crop, adjust_fn, fit)
+                    export.edit_one(Path(p["path"]), p.get("m") or {}, size, versions, folder, crop, ai_crop, adjust_fn, fit,
+                                    enlarged)
+                    sh.job["enlarged"] = enlarge.summary(enlarged)
                 sh.job["done"] = i
             sh.job["state"] = "done"
         except Exception as x:

@@ -155,6 +155,42 @@ const SLIDER_TIPS = {
   saturation: "Less color (left, down to black and white) or more (right)", strength: "How much of the look shows: 0% is the photo as it was",
   subject: "The player alone, brighter or darker", background: "Everything behind the player, brighter or darker",
 };
+/* Advanced: folded away under one "Advanced" group, each part its own fold (pipeline.ADJUST) */
+const ADVANCED = [
+  ["punch", "Clarity and punch", [["vibrance", "Vibrance", -1, 1, 0.05], ["clarity", "Clarity", -1, 1, 0.05], ["texture", "Texture", -1, 1, 0.05],
+    ["dehaze", "Dehaze", -1, 1, 0.05], ["whites", "Whites", -1, 1, 0.05], ["blacks", "Blacks", -1, 1, 0.05]]],
+  ["player", "Player and background", [["p_clarity", "Player clarity", -1, 1, 0.05], ["p_vibrance", "Player vibrance", -1, 1, 0.05],
+    ["p_warmth", "Player warmth", -1, 1, 0.05, "", "warm"], ["p_sharpen", "Player sharpness", 0, 1, 0.05, "pct"], ["face_light", "Face light", 0, 1, 0.05, "pct"],
+    ["rim_light", "Rim light", 0, 1, 0.05, "pct"], ["bg_blur", "Background blur", 0, 1, 0.05, "pct"], ["bg_saturation", "Background color", -1, 1, 0.05],
+    ["bg_warmth", "Background warmth", -1, 1, 0.05, "", "warm"]]],
+  ["mixer", "Color mixer", null],
+  ["grading", "Color grading", null],
+  ["finish", "Finishing", [["noise", "Noise reduction", 0, 1, 0.05, "pct"], ["sharpen", "Sharpen", 0, 1, 0.05, "pct"], ["vignette", "Vignette", -1, 1, 0.05]]],
+];
+const MIX_COLORS = [["red", "Red", "#e5484d"], ["orange", "Orange", "#f08c2e"], ["yellow", "Yellow", "#f2cf1d"], ["green", "Green", "#3fb950"],
+  ["aqua", "Aqua", "#2fc6c6"], ["blue", "Blue", "#3b82f6"], ["purple", "Purple", "#8b5cf6"], ["magenta", "Magenta", "#e04fbf"]];
+const GRADES = [["sh", "Shadows"], ["mid", "Midtones"], ["hi", "Highlights"]];
+const ADJ_DEFAULT = { strength: 100, grade_sh_hue: 210, grade_mid_hue: 30, grade_hi_hue: 40 };
+/* Which Advanced sliders each fold holds (to show how many are in use) */
+const ADV_KEYS = {
+  punch: ADVANCED[0][2].map((r) => r[0]), player: ADVANCED[1][2].map((r) => r[0]), finish: ADVANCED[4][2].map((r) => r[0]),
+  mixer: [...MIX_COLORS.flatMap(([c]) => ["h", "s", "l"].map((x) => `mix_${c}_${x}`)), "kit_pop"],
+  grading: GRADES.map(([g]) => `grade_${g}`),
+};
+Object.assign(SLIDER_TIPS, {
+  vibrance: "More color where it's dull, while skin stays natural", clarity: "Midtone punch: muscles, kit folds, faces get depth",
+  texture: "Fine detail: fabric, hair, grass (left softens it)", dehaze: "Cuts haze and glare (left adds a soft haze)",
+  whites: "The very brightest tones up or down", blacks: "The darkest tones: left deeper, right lifted (matte)",
+  p_clarity: "Punch on the player only", p_vibrance: "Color on the player only", p_warmth: "The player alone, cooler or warmer",
+  p_sharpen: "A crisper player (the background is left soft)", face_light: "Brighter faces, softly, as if lit with a reflector",
+  rim_light: "A soft glow around the player's edge, like stadium backlight", bg_blur: "The background soft, like a fast lens",
+  bg_saturation: "The background's color: left down to black and white", bg_warmth: "The background alone, cooler or warmer",
+  noise: "Smooths grain from high ISO, keeping edges", sharpen: "A final crispness on the whole picture",
+  vignette: "Left darkens the corners, right lightens them", kit_pop: "Makes the picked kit color richer and deeper, nothing else",
+  ...Object.fromEntries(MIX_COLORS.flatMap(([c, l]) => [[`mix_${c}_h`, `Moves ${l.toLowerCase()}s toward the next colors`],
+    [`mix_${c}_s`, `${l}s more or less colorful`], [`mix_${c}_l`, `${l}s lighter or darker`]])),
+  ...Object.fromEntries(GRADES.flatMap(([g, l]) => [[`grade_${g}_hue`, `The color the ${l.toLowerCase()} lean toward`], [`grade_${g}`, `How much the ${l.toLowerCase()} lean toward it`]])),
+});
 const TEXT_STYLES = [["clean", "Clean"], ["bold", "Bold"], ["spaced", "Spaced"], ["banner", "Banner"]];
 const TEXT_COLORS = ["#ffffff", "#111111", "#f5c443", "#1f2a44", "#e63946", "#86d0d8"];
 /* The fonts any word can be set in (fonts.py), each shown in its own face, as it's exported */
@@ -243,7 +279,8 @@ function turnText(cur, i, a) {
 }
 /* The round handle that turns a word or piece: above it, or below it when it is at the very top */
 const turnHandle = (top) => `<span class="pc-r${top < 0.08 ? " below" : ""}" title="Drag to turn it · Shift: 15° steps"></span>`;
-const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
+const fmtVal = (k, v, unit) => k === "strength" ? `${Math.round(v)}%` : unit === "pct" ? `${Math.round(v * 100)}%` : unit === "deg" ? `${Math.round(v)}°`
+  : `${v > 0 ? "+" : ""}${(+v).toFixed(2)}${unit ? " " + unit : ""}`;
 
 let editSig = "";
 const paneSignature = (cur) => `${cur.id}:${cur.ver}:${familyOf(cur.edits?.poster) ? familySlots(familyOf(cur.edits.poster)).map((s) => s.id + s.state).join(",") : ""}:${st.photos.find((p) => p.id === cur.photo)?.edited}:${st.photos.length}:${st.areaSel}:${st.textSel}:${hist.undo.length}:${hist.redo.length}:${st.tool}`;
@@ -260,7 +297,7 @@ function renderEdit(cur) {
   const pane = $("#pane-edit");
   const val = (k) => k === "strength" ? Math.round(a.strength * 100) : a[k];
   const sliderRow = ([k, label, min, max, stp, unit, cls]) => `<div class="slider"><label for="e-${k}" title="${esc(SLIDER_TIPS[k])} · double-click the slider to reset">${label}</label>
-    <output for="e-${k}">${fmtVal(k, val(k), unit)}</output><input type="range" class="${cls || ""}" id="e-${k}" data-k="${k}" data-unit="${unit || ""}" min="${min}" max="${max}" step="${stp}" value="${val(k)}"></div>`;
+    <output for="e-${k}">${fmtVal(k, val(k), unit)}</output><input type="range" class="${cls || ""}" id="e-${k}" data-k="${k}" data-unit="${unit || ""}" data-def="${ADJ_DEFAULT[k] ?? 0}" min="${min}" max="${max}" step="${stp}" value="${val(k)}"></div>`;
   const tool = (id, ic, label, tip) => `<button class="tool${st.tool === id || (id === "cutout" && st.fixing) ? " on" : ""}" data-tool="${id}" title="${esc(tip)}">${icon(ic)}<span>${label}</span></button>`;
   // what you are working on (a poster, text, a logo, a part) sits right under the tools;
   // the light and color sliders fold away meanwhile (open them any time)
@@ -283,8 +320,26 @@ function renderEdit(cur) {
     logo: st.tool === "logo" || (e.logos || []).length ? logoSection(e) : "",
   };
   const design = ["background", "poster", "text", "logo", "area"].includes(st.tool) && parts[st.tool] ? st.tool : null;
-  const group = (g, title, body) => `<details class="group" data-g="${g}" ${(st.openGroups[g] ?? !design) ? "open" : ""}>
-    <summary><h3>${title}</h3>${icon("chev")}</summary><div class="group-body">${body}</div></details>`;
+  const group = (g, title, body, open = !design, extra = "") => `<details class="group" data-g="${g}" ${(st.openGroups[g] ?? open) ? "open" : ""}>
+    <summary><h3>${title}</h3>${extra}${icon("chev")}</summary><div class="group-body">${body}</div></details>`;
+  const used = (keys) => keys.filter((k) => a[k] !== (ADJ_DEFAULT[k] ?? 0) && !(k.endsWith("_hue"))).length;
+  const count = (n) => n ? `<span class="adv-n" title="${plural(n, "setting")} in use">${n}</span>` : "";
+  const mixC = st.mixColor || "green";
+  const advBody = {
+    mixer: `<div class="mix-chips" role="group" aria-label="Color to change">${MIX_COLORS.map(([c, l, hex]) => `<button data-mix="${c}" class="${c === mixC ? "on" : ""}${used([`mix_${c}_h`, `mix_${c}_s`, `mix_${c}_l`]) ? " set" : ""}"
+        style="--chip:${hex}" title="${l}${used([`mix_${c}_h`, `mix_${c}_s`, `mix_${c}_l`]) ? " (changed)" : ""}" aria-label="${l}"></button>`).join("")}</div>
+      ${[["h", "Hue"], ["s", "Saturation"], ["l", "Luminance"]].map(([x, l]) => sliderRow([`mix_${mixC}_${x}`, `${MIX_COLORS.find((m) => m[0] === mixC)[1]} ${l.toLowerCase()}`, -1, 1, 0.05])).join("")}
+      <div class="kit-pop"><span class="sub-label">Kit color pop</span>
+        <div class="inline"><span class="kit-swatch${a.kit_color ? "" : " none"}" style="${a.kit_color ? `background:${esc(a.kit_color)}` : ""}" title="${a.kit_color ? esc(a.kit_color) : "No kit color picked yet"}"></span>
+        <button class="btn small" id="e-kit-pick" title="Click the kit on the picture to pick its color">${icon("pipette")} ${a.kit_color ? "Pick again" : "Pick the kit color"}</button>
+        ${a.kit_color ? `<button class="icon-btn" id="e-kit-clear" title="Forget the kit color">${icon("x")}</button>` : ""}</div>
+        ${a.kit_color ? sliderRow(["kit_pop", "Pop", 0, 1, 0.05, "pct"]) : ""}</div>`,
+    grading: GRADES.map(([g, l]) => `<div class="grade-row">${sliderRow([`grade_${g}_hue`, `${l} color`, 0, 360, 1, "deg", "hue"])}${sliderRow([`grade_${g}`, l, 0, 1, 0.05, "pct"])}</div>`).join(""),
+  };
+  const advanced = group("advanced", "Advanced",
+    ADVANCED.map(([g, title, rows]) => `<details class="group sub" data-g="adv-${g}" ${st.openGroups[`adv-${g}`] ? "open" : ""}>
+      <summary><h3>${title}</h3>${count(used(ADV_KEYS[g]))}${icon("chev")}</summary><div class="group-body">${rows ? rows.map(sliderRow).join("") : advBody[g]}</div></details>`).join(""),
+    false, count(used(Object.values(ADV_KEYS).flat())));
   pane.innerHTML = `
     <div class="edit-head"><div class="adj-title"><b>${esc(cur.look)}</b><span>${esc(photo?.name || "")}</span></div>
       <div class="undo-btns"><button class="icon-btn" id="e-undo" title="Undo (⌘Z)" ${off(!hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.")}>${icon("undo")}</button>
@@ -306,6 +361,7 @@ function renderEdit(cur) {
     ${group("color", "Color", SLIDERS.color.map(sliderRow).join(""))}
     ${group("look", "The look", SLIDERS.look.map(sliderRow).join("") + `
       <label class="toggle"><input type="checkbox" id="e-fill" ${a.auto_fill ? "checked" : ""}><span><b>Auto fill light</b><small>Lifts a backlit or shaded player</small></span></label>`)}
+    ${advanced}
     ${Object.entries(parts).filter(([k, html]) => k !== design && html).map(([, html]) => html).join("")}
     <div class="inline"><button class="btn" id="e-reset" title="Back to the look as it was made">Reset all</button>
       ${same > 1 ? `<button class="btn" id="e-all" style="flex:1" title="These light, color and look settings on every picture in this look">${icon("copy")} Use on all ${same}</button>` : ""}</div>
@@ -346,7 +402,7 @@ function bindEditPane(cur, pane) {
       sendAdjust(cur.id, vals);
     };
     r.onchange = () => commitDrag();
-    r.ondblclick = () => { r.value = r.dataset.k === "strength" ? 100 : 0; r.oninput(); commitDrag(); };
+    r.ondblclick = () => { r.value = r.dataset.def; r.oninput(); commitDrag(); };
   });
   const commitDrag = () => {
     if (!dragSnap) return;
@@ -354,6 +410,11 @@ function bindEditPane(cur, pane) {
     dragSnap = null;
     afterSend(() => { const s = slotById(cur.id); pushHist({ type: "slot", sid: cur.id, before, after: snapshot(s) }); });
   };
+  pane.querySelectorAll("[data-mix]").forEach((b) => b.onclick = () => { st.mixColor = b.dataset.mix; editSig = ""; renderEdit(slotById(cur.id)); });
+  const setAdj = (change) => { const before = snapshot(slotById(cur.id)); change(vals); sendAdjust(cur.id, vals);
+    afterSend(() => pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) })); };
+  $("#e-kit-pick", pane)?.addEventListener("click", () => { const keep = { ...st.openGroups }; setTool("kitpick"); st.openGroups = keep; editSig = ""; render(); });
+  $("#e-kit-clear", pane)?.addEventListener("click", () => setAdj((v) => { v.kit_color = ""; v.kit_pop = 0; }));
   $("#e-fill", pane).onchange = (ev) => { const before = snapshot(slotById(cur.id)); vals.auto_fill = ev.target.checked; sendAdjust(cur.id, vals);
     afterSend(() => pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) })); };
   $("#e-reset", pane).onclick = async () => {
@@ -534,6 +595,7 @@ function renderTool(v, cur) {
   const src = base ? slotImg(cur, st.areaSel != null && cur.edits?.areas?.[st.areaSel] ? `area-${st.areaSel}` : "base") : slotImg(cur);
   const bar = {
     area: `<span class="title"><b>Adjust a part</b><span>Click a face, the player, the sky or the grass</span></span><span class="sep"></span><button data-done>Done</button>`,
+    kitpick: `<span class="title"><b>Kit color pop</b><span>Click the kit (a shirt, the shorts) to pick its color</span></span><span class="sep"></span><button data-done>Cancel</button>`,
     wb: `<span class="title"><b>White balance</b><span>Click something that should be white or gray</span></span><span class="sep"></span><button data-done>Cancel</button>`,
     text: `<span class="title"><b>Text</b><span>Drag to place it · type in the panel</span></span><span class="sep"></span><button data-add-text>${icon("plus")} Add text</button><button data-done>Done</button>`,
     logo: `<span class="title"><b>Logo</b><span>Pick one in the panel · drag it to place it</span></span><span class="sep"></span><button data-done>Done</button>`,
@@ -548,7 +610,7 @@ function renderTool(v, cur) {
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
   if (t === "poster") { paintWords(cur); bindPhotoDrag(cur); }
   watchPicture(cur);
-  $("[data-done]", v).onclick = () => setTool(t);
+  $("[data-done]", v).onclick = () => { if (t !== "kitpick") return setTool(t); st.tool = null; viewerSig = ""; editSig = ""; render(); };
   $("[data-add-text]", v)?.addEventListener("click", () => addText(slotById(cur.id)));
   const f = $("#frame");
   const at = (e) => { const r = f.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; };
@@ -557,6 +619,24 @@ function renderTool(v, cur) {
     st.areaSel = (s.edits?.areas || []).length;
     const tk = toast("Finding that part…", { sticky: true, spin: true });
     try { await changeEdits(s, (ed) => { (ed.areas ||= []).push({ x: p.x, y: p.y, exposure: 0.3, warmth: 0, saturation: 0 }); }); } finally { tk.close(); }
+  };
+  if (t === "kitpick") f.onclick = (e) => {
+    const p = at(e), img = $("img.after", f), s = slotById(cur.id), c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0);
+    const r = Math.max(2, Math.round(c.width / 300)), cx = Math.round(p.x * c.width), cy = Math.round(p.y * c.height);
+    const d = g.getImageData(Math.max(0, cx - r), Math.max(0, cy - r), 2 * r + 1, 2 * r + 1).data;
+    let R = 0, G = 0, B = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; n++; }
+    const hex = "#" + [R, G, B].map((x) => Math.round(x / n).toString(16).padStart(2, "0")).join("");
+    const mx = Math.max(R, G, B) / n, mn = Math.min(R, G, B) / n;
+    // gray, white or black: no kit color to pick (a dark navy still counts)
+    if (mx < 14 || (mx - mn) / mx < 0.15) { toast("That spot has hardly any color", { small: "Click a colored part of the kit: a red shirt, blue shorts." }); return; }
+    const before = snapshot(s), adj = { ...s.adjust, kit_color: hex, kit_pop: s.adjust.kit_pop || 0.5 };
+    st.tool = null; viewerSig = ""; editSig = ""; render();
+    sendAdjust(cur.id, adj);
+    afterSend(() => pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) }));
+    toast("Kit color picked", { small: "Pop sets how much richer it gets" });
   };
   if (t === "wb") f.onclick = async (e) => {
     const p = at(e), s = slotById(cur.id), before = snapshot(s);
@@ -840,7 +920,7 @@ function posterSection(e) {
       ${p.template === "spotlight" ? `<div class="fld"><label>Number</label><div class="seg full small" id="pp-numstyle">
         <button data-v="badge" class="${(p.number_style || "badge") === "badge" ? "on" : ""}" title="A solid badge on the card's corner, in front">Badge</button>
         <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
-      ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><div class="fld-row"><input class="field poster-in" data-pk="${k}" value="${esc(p[k] ?? "")}" placeholder="(left off the poster)">
+      ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><div class="fld-row"><textarea class="field poster-in" rows="1" data-pk="${k}" placeholder="(left off the poster)" title="Return starts a new line (up to 3)">${esc(p[k] ?? "")}</textarea>
         ${k === "away_score" ? "" : `<button class="color-dot${p.colors?.[k] ? "" : " auto"}" data-color-pk="${k}" style="${p.colors?.[k] ? `background:${p.colors[k]}` : ""}" title="Its color" aria-label="Color of ${esc(l)}"></button>`}
         ${k === "away_score" ? "" : `<button class="aa-btn${st.stylePk === k ? " on" : ""}${p.moves?.[k]?.f || p.moves?.[k]?.r ? " set" : ""}" data-style-pk="${k}" title="Its font, size and angle" aria-label="Style of ${esc(l)}">Aa</button>`}
         <button class="icon-btn" data-clear-pk="${k}" title="Take this off the poster" ${off(!(p[k] ?? ""), "It's already off the poster: type in the box to put it back.")}>${icon("x")}</button></div>
@@ -973,6 +1053,8 @@ function bindPosterSection(cur, pane) {
   $("#pp-off", pane)?.addEventListener("click", () => { st.tool = null; changeEdits(s0(), (ed) => { delete ed.poster; }); });
   pane.querySelectorAll(".poster-in").forEach((inp) => {
     let snap = null, timer = null;
+    const grow = () => { inp.style.height = "auto"; inp.style.height = inp.scrollHeight + "px"; };
+    requestAnimationFrame(grow); inp.addEventListener("input", grow);
     inp.onfocus = () => { snap = snapshot(s0()); };
     inp.oninput = () => {
       const s = s0(), e2 = clone(s.edits);

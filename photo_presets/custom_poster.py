@@ -52,7 +52,7 @@ def clean(elements) -> list[dict]:
         if t != "card" and fonts.angle_ok(e.get("angle", 0)):
             c["angle"] = fonts.angle_ok(e["angle"])
         if t == "text":
-            c.update(text=str(e.get("text", ""))[:60], style=e.get("style") if e.get("style") in TEXT_STYLES else "bold",
+            c.update(text=fonts.lines(str(e.get("text", ""))[:80]), style=e.get("style") if e.get("style") in TEXT_STYLES else "bold",
                      size=_num(e.get("size"), 0.01, 0.5, 0.06), color=_hex(e.get("color"), "#ffffff"))
             if fonts.name_ok(e.get("font")):
                 c["font"] = e["font"]
@@ -140,18 +140,19 @@ def _piece(lay: Image.Image, e: dict, W: int, H: int, u: float, team: tuple, log
             text = text.upper()
         idx = {"heavy": 8, "bold": 0, "clean": 2, "spaced": 5, "outline": 8, "banner": 0}[style]
         f = fonts.load(e.get("font"), px) or font(idx, px)
+        ml = {"align": "center", "spacing": int(px * 0.12)}  # (several lines: centered on each other)
         if style == "spaced":
-            text = " ".join(text)  # (hair spaces: the letters set apart)
+            text = "\n".join(" ".join(r) for r in text.split("\n"))  # (hair spaces: the letters set apart)
         if style == "banner" and text:
-            x0, y0, x1, y1 = d.textbbox((cx, cy), text, font=f, anchor="mm")
+            x0, y0, x1, y1 = d.textbbox((cx, cy), text, font=f, anchor="mm", **ml)
             pad = px * 0.35
             d.rounded_rectangle((x0 - pad * 1.3, y0 - pad, x1 + pad * 1.3, y1 + pad), radius=px * 0.18, fill=(10, 12, 16, 160))
         if style == "outline":
-            d.text((cx, cy), text, font=f, fill=fill[:3] + (0,), anchor="mm", stroke_width=max(2, int(px * 0.045)), stroke_fill=fill)
+            d.text((cx, cy), text, font=f, fill=fill[:3] + (0,), anchor="mm", stroke_width=max(2, int(px * 0.045)), stroke_fill=fill, **ml)
         else:
-            d.text((cx, cy), text, font=f, fill=fill, anchor="mm")
+            d.text((cx, cy), text, font=f, fill=fill, anchor="mm", **ml)
         if text:
-            boxes.append((key, d.textbbox((cx, cy), text, font=f, anchor="mm")))
+            boxes.append((key, d.textbbox((cx, cy), text, font=f, anchor="mm", **ml)))
     elif t == "badge":
         r = e["size"] * u
         fillc = tuple(int(e["color"][i:i + 2], 16) for i in (1, 3, 5)) if e["color"] else team

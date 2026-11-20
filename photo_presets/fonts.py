@@ -39,6 +39,31 @@ FONTS: dict[str, tuple[str, str, int]] = {
 }
 
 
+class MultiFont(ImageFont.FreeTypeFont):
+    """A font whose length is its longest line's, so words typed on several lines fit like one."""
+
+    def getlength(self, text, *a, **k):
+        return max((super(MultiFont, self).getlength(t, *a, **k) for t in str(text).split("\n")), default=0.0)
+
+    def font_variant(self, font=None, size=None, index=None, encoding=None, layout_engine=None):
+        return MultiFont(font=self.path if font is None else font, size=self.size if size is None else size,
+                         index=self.index if index is None else index, encoding=self.encoding if encoding is None else encoding,
+                         layout_engine=layout_engine or self.layout_engine)
+
+
+def multi(font):
+    """The same font as a MultiFont (lengths by the longest line)."""
+    if isinstance(font, MultiFont) or not isinstance(font, ImageFont.FreeTypeFont):
+        return font
+    return MultiFont(font.path, font.size, index=font.index, encoding=font.encoding, layout_engine=font.layout_engine)
+
+
+def lines(text, most: int = 3) -> str:
+    """Typed words kept to at most `most` lines (Return makes a new line)."""
+    rows = [r.rstrip() for r in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    return "\n".join(rows[:most]).strip("\n")
+
+
 def name_ok(key) -> bool:
     return isinstance(key, str) and key in FONTS
 
@@ -49,7 +74,7 @@ def load(key: str | None, px: float) -> ImageFont.FreeTypeFont | None:
         return None
     _, path, index = FONTS[key]
     try:
-        return ImageFont.truetype(path, max(6, int(px)), index=index)
+        return MultiFont(path, max(6, int(px)), index=index)
     except OSError:
         return None
 

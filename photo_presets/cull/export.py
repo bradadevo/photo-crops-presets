@@ -56,7 +56,7 @@ def copy_files(files: list[Path], folder: Path) -> list[Path]:
 
 FITS = {"widen": "Widen those crops just enough to stay sharp",
         "native": "Keep the crop's own pixels (a smaller file, never enlarged)",
-        "enlarge": "Enlarge them to the full size anyway (softer)"}
+        "enlarge": "Enlarge them with the AI detail enlarger (sharp, about 7 s each)"}
 
 
 def target(size_key: str, full: tuple[int, int]) -> tuple[int, int] | None:
@@ -164,7 +164,7 @@ def team_on_border(img: Image.Image, group, aspect: float, t, room: bool = True)
 
 
 def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, override: tuple | None = None,
-             ai_crop: tuple | None = None, adjust_fn=None, fit: str = "widen") -> list[Path]:
+             ai_crop: tuple | None = None, adjust_fn=None, fit: str = "widen", report: list | None = None) -> list[Path]:
     """One keeper's versions, saved in folder as <name>_<version>.jpg with its camera data.
     adjust_fn: Gemini's adjustments for D (given the natural edit), only when D is asked for."""
     photo = images.load(path)
@@ -189,7 +189,15 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
         images.save_jpeg(im, dest, exif)
         out.append(dest)
 
+    made = {}
+
     def at_size(box):
+        """The crop at its final size (made once per box: the AI enlarger takes seconds)."""
+        if tuple(box) not in made:
+            made[tuple(box)] = _at_size(box)
+        return made[tuple(box)].copy()
+
+    def _at_size(box):
         """The crop at its final size first, so the edit's detail and clarity suit what is seen
         (edited at 33 MP and then shrunk, the texture packs together and looks crunchy)."""
         if team:
@@ -202,7 +210,11 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
             return crop
         if fit == "native" and (crop.width < t[0] or crop.height < t[1]):
             return crop  # its own pixels: never enlarged (it may be made smaller, never bigger)
-        return crop.resize(t, Image.Resampling.LANCZOS)
+        how = []
+        out = enlarge.fit_pil(crop, tuple(t), how)  # (a real enlargement: the AI detail enlarger)
+        if report is not None:
+            report.extend({**h, "photo": path.name, "size": SIZES[size_key].label.split(" (")[0]} for h in how)
+        return out
 
     def sub(box, shown):
         s = _subject_in(box, subject, img.size)

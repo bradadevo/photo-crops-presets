@@ -886,7 +886,7 @@ function toast(text, { bad = false, sticky = false, spin = false, action = null,
   return {
     el: t,
     update(msg, sub, frac) { paint(msg, sub, true, null); t.querySelector(".bar").style.width = `${(frac * 100).toFixed(0)}%`; },
-    done(msg, sub = "", act = null) { paint(msg, sub, false, act); setTimeout(() => t.remove(), 9000); },
+    done(msg, sub = "", act = null, ms = 9000) { paint(msg, sub, false, act); setTimeout(() => t.remove(), ms); },
     fail(msg) { t.classList.add("bad"); paint(msg, "", false, null); setTimeout(() => t.remove(), 9000); },
     close() { t.remove(); },
   };
@@ -906,7 +906,8 @@ function renderTasks() {
       if (task.state === "done" && task.kind === "share") t.done(task.message);
       else if (task.state === "done" && task.kind === "find") { t.done(task.message); st.railShow = "with"; refresh(); }
       else if (task.state === "done") {
-        t.done(task.message, "", { label: "Show in Finder", run: () => api("/api/reveal", { path: task.path }) });
+        t.done(task.message, task.detail ? `✦ ${task.detail}` : "", { label: "Show in Finder", run: () => api("/api/reveal", { path: task.path }) },
+          task.detail ? 20000 : 9000);
         notify(task.kind === "reel" ? "Your reel is ready" : "Export finished", task.message);
       }
       else t.fail(task.message);
