@@ -85,13 +85,8 @@ document.addEventListener("contextmenu", (e) => {
   const m = document.createElement("div");
   m.className = "menu ctx-menu";
   m.innerHTML = items.map(([k, l, sub]) => `<button data-ctx="${k}"><span>${l}</span><small>${sub}</small></button>`).join("");
-  document.body.appendChild(m);
-  const r = m.getBoundingClientRect();
-  m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + "px";
-  m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + "px";
-  const close = () => { m.remove(); document.removeEventListener("pointerdown", away, true); };
-  const away = (ev) => { if (!m.contains(ev.target)) close(); };
-  setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+  ctxPlace(m, e);
+  const close = ctxKeep(m);
   m.querySelectorAll("[data-ctx]").forEach((b) => b.onclick = () => {
     close();
     const k = b.dataset.ctx;

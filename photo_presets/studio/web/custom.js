@@ -58,13 +58,8 @@ function pieceMenu(e, cur, id) {
     + (it0?.type === "card" ? "" : `<hr><button data-turn="90"><span>Turn 90° ↻</span><small>Stand it up the other way</small></button><button data-turn="-90"><span>Turn 90° ↺</span></button>
       <button data-turn="0" ${it0?.angle ? "" : "disabled"}><span>Make it level</span></button>`)
     + `<hr><button data-ctx="dup"><span>Duplicate</span></button><button data-ctx="del"><span>Delete</span></button>`;
-  document.body.appendChild(m);
-  const r = m.getBoundingClientRect();
-  m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + "px";
-  m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + "px";
-  const close = () => { m.remove(); document.removeEventListener("pointerdown", away, true); };
-  const away = (ev) => { if (!m.contains(ev.target)) close(); };
-  setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+  ctxPlace(m, e);
+  const close = ctxKeep(m);
   const edit = (fn) => { close(); editSig = ""; changeEdits(slotById(cur.id), (ed) => fn(ed.poster)); };
   m.querySelectorAll("[data-layer]").forEach((b) => b.onclick = () => {
     const said = layerPiece(clone(p), id, b.dataset.layer);  // (where it ends up, said at once)
@@ -78,7 +73,62 @@ function pieceMenu(e, cur, id) {
     st.pieceSel = nid;
   };
   m.querySelector('[data-ctx="del"]').onclick = () => { st.pieceSel = null; edit((pp) => { pp[PK(pp)] = pp[PK(pp)].filter((x) => x.id !== id); }); };
-  document.addEventListener("keydown", function esc(k) { if (k.key === "Escape") { close(); document.removeEventListener("keydown", esc); } });
+}
+
+/* A right-click menu stays open until you choose, click away or press Escape (not closed by the click
+   or redraw that some Macs send right after a right-click). Returns its close(). */
+function ctxKeep(m) {
+  const opened = Date.now();
+  const away = (ev) => { if (!m.contains(ev.target) && (Date.now() - opened > 350 || (ev.button === 0 && !ev.ctrlKey))) close(); };
+  const esc = (k) => { if (k.key === "Escape") { k.stopPropagation(); close(); } };
+  function close() { m.remove(); document.removeEventListener("pointerdown", away, true); document.removeEventListener("keydown", esc, true); }
+  setTimeout(() => { document.addEventListener("pointerdown", away, true); document.addEventListener("keydown", esc, true); }, 0);
+  return close;
+}
+function ctxPlace(m, e) {
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(e.clientX, innerWidth - r.width - 8)) + "px";
+  m.style.top = Math.max(8, Math.min(e.clientY, innerHeight - r.height - 8)) + "px";
+}
+
+/* Right-click on a word of a ready-made layout: the same choices as a piece. Moving it forward or back
+   makes the layout your own first (Customize), so it can be layered. */
+function wordMenu(e, cur, k) {
+  e.preventDefault(); e.stopPropagation();
+  document.querySelector(".ctx-menu")?.remove();
+  const p = cur.edits?.poster;
+  if (!p) return;
+  const mv = (p.moves || {})[k] || {}, ang = wordsList.find((w) => w.key === k)?.r || 0;
+  const m = document.createElement("div");
+  m.className = "menu ctx-menu";
+  m.innerHTML = `<button data-w="type"><span>Change the words</span><small>Type over them in the panel</small></button>
+    <button data-w="style"><span>Font and color…</span></button><hr>
+    ${[["front", "Bring to front"], ["forward", "Bring forward"], ["backward", "Send backward"], ["back", "Send to back"]].map(([h, l]) =>
+      `<button data-wl="${h}"><span>${l}</span><small>Makes the layout your own, then moves it</small></button>`).join("")}<hr>
+    <button data-wt="90"><span>Turn 90° ↻</span></button><button data-wt="-90"><span>Turn 90° ↺</span></button>
+    <button data-wt="0" ${ang ? "" : "disabled"}><span>Make it level</span></button>
+    <button data-w="place" ${mv.x || mv.y || (mv.s && mv.s !== 1) || mv.r ? "" : "disabled"}><span>Back to its place</span></button><hr>
+    <button data-w="off"><span>Take it off the poster</span><small>Type in its box to put it back</small></button>`;
+  ctxPlace(m, e);
+  const close = ctxKeep(m);
+  const s0 = () => slotById(cur.id);
+  m.querySelector('[data-w="type"]').onclick = () => { close(); st.focusField = { k, until: Date.now() + 2500 }; if (st.tool !== "poster") openPart(s0(), "poster"); focusPosterField(k); };
+  m.querySelector('[data-w="style"]').onclick = () => { close(); st.stylePk = k; st.colorPk = null; if (st.tool !== "poster") openPart(s0(), "poster"); else { editSig = ""; renderTabs(); } };
+  m.querySelectorAll("[data-wt]").forEach((b) => b.onclick = () => { close(); turnWord(s0(), k, +b.dataset.wt ? normAngle(ang + +b.dataset.wt) : 0); });
+  m.querySelector('[data-w="place"]').onclick = () => { close(); changeEdits(s0(), (ed) => { if (ed.poster.moves) delete ed.poster.moves[k]; }); };
+  m.querySelector('[data-w="off"]').onclick = () => { close(); changeEdits(s0(), (ed) => { ed.poster[k] = ""; }); };
+  m.querySelectorAll("[data-wl]").forEach((b) => b.onclick = async () => {
+    close();
+    const now = s0().edits?.poster, text = String(now?.[k] ?? "").trim().toUpperCase();
+    const r = await api("/api/poster/customize", { poster: now });
+    const els = r.poster[PK(r.poster)] || [];
+    const el = els.find((x) => (x.type === "text" || x.type === "badge") && String(x.text || "").trim().toUpperCase() === text);
+    const said = el ? layerPiece(r.poster, el.id, b.dataset.wl) : null;
+    st.pieceSel = el?.id || null;
+    await changeEdits(s0(), (ed) => { ed.poster = r.poster; });
+    toast(said || "Your own layout now", { small: "The layout is now yours: every word is a piece you can layer, move and restyle. ⌘Z undoes it." });
+  });
 }
 
 /* What "Add" puts on the poster (some add several pieces: a score banner is a panel and its words). */
@@ -143,7 +193,7 @@ function customSection(p) {
       ${t === "card" ? `${sl("w", "Width", 0.2, 1, 0.01, sel.w)}${sl("h", "Height", 0.2, 1, 0.01, sel.h)}${toggle("border", "White edge")}
         <p class="notes">The photo sits in the card, the player breaking out of its top. Drag the photo in it to move it; Photo zoom is above.</p>` : ""}
       ${t === "card" ? "" : angleControl(sel.angle)}
-      ${t === "card" || p.template === "spotlight" ? "" : toggle("behind", "Behind the players", "They stand in front of it")}
+      ${t === "card" || p.template === "spotlight" ? "" : toggle("behind", "Behind the players", "They stand in front of it. Only the players in the play count: to tuck it behind a teammate, the ball or the goal too, add them with Cut-out → Add")}
       <div class="inline piece-acts"><button class="btn" data-piece-dup>${icon("copy")} Duplicate</button><button class="btn ghost" data-piece-del>${icon("trash")} Delete</button></div>
       </div></div>`;
   }
@@ -155,7 +205,7 @@ function customSection(p) {
       <button class="pick" data-pick-piece="${el.id}"><span class="kind">${esc(PIECE_NAMES[el.type])}</span>${el.type === "text" || el.type === "badge" ? `<span class="what">${esc(pieceLabel(el))}</span>` : el.type === "stripes" ? pieceLabel(el) : ""}${el.behind ? `<span class="behind" title="Behind the players">behind</span>` : ""}</button>
       <button class="icon-btn" data-piece-up="${el.id}" title="Bring forward${canBehind(p) && el.behind ? " (in front of the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[1], "It's already at the very front.")}>▲</button>
       <button class="icon-btn" data-piece-down="${el.id}" title="Send back${canBehind(p) && !el.behind ? " (behind the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[0], canBehind(p) ? "It's already at the very back, behind the players." : "It's already behind your other pieces.")}>▼</button>
-      <button class="icon-btn" data-piece-x="${el.id}" title="Delete">${icon("x")}</button></div>`).join("")}</div>` : `<p class="notes">Nothing on it yet: add a title, a score banner, your logo…</p>`}
+      <button class="icon-btn" data-piece-x="${el.id}" title="Delete">${icon("x")}</button></div>`).join("")}</div>` : `<p class="notes">${custom ? "Nothing on it yet: add a title, a score banner, your logo…" : "Nothing added on top yet. The layout's own words are below."}</p>`}
     ${props}
     ${custom ? "" : "<!--"}${sl("fade_top", "Dark fade at the top", 0, 0.9, 0.05, p.fade_top ?? 0.35, "%").replace('data-prop="fade_top"', 'data-fade="fade_top"')}
     ${sl("fade_bottom", "Dark fade at the bottom", 0, 0.9, 0.05, p.fade_bottom ?? 0.55, "%").replace('data-prop="fade_bottom"', 'data-fade="fade_bottom"')}${custom ? "" : "-->"}
@@ -309,7 +359,10 @@ function paintPieces(cur, f, boxes) {
     if (e.target.closest(".pc-r")) {  // its round handle: turn it to any angle
       return rotateDrag(el, e, parseFloat(el.style.rotate) || 0, (a) => { el.style.rotate = `${a}deg`; }, (a) => setAngle(cur, id, a));
     }
-    if (st.pieceSel !== id) { st.pieceSel = id; editSig = ""; renderTabs(); layer.querySelectorAll(".pc").forEach((x) => x.classList.toggle("sel", x.dataset.pc === id)); }
+    if (st.pieceSel !== id) {
+      st.pieceSel = id; editSig = ""; renderTabs(); layer.querySelectorAll(".pc").forEach((x) => x.classList.toggle("sel", x.dataset.pc === id));
+      requestAnimationFrame(() => $(".piece-props")?.scrollIntoView({ block: "nearest", behavior: "smooth" }));  // (its settings in view)
+    }
     const r = f.getBoundingClientRect(), start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
     let moved = false, dx = 0, dy = 0;
     el.setPointerCapture(e.pointerId);

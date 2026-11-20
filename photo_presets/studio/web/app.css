@@ -1449,3 +1449,8 @@ input[type=range].hue::-webkit-slider-runnable-track { background: linear-gradie
 .kit-pop .sub-label { font-size: 11px; color: var(--faint); }
 .cu-done .ai-used { color: var(--accent-2, #3fa9f5); font-size: 12.5px; }
 textarea.poster-in { resize: none; min-height: 32px; line-height: 1.35; font: inherit; overflow: hidden; padding: 7px 10px; flex: 1; }
+/* typing boxes: the app's own font, growing with their lines */
+textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; min-height: 32px; padding: 7px 10px; overflow: hidden; }
+/* a piece's six styles: two even rows, never squeezed together */
+.piece-props [data-prop-style] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; width: 100%; }
+.piece-props [data-prop-style] button { padding: 5px 4px; }

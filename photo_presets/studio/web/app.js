@@ -1382,11 +1382,11 @@ document.addEventListener("paste", (e) => {
 });
 
 // Menus, tabs, keys ------------------------------------------------------------------------------
-function closeMenus() { $$(".menu").forEach((m) => m.hidden = true); }
+function closeMenus() { $$(".menu:not(.ctx-menu)").forEach((m) => m.hidden = true); }  // (a right-click menu closes itself)
 function menu(btn, m) {
   btn.onclick = (e) => { e.stopPropagation(); const open = m.hidden; closeMenus(); m.hidden = !open; };
 }
-document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
+document.addEventListener("click", (e) => { if (!e.target.closest?.(".menu")) closeMenus(); });
 
 function showHelp() {
   closeMenus();
@@ -1407,6 +1407,12 @@ document.addEventListener("keydown", (e) => {
   // ⌘Z in the edit panel's boxes undoes the picture's last change (the box shows it), not just letters
   const ownBox = e.target.closest?.("#pane-edit input:not(#e-name):not(#pp-name), #pane-edit textarea");
   if (undoKey && ownBox && st.mode === "edit") { e.preventDefault(); ownBox.blur(); (e.shiftKey ? redo : undo)(); return; }
+  if (e.key === "Escape" && ownBox && st.mode === "edit") {  // Escape in a box: out of it (and nothing chosen), as in any app
+    ownBox.blur();
+    st.focusField = null;
+    if (st.tool === "poster" && (st.pieceSel || st.stylePk)) { st.pieceSel = null; st.stylePk = null; st.colorPk = null; editSig = ""; viewerSig = ""; render(); }
+    return;
+  }
   if (e.target.closest?.("input, textarea, select")) return;
   if (undoKey && st.mode === "check") return;  // (the Check tab never changes your looks)
   if (undoKey) { e.preventDefault(); (e.shiftKey ? redo : undo)(); return; }
@@ -1418,6 +1424,9 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Escape") {
     if (modalOpen()) closeModal();
+    else if (st.tool === "poster" && (st.pieceSel || st.stylePk)) {  // first Escape: nothing chosen; the next one closes the tool
+      st.pieceSel = null; st.stylePk = null; st.colorPk = null; editSig = ""; viewerSig = ""; render();
+    }
     else if (st.tool) setTool(st.tool);
     else if (st.survey.length) { st.survey = []; viewerSig = ""; render(); }
     else if (st.zoom.on) toggleZoom();

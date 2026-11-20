@@ -760,6 +760,7 @@ async function paintWords(cur) {
     if (st.tool !== "poster") openPart(cur, "poster");
     focusPosterField(k);
   }, (a) => turnWord(cur, el.dataset.pk, a)));
+  box.querySelectorAll(".pc-word").forEach((el) => el.oncontextmenu = (e) => wordMenu(e, slotById(cur.id), el.dataset.pk));
   paintPieces(cur, f, wordsList);  // (pieces added on top of the layout: stripes, text…)
   box.querySelectorAll(".pc-logo").forEach((el) => dragPiece(el, f, cur, (dx, dy, resize, kx, ky, r) => {
     const w = wordsList.find((x) => x.key === "logo");
@@ -1414,7 +1415,12 @@ function bindPhotoDrag(cur) {
     f.onpointermove = (m) => { dx = m.clientX - x0; dy = m.clientY - y0; img.style.transform = `translate(${dx}px, ${dy}px)`; };
     f.onpointerup = () => {
       f.onpointermove = f.onpointerup = null; f.classList.remove("dragging-photo");
-      if (Math.abs(dx) + Math.abs(dy) < 3) { img.style.transform = ""; return; }
+      if (Math.abs(dx) + Math.abs(dy) < 3) {  // a click on the photo, not on a word: nothing chosen any more
+        img.style.transform = "";
+        st.focusField = null;
+        if (st.pieceSel || st.stylePk) { st.pieceSel = null; st.stylePk = null; st.colorPk = null; editSig = ""; viewerSig = ""; render(); }
+        return;
+      }
       changeEdits(slotById(cur.id), (ed) => {
         const pic = ed.poster.pic || { x: 0, y: 0, zoom: 1 };
         ed.poster.pic = { ...pic, x: (pic.x || 0) + dx / r.width, y: (pic.y || 0) + dy / r.height };

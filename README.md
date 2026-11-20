@@ -208,9 +208,10 @@ Sliders:
   **Color mixer** (hue, saturation and lightness for eight colors, and **Kit
   color pop**: pick a kit color and make it richer); **Color grading** (a
   color and amount for shadows, midtones and highlights); **Finishing** (Noise
-  reduction, Sharpen, Vignette). The picture side of these is in; their panel
-  in the Edit tab is being added next. Until then they work in a recipe's
-  `"adjust"` (below).
+  reduction, Sharpen, Vignette). Advanced is folded away, each part folds on its
+  own, and a blue number shows how many settings are in use. Kit color pop:
+  **Pick the kit color**, then click the kit on the picture. Double-click any
+  slider to reset it.
 - **Reset all**, and **Use on all N** (these sliders on every picture with
   this look; crops, parts and text stay with each picture).
 
@@ -259,7 +260,9 @@ exports just that one. The export window:
   numbers and kit instead of a soft blow-up, with a little of the plain
   enlargement mixed back so skin keeps its real texture; it never redraws
   faces. Crops over 4 megapixels, or a Mac without the model, use plain
-  enlarging. The export says when a size was enlarged. Files are named with the size, e.g.
+  enlarging. When the export is done, its note says which files the AI
+  enlarger sharpened and by how much (✦), so you can see when it was used;
+  Culling's finish page says the same for its crops. Files are named with the size, e.g.
   `DSC03424_vivid-pro_ig-4x5.jpg`.
 - **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
   prints, further editing in Lightroom or Photoshop; about 6 times bigger), or
@@ -427,6 +430,15 @@ Collector's Edition. **Clean overlays** (your photo as it is, the words on a
 quiet fill): Fill Band, Lower Third, Knockout (the words cut out of a solid
 panel), Side Label (the name standing up by the edge), Corner Tag, Outline
 Stack and Frosted Panel.
+
+**Words on several lines**: Return starts a new line (up to three) in any
+poster word box, custom text piece or photo text; every layout stacks them.
+
+**Right-click** (or Control-click) a word or piece for Bring to front, Bring
+forward, Send backward, Send to back, turning, back to its place, and taking it
+off. On a ready-made layout, layering makes the layout your own first
+(Customize). Click the photo, or press Esc, to deselect; Esc again closes the
+tool.
 
 **Every word, any font, any angle**: on every layout, each word (titles,
 names, numbers, the ribbon and the badge too) takes its own color, font and

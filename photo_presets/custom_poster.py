@@ -254,7 +254,8 @@ def from_layout(p: dict, words: list[dict], W: int, H: int, u: float) -> list[di
             text = f"{p.get('home_score', '')}  –  {p.get('away_score', '')}"
         if not text:
             continue
-        hpx = (w["y1"] - w["y0"]) * H
+        rows = str(text).count("\n") + 1  # (a word on several lines: its size is one line's)
+        hpx = (w["y1"] - w["y0"]) * H / (1 + 1.12 * (rows - 1))
         size = max(0.015, hpx / 0.74 / u)
         own = (p.get("colors") or {}).get(k)
         if k == "number" and t in ("spotlight", "card"):
