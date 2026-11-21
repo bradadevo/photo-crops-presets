@@ -196,7 +196,8 @@ class Engine:
         """What one removal takes from the result's picture (bool, h x w): what was brushed,
         and the whole person or object clicked, with its edge and shadow; never the players
         kept in the look, unless brushed over directly."""
-        key = ("mask", str(r.source), r.crop, r.frame, json.dumps(removal, sort_keys=True))
+        what = {"points": removal.get("points", []), "strokes": removal.get("strokes", [])}  # (not how it's filled)
+        key = ("mask", str(r.source), r.crop, r.frame, json.dumps(what, sort_keys=True))
         if key not in self._gone:
             img = self._picture(r)
             matte = self.cutout(r)
@@ -222,11 +223,21 @@ class Engine:
         sample = arr[:: max(1, h // 64), :: max(1, w // 64)].tobytes()
         key = ("fill", hash(sample), h, w, json.dumps(removals, sort_keys=True), str(r.source), r.crop, r.frame)
         if key not in self._gone:
-            mask = np.zeros((h, w), bool)
-            for rm in removals:
-                mask |= self.removal_mask(r, rm, h, w)
             u8 = (np.clip(arr, 0, 1) * 255 + 0.5).astype(np.uint8)
-            filled, weight = retouch.fill(u8, mask)
+            weight = np.zeros((h, w), np.float32)
+            plain = np.zeros((h, w), bool)  # (removals filled the usual way go together, as before)
+            for rm in removals:
+                if rm.get("fill"):
+                    continue
+                plain |= self.removal_mask(r, rm, h, w)
+            filled = u8
+            if plain.any():
+                filled, wt = retouch.fill(filled, plain)
+                weight = np.maximum(weight, wt)
+            for rm in removals:  # each one filled its own way, in order
+                if rm.get("fill"):
+                    filled, wt = retouch.fill_one(filled, self.removal_mask(r, rm, h, w), rm["fill"])
+                    weight = np.maximum(weight, wt)
             wgt = weight[..., None]
             self._gone[key] = (arr * (1 - wgt) + filled.astype(np.float32) / 255 * wgt).astype(np.float32)
             self._trim()

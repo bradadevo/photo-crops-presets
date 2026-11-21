@@ -167,18 +167,27 @@ def _borrow_detail(tile: np.ndarray, filled: np.ndarray, hole: np.ndarray, seed:
     return filled - _high(filled, DETAIL_SIGMA) * inside + detail * inside
 
 
-def fill(arr: np.ndarray, mask: np.ndarray, work_edge: int = WORK_EDGE) -> tuple[np.ndarray, np.ndarray]:
+# The fills to choose from ("Try another fill"): each sees the area differently, so when one shows a
+# smudge or a repeat, another usually doesn't.
+FILLS = ["AI fill", "AI fill, wider view", "AI fill, smooth", "Blend from around it"]
+
+
+def fill(arr: np.ndarray, mask: np.ndarray, work_edge: int = WORK_EDGE, variant: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """Every masked area of an RGB uint8 image filled. Returns the image and
     the weight each pixel was replaced with (0-1), to carry the change to a
     16-bit copy. Near the picture's edge the context is mirrored, so the fill
-    has something to go on there too."""
+    has something to go on there too. variant: which of FILLS (0 is the usual)."""
+    variant = int(variant) % len(FILLS)
+    context, min_context = (CONTEXT * 2.2, MIN_CONTEXT * 2) if variant == 1 else (CONTEXT, MIN_CONTEXT)
+    if variant == 2:
+        work_edge = max(work_edge, 2048)
     out = arr.copy()
     h, w = mask.shape
     weights = np.zeros((h, w), np.float32)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
     for i in range(1, count):
         x, y, bw, bh = stats[i, :4]
-        pad = max(MIN_CONTEXT, int(CONTEXT * max(bw, bh)))
+        pad = max(min_context, int(context * max(bw, bh)))
         X0, Y0, X1, Y1 = max(0, x - pad), max(0, y - pad), min(w, x + bw + pad), min(h, y + bh + pad)
         tile = out[Y0:Y1, X0:X1]
         hole = labels[Y0:Y1, X0:X1] == i
@@ -196,16 +205,56 @@ def fill(arr: np.ndarray, mask: np.ndarray, work_edge: int = WORK_EDGE) -> tuple
         tw = max(8, int(big.shape[1] * scale) // 8 * 8)
         small = cv2.resize(big, (tw, th), interpolation=cv2.INTER_AREA)
         small_hole = cv2.resize(big_hole, (tw, th), interpolation=cv2.INTER_NEAREST) > 0
-        small_hole = cv2.dilate(small_hole.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
-        done = cv2.resize(_run(small, small_hole), (big.shape[1], big.shape[0]), interpolation=cv2.INTER_CUBIC)
+        grow = 5 if variant == 2 else 3
+        small_hole = cv2.dilate(small_hole.astype(np.uint8), np.ones((grow, grow), np.uint8)) > 0
+        if variant == 3:  # no AI: the surroundings flowed in (clean on sky, walls, plain grass)
+            done_small = cv2.inpaint(small, small_hole.astype(np.uint8), 7, cv2.INPAINT_TELEA)
+        else:
+            done_small = _run(small, small_hole)
+        done = cv2.resize(done_small, (big.shape[1], big.shape[0]), interpolation=cv2.INTER_CUBIC)
         filled = done[mt:mt + tile.shape[0], ml:ml + tile.shape[1]].astype(np.float32)
         filled = _match_seam(tile.astype(np.float32), filled, hole)
-        filled = _borrow_detail(tile.astype(np.float32), filled, hole, seed=i)
+        if variant != 2:  # (the smooth fill keeps its own texture)
+            filled = _borrow_detail(tile.astype(np.float32), filled, hole, seed=i + 7 * variant)
         weight = cv2.GaussianBlur(hole.astype(np.float32), (0, 0), FEATHER)
         weight = np.maximum(weight, hole.astype(np.float32))
         out[Y0:Y1, X0:X1] = np.clip(tile * (1 - weight[..., None]) + filled * weight[..., None], 0, 255).astype(np.uint8)
         weights[Y0:Y1, X0:X1] = np.maximum(weights[Y0:Y1, X0:X1], weight)
     return out, weights
+
+
+def copy_from(arr: np.ndarray, mask: np.ndarray, dx: float, dy: float) -> tuple[np.ndarray, np.ndarray]:
+    """The masked area filled with the photo from another spot (dx, dy: how far away, as shares of the
+    picture's width and height), its light and color matched at the edge, as a healing brush does.
+    Returns the image and the weight each pixel was replaced with (as fill())."""
+    h, w = mask.shape
+    sx, sy = int(round(dx * w)), int(round(dy * h))
+    ys, xs = np.nonzero(mask)
+    if not len(ys):
+        return arr.copy(), np.zeros((h, w), np.float32)
+    pad = max(12, int(0.25 * max(ys.max() - ys.min(), xs.max() - xs.min())))
+    Y0, Y1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1)
+    X0, X1 = max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
+    yy, xx = np.mgrid[Y0:Y1, X0:X1]
+    src = arr[np.clip(yy + sy, 0, h - 1), np.clip(xx + sx, 0, w - 1)].astype(np.float32)
+    tile = arr[Y0:Y1, X0:X1].astype(np.float32)
+    hole = mask[Y0:Y1, X0:X1]
+    filled = _match_seam(tile, src, hole)
+    weight = np.maximum(cv2.GaussianBlur(hole.astype(np.float32), (0, 0), FEATHER), hole.astype(np.float32))
+    out = arr.copy()
+    out[Y0:Y1, X0:X1] = np.clip(tile * (1 - weight[..., None]) + filled * weight[..., None], 0, 255).astype(np.uint8)
+    weights = np.zeros((h, w), np.float32)
+    weights[Y0:Y1, X0:X1] = weight
+    return out, weights
+
+
+def fill_one(arr: np.ndarray, mask: np.ndarray, how: dict | None) -> tuple[np.ndarray, np.ndarray]:
+    """One removal's area filled as chosen: {"from": [dx, dy]} copies another spot, {"try": n} is
+    FILLS[n], nothing is the usual AI fill."""
+    how = how or {}
+    if how.get("from"):
+        return copy_from(arr, mask, *how["from"])
+    return fill(arr, mask, variant=int(how.get("try", 0)))
 
 
 def stroke_mask(strokes: list[dict], w: int, h: int) -> np.ndarray:

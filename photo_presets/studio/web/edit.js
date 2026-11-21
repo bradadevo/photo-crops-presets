@@ -1309,26 +1309,141 @@ function renderCrop(v, cur) {
    too), or brush over it. What will go shows in red before anything is removed; then this look
    only, or every look of this photo. It never takes the players kept in the look unless you
    brush right over them. */
+/* Remove, in three plain steps: ① pick what goes (click a person or a thing, or brush), ② Remove it,
+   ③ check the fill: hold to compare, try another fill, or copy from a spot you choose (drag the circle
+   to grass, sky, crowd: the area is filled from there, its light matched at the edge). */
+const FILL_NAMES = ["AI fill", "AI fill, wider view", "AI fill, smooth", "Blend from around it"];
 function renderBrush(v, cur) {
   const b = st.brush;
   b.mode ||= "click";
   b.scope ||= "look";
+  b.stage ||= "pick";
+  const nRemoved = (cur.edits?.removals || []).length;
+  if (b.stage !== "pick" && (b.sid !== cur.id || nRemoved < (b.count || 0))) { b.stage = "pick"; b.copy = null; }  // (undone, or another look)
   const others = st.slots.filter((s) => s.photo === cur.photo && s.state === "done").length;
-  v.innerHTML = `<div class="frame tool-remove mode-${b.mode}" id="frame"><div class="layer"><img class="after" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
-      <img class="rm-preview" id="rm-preview" alt="" hidden><canvas id="brush"></canvas><div class="brush-ring" id="ring" hidden></div>
-      <span class="tag l rm-status" id="rm-status" hidden></span></div>
-    <div class="fixbar toolbar rm-bar below">${histBtns()}
-      <div class="seg small" id="rm-mode"><button data-v="click" title="Click a person or a thing: all of it goes">${icon("target")} Click</button><button data-v="brush" title="Paint over what should go">${icon("eraser")} Brush</button></div>
+  const step = (n, label) => `<span class="rm-step${b.stage === "pick" ? (n === 1 ? " on" : "") : n === 3 ? " on" : " done"}"><i>${n}</i>${label}</span>`;
+  const steps = `<span class="rm-steps">${step(1, "Pick what goes")}${step(2, "Remove")}${step(3, "Check the fill")}</span><span class="sep"></span>`;
+  const last = (cur.edits?.removals || [])[nRemoved - 1] || {};
+  const fillNow = last.fill?.from ? "Copied from a spot" : FILL_NAMES[last.fill?.try || 0];
+  const bar = b.stage === "pick" ? `
+      <div class="seg small" id="rm-mode"><button data-v="click" title="Click a person or a thing: all of it goes">${icon("target")} Click</button><button data-v="brush" title="Paint over what should go (small spots too: then fill them from a spot you choose)">${icon("eraser")} Brush</button></div>
       <span class="angle" id="rm-size" ${b.mode === "brush" ? "" : "hidden"}>Size<input type="range" id="b-size" min="0.006" max="0.08" step="0.002" value="${b.r}"></span>
       <button id="rm-people" title="Select every person who is not one of the players kept" hidden>${icon("plus")} Background people</button>
       <span class="sep"></span>
       ${others > 1 ? `<div class="seg small" id="rm-scope"><button data-v="look" title="Only this look">This look</button><button data-v="photo" title="Every look of this photo, and the looks made of it later">All ${others} looks</button></div><span class="sep"></span>` : ""}
-      <button id="b-undo" title="Take back the last click or stroke">${icon("undo")}</button>
-      <button id="b-go" class="on">Remove it</button><button id="b-done">Done</button></div>`;
+      <button id="b-undo" title="Take back the last click or stroke">${icon("undo")} Last pick</button>
+      <button id="b-go" class="on">Remove it</button><button id="b-done">Done</button>`
+    : b.stage === "check" ? `
+      <button id="rm-hold" title="Hold to see it before the removal">${icon("compare")} Hold to compare</button>
+      <button id="rm-try" title="Fill it another way (four to choose from; each sees the area differently)">${icon("refresh")} Try another fill <small>${esc(fillNow)}</small></button>
+      <button id="rm-copy" title="Choose the spot it's filled from: drag the circle to grass, sky, crowd…">${icon("target")} Copy from a spot</button>
+      <span class="sep"></span>
+      <button id="rm-keep" class="on" title="Keep it and remove something else">${icon("check")} Keep</button><button id="b-done">Done</button>`
+    : `
+      <span class="title"><b>Copy from a spot</b><span>Drag the circle to what should fill it · let go to apply</span></span><span class="sep"></span>
+      <button id="rm-copy-done" class="on">${icon("check")} Done copying</button>`;
+  v.innerHTML = `<div class="frame tool-remove mode-${b.stage === "pick" ? b.mode : b.stage}" id="frame"><div class="layer"><img class="after" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
+      <img class="rm-before" id="rm-before" alt="" hidden>
+      <img class="rm-preview" id="rm-preview" alt="" hidden><canvas id="brush"></canvas><canvas id="rm-copy-cv" hidden></canvas><div class="brush-ring" id="ring" hidden></div>
+      <div class="rm-src" id="rm-src" hidden title="Drag me to the spot it's filled from"></div><div class="rm-dst" id="rm-dst" hidden></div>
+      <span class="tag l rm-status" id="rm-status" hidden></span></div>
+    <div class="fixbar toolbar rm-bar below">${histBtns()}${steps}${bar}</div>`;
   paintIcons(v);
   fitFrame(cur.base_width, cur.base_height);
-  const f = $("#frame"), cv = $("#brush"), ring = $("#ring"), prev = $("#rm-preview"), status = $("#rm-status");
+  const f = $("#frame"), cv = $("#brush"), ring = $("#ring"), prev = $("#rm-preview"), status = $("#rm-status"), img = $("#frame img.after");
+  const say = (html) => { if (!status.isConnected) return; status.hidden = !html; status.innerHTML = html || ""; };
+  $("#b-done")?.addEventListener("click", () => { b.stage = "pick"; b.copy = null; setTool("remove"); });
+
+  if (b.stage === "check") {  // ③ check the fill
+    say(`<b>③</b> Does it look right? Hold to compare · try another fill · or copy from a spot`);
+    const hold = $("#rm-hold"), before = $("#rm-before");
+    if (b.beforeUrl) before.src = b.beforeUrl; else hold.hidden = true;
+    const show = (on) => { before.hidden = !on; hold.classList.toggle("on", on); };
+    hold.onpointerdown = () => show(true);
+    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => hold.addEventListener(ev, () => show(false)));
+    $("#rm-keep").onclick = () => { b.stage = "pick"; viewerSig = ""; renderViewer(); toast("Kept", { small: "Pick the next thing to remove, or Done" }); };
+    $("#rm-copy").onclick = () => { b.stage = "copy"; viewerSig = ""; renderViewer(); };
+    $("#rm-try").onclick = async () => {
+      const s0 = slotById(cur.id), was = last.fill?.try || 0, next = last.fill?.from ? 1 : (was + 1) % FILL_NAMES.length;
+      const t = toast(`Filling it: ${FILL_NAMES[next]}…`, { sticky: true, spin: true });
+      try {
+        const s = await api(`/api/slots/${cur.id}/remove/fill`, { fill: next ? { try: next } : null });
+        pushHist({ type: "slot", sid: cur.id, before: snapshot(s0), after: snapshot(s) });
+        updateSlot(s); t.done(FILL_NAMES[next], `${next + 1} of ${FILL_NAMES.length} · Try again for the next one`);
+      } catch { t.close(); }
+      viewerSig = ""; renderViewer();
+    };
+    return;
+  }
+
+  if (b.stage === "copy") {  // copy from a spot: a circle to drag, the fill shown live from there
+    const cc = $("#rm-copy-cv"), src = $("#rm-src"), dst = $("#rm-dst");
+    say(`Drag the <b>◎</b> circle to what should fill the area (it's shown live) · let go to apply`);
+    const mask = new Image();
+    mask.src = `/api/slots/${cur.id}/remove/mask/${cur.ver}.png`;
+    const base = new Image();
+    base.src = b.beforeUrl || slotImg(cur, "base");
+    Promise.all([mask.decode(), base.decode()]).then(() => {
+      const W = mask.naturalWidth, H = mask.naturalHeight;
+      // the area's middle and size (from the mask, at a small scale)
+      const k = Math.min(1, 240 / Math.max(W, H)), sw = Math.max(1, Math.round(W * k)), sh = Math.max(1, Math.round(H * k));
+      const t = document.createElement("canvas"); t.width = sw; t.height = sh;
+      const tc = t.getContext("2d"); tc.drawImage(mask, 0, 0, sw, sh);
+      const d = tc.getImageData(0, 0, sw, sh).data;
+      let x0 = sw, y0 = sh, x1 = 0, y1 = 0, n = 0, mx = 0, my = 0;
+      for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) if (d[(y * sw + x) * 4 + 3] > 127) { n++; mx += x; my += y; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      if (!n) { say("Nothing to fill here"); return; }
+      const cx = mx / n / sw, cy = my / n / sh, aw = (x1 - x0 + 1) / sw, ah = (y1 - y0 + 1) / sh;
+      if (!b.copy || b.copy.sid !== cur.id) {  // a first spot beside it (right, or left near the edge)
+        const dx = cx + aw * 1.25 < 0.97 ? aw * 1.25 : -aw * 1.25;
+        b.copy = { sid: cur.id, dx: last.fill?.from?.[0] ?? dx, dy: last.fill?.from?.[1] ?? 0 };
+      }
+      const r = f.getBoundingClientRect();
+      cc.width = Math.round(r.width * devicePixelRatio); cc.height = Math.round(r.height * devicePixelRatio); cc.hidden = false;
+      const ctx = cc.getContext("2d");
+      const paint = () => {
+        const { dx, dy } = b.copy, cw = cc.width, ch = cc.height;
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.drawImage(base, -dx * cw, -dy * ch, cw, ch);  // the photo moved so the chosen spot sits over the area
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.drawImage(mask, 0, 0, cw, ch);  // only inside the area
+        ctx.globalCompositeOperation = "source-over";
+        const size = Math.max(aw * r.width, ah * r.height, 28);
+        Object.assign(dst.style, { left: `${cx * 100}%`, top: `${cy * 100}%`, width: `${aw * 100}%`, height: `${ah * 100}%` });
+        Object.assign(src.style, { left: `${(cx + dx) * 100}%`, top: `${(cy + dy) * 100}%`, width: `${size}px`, height: `${size}px` });
+        src.hidden = dst.hidden = false;
+      };
+      paint();
+      const apply = async () => {
+        const s0 = slotById(cur.id), { dx, dy } = b.copy;
+        say(`<span class="spin"></span> Copying it from there…`);
+        try {
+          const s = await api(`/api/slots/${cur.id}/remove/fill`, { fill: { from: [Math.round(dx * 1e4) / 1e4, Math.round(dy * 1e4) / 1e4] } });
+          pushHist({ type: "slot", sid: cur.id, before: snapshot(s0), after: snapshot(s) });
+          updateSlot(s, { keepPane: true });
+          img.src = slotImg(s, "base");
+          say(`Filled from there · drag again to try another spot, or <b>Done copying</b>`);
+        } catch { say("Couldn't copy from there: try another spot"); }
+      };
+      src.onpointerdown = (e) => {
+        e.preventDefault(); src.setPointerCapture(e.pointerId);
+        const start = { x: e.clientX, y: e.clientY, dx: b.copy.dx, dy: b.copy.dy };
+        src.onpointermove = (m) => {
+          b.copy.dx = Math.max(-cx, Math.min(1 - cx, start.dx + (m.clientX - start.x) / r.width));
+          b.copy.dy = Math.max(-cy, Math.min(1 - cy, start.dy + (m.clientY - start.y) / r.height));
+          paint();
+        };
+        src.onpointerup = () => { src.onpointermove = src.onpointerup = null; apply(); };
+      };
+    }).catch(() => say("Couldn't load the area: Done copying, then try again"));
+    $("#rm-copy-done").onclick = () => { b.stage = "check"; viewerSig = ""; renderViewer(); };
+    return;
+  }
+
+  // ① pick what goes
   const paintBar = () => {
+    if (!f.isConnected || !$("#rm-size")) return;  // (moved on to another step meanwhile)
     $$("#rm-mode button").forEach((x) => x.classList.toggle("on", x.dataset.v === b.mode));
     $$("#rm-scope button").forEach((x) => x.classList.toggle("on", x.dataset.v === b.scope));
     $("#rm-size").hidden = b.mode !== "brush";
@@ -1358,22 +1473,26 @@ function renderBrush(v, cur) {
   const preview = () => {  // what will go, worked out by the app: whole people and things, edges, shadows
     clearTimeout(previewTimer);
     paintBar();
-    if (!b.strokes.length && !b.points.length) { prev.hidden = true; status.hidden = true; b.preview = null; return; }
+    if (!b.strokes.length && !b.points.length) {
+      prev.hidden = true; b.preview = null;
+      say(`<b>①</b> ${b.mode === "click" ? "Click a person or a thing to remove" : "Brush over what should go"}`);
+      return;
+    }
     previewTimer = setTimeout(async () => {
       const ask = ++previewAsk;
-      status.hidden = false; status.innerHTML = '<span class="spin"></span> Finding it…';
+      say('<span class="spin"></span> Finding it…');
       try {
         const res = await fetch(`/api/slots/${cur.id}/remove/preview`, { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ points: b.points, strokes: b.strokes }) });
-        if (!res.ok || ask !== previewAsk) return;
+        if (!res.ok || ask !== previewAsk || !f.isConnected) return;
         const url = URL.createObjectURL(await res.blob());
         if (b.preview) URL.revokeObjectURL(b.preview);
         b.preview = url; prev.src = url; prev.hidden = false;
-        status.innerHTML = "Red goes · click more, or Remove it";
-      } catch { status.hidden = true; }
+        say(`<b>②</b> Red goes · click more, or <b>Remove it</b>`);
+      } catch { say(""); }
     }, 150);
   };
-  requestAnimationFrame(() => { size(); if (b.preview) { prev.src = b.preview; prev.hidden = false; } paintBar(); });
+  requestAnimationFrame(() => { if (!f.isConnected) return; size(); if (b.preview) { prev.src = b.preview; prev.hidden = false; } paintBar(); if (!b.preview) preview(); });
   const at = (e) => { const r = f.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
   const showRing = (e) => {
     if (b.mode !== "brush") { ring.hidden = true; return; }
@@ -1392,15 +1511,14 @@ function renderBrush(v, cur) {
     cv.onpointermove = (m) => { showRing(m); s2.pts.push(at(m)); draw(); };
     cv.onpointerup = () => { cv.onpointermove = null; preview(); };
   };
-  $$("#rm-mode button").forEach((x) => x.onclick = () => { b.mode = x.dataset.v; paintBar(); });
+  $$("#rm-mode button").forEach((x) => x.onclick = () => { b.mode = x.dataset.v; paintBar(); preview(); });
   $$("#rm-scope button").forEach((x) => x.onclick = () => { b.scope = x.dataset.v; paintBar(); });
   $("#b-size").oninput = (e) => { b.r = +e.target.value; store.set("brush", b.r); };
   $("#b-undo").onclick = () => {
-    const last = (b.order || []).pop();
-    if (last === "s") b.strokes.pop(); else if (last === "p") b.points.pop();
+    const l = (b.order || []).pop();
+    if (l === "s") b.strokes.pop(); else if (l === "p") b.points.pop();
     draw(); preview();
   };
-  $("#b-done").onclick = () => setTool("remove");
   // the background people: one click selects them all
   api(`/api/slots/${cur.id}/people`).then((r) => {
     const btn = $("#rm-people");
@@ -1410,20 +1528,25 @@ function renderBrush(v, cur) {
     btn.onclick = () => { r.people.forEach((p) => { b.points.push([p.x, p.y]); (b.order ||= []).push("p"); }); preview(); };
   }).catch(() => {});
   $("#b-go").onclick = async () => {
+    if (!(b.strokes.length || b.points.length)) return;
     const body = { points: b.points.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]),
       strokes: b.strokes.map((s2) => ({ pts: s2.pts.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]), r: s2.r })),
       scope: b.scope };
     const affected = b.scope === "photo" ? st.slots.filter((s2) => s2.photo === cur.photo && s2.state === "done") : [cur];
     const before = new Map(affected.map((s2) => [s2.id, snapshot(s2)]));
-    const t = toast(affected.length > 1 ? `Removing it from ${plural(affected.length, "look")}…` : "Removing it…", { sticky: true, spin: true });
+    try {  // the picture as it was, kept for "Hold to compare" and for copying from
+      if (b.beforeUrl) URL.revokeObjectURL(b.beforeUrl);
+      b.beforeUrl = URL.createObjectURL(await (await fetch(img.src)).blob());
+    } catch { b.beforeUrl = null; }
+    say('<span class="spin"></span> Removing it and filling the area…');
     try {
       const r = await api(`/api/slots/${cur.id}/remove`, body);
       const items = r.slots.filter((s2) => before.has(s2.id)).map((s2) => ({ sid: s2.id, before: before.get(s2.id), after: snapshot(s2) }));
       pushHist({ type: "multi", items, pid: b.scope === "photo" ? cur.photo : null,
         futureBefore: (r.future || []).slice(0, -1), futureAfter: r.future || [] });
       r.slots.forEach((s2) => updateSlot(s2));
-      t.done("Removed", "⌘Z puts it back");
-    } catch { t.close(); }
+      b.stage = "check"; b.sid = cur.id; b.count = (slotById(cur.id).edits?.removals || []).length; b.copy = null;
+    } catch { say(""); }
     b.strokes = []; b.points = []; b.order = [];
     if (b.preview) URL.revokeObjectURL(b.preview);
     b.preview = null;

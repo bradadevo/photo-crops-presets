@@ -148,7 +148,15 @@ the tab too). Tools used on the picture itself:
   **4:5**, **1:1**, **9:16** or **16:9**; **straighten** with the dial (up to
   20°; the picture is enlarged so no corner is empty), or **Auto**, which
   levels it from the field lines, the horizon and the goal posts. **Apply**.
-- **Remove**: **Click** a person or a thing (a bag, a cone, the goal cart) and
+- **Remove** works in three steps, shown on its bar: **① Pick what goes**,
+  **② Remove**, **③ Check the fill**. In step 3: **Hold to compare** (before and
+  after), **Try another fill** (four fills, each seeing the area differently:
+  AI fill, a wider view, smooth, or blended from around it), and **Copy from a
+  spot**: drag the circle to grass, sky or crowd and the area is filled from
+  there, shown live as you drag, its light matched at the edge (like a healing
+  brush; brush a small spot first to patch it). **Keep** moves on to the next
+  thing; ⌘Z undoes each step. How each removal is filled is saved with it.
+  **Click** a person or a thing (a bag, a cone, the goal cart) and
   all of it is taken (their edge and their shadow on the grass too), or
   **Brush** over it (brushing over most of a person takes the whole person).
   **Background people** selects, in one click, everyone who is not one of the

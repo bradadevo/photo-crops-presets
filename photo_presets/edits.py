@@ -272,6 +272,21 @@ def level_angle(arr: np.ndarray) -> float:
     return round(float(np.clip(-median, -MAX_ANGLE, MAX_ANGLE)), 1) if abs(median) >= 0.2 else 0.0
 
 
+def _fill(f) -> dict:
+    """How a removal is filled: {"fill": {"try": n}} (another AI fill) or {"fill": {"from": [dx, dy]}}
+    (copied from another spot, as shares of the picture); nothing for the usual fill."""
+    if not isinstance(f, dict):
+        return {}
+    if isinstance(f.get("from"), (list, tuple)) and len(f["from"]) == 2:
+        dx, dy = (float(np.clip(float(v), -1, 1)) for v in f["from"])
+        return {"fill": {"from": [round(dx, 4), round(dy, 4)]}} if (dx, dy) != (0, 0) else {}
+    try:
+        n = int(f.get("try", 0)) % 4
+    except (TypeError, ValueError):
+        return {}
+    return {"fill": {"try": n}} if n else {}
+
+
 def clean(edits: dict | None) -> dict:
     """Edits kept tidy (numbers, known styles), with nothing empty."""
     e = edits or {}
@@ -291,7 +306,8 @@ def clean(edits: dict | None) -> dict:
     if e.get("removals"):  # what was clicked and brushed away (shares of the picture), in order
         out["removals"] = [{"points": [[float(x), float(y)] for x, y in rm.get("points", [])][:40],
                             "strokes": [{"pts": [[float(x), float(y)] for x, y in st.get("pts", [])][:2000],
-                                         "r": float(st.get("r", 0.02))} for st in rm.get("strokes", [])][:200]}
+                                         "r": float(st.get("r", 0.02))} for st in rm.get("strokes", [])][:200],
+                            **_fill(rm.get("fill"))}
                            for rm in e["removals"] if rm.get("points") or rm.get("strokes")][:30]
     bg = e.get("background")
     if bg and isinstance(bg, dict) and bg.get("src"):  # a new background behind the player (see backgrounds.py)

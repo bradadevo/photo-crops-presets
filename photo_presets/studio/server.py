@@ -40,7 +40,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import brand, deliver, edits, engine, enlarge, pipeline, players, presets, reel, timing, poster
+from photo_presets import brand, deliver, edits, engine, enlarge, pipeline, players, presets, reel, retouch, timing, poster
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
 
@@ -1338,6 +1338,50 @@ async def remove_from_looks(sid: int, req: Request):
             with S.lock:
                 o.result, o.ver = with_it(o, rm), o.ver + 1
     return {"slots": [o.public() for o in targets], "future": S.future.get(s.photo, [])}
+
+
+@app.post("/api/slots/{sid}/remove/fill")
+async def removal_fill(sid: int, req: Request):
+    """{fill: {"try": n} | {"from": [dx, dy]} | null, index}: how one removal of this look is filled
+    (the last one unless index is given): another AI fill, or copied from another spot."""
+    s = S.slot(sid)
+    body = await req.json()
+    rms = list((s.result.edits or {}).get("removals") or [])
+    if not rms:
+        raise HTTPException(400, "Nothing removed from this look yet")
+    i = int(body.get("index", -1))
+    i = i if 0 <= i < len(rms) else len(rms) - 1
+    rm = {k: v for k, v in rms[i].items() if k != "fill"}
+    if body.get("fill"):
+        rm["fill"] = body["fill"]
+    rms[i] = rm
+    e = edits.clean({**(s.result.edits or {}), "removals": rms})
+    new = dataclasses.replace(s.result, edits=e)
+    await asyncio.wrap_future(W.submit(FIX, lambda: E.finished(new, texts=False)))  # (the slow part, before it shows)
+    async with s.edit_lock:
+        with S.lock:
+            s.result, s.ver = dataclasses.replace(s.result, edits=e), s.ver + 1
+    return {**s.public(), "fills": retouch.FILLS}
+
+
+@app.get("/api/slots/{sid}/remove/mask/{ver}.png")
+async def removal_mask_png(sid: int, ver: int, index: int = -1):
+    """The area one removal took (the last by default), white on clear, at the look's size."""
+    s = S.slot(sid)
+    rms = (s.result.edits or {}).get("removals") or []
+    if not rms:
+        raise HTTPException(404, "Nothing removed")
+    rm = rms[index if 0 <= index < len(rms) else -1]
+    w, h = s.result.after.size
+
+    def make() -> bytes:
+        m = E.removal_mask(s.result, rm, h, w)
+        rgba = np.zeros((h, w, 4), np.uint8)
+        rgba[m] = (255, 255, 255, 255)
+        buf = io.BytesIO()
+        Image.fromarray(rgba, "RGBA").save(buf, "PNG")
+        return buf.getvalue()
+    return Response(await asyncio.wrap_future(W.submit(FIX, make)), media_type="image/png")
 
 
 @app.post("/api/photos/{pid}/future_removals")

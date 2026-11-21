@@ -1493,3 +1493,23 @@ textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; m
 .fixbar.toolbar.below { flex-wrap: wrap; justify-content: center; row-gap: 2px; max-width: calc(100% - 24px); width: max-content; }
 .fixbar.toolbar.below > * { flex-shrink: 0; }
 .viewer.tool-view { padding-bottom: 108px; }
+
+/* Remove, in three steps */
+.rm-steps { display: inline-flex; gap: 10px; padding: 0 6px; font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.rm-step { display: inline-flex; align-items: center; gap: 5px; }
+.rm-step i { font-style: normal; width: 17px; height: 17px; border-radius: 50%; display: inline-grid; place-items: center;
+  font-size: 10.5px; font-weight: 700; border: 1px solid var(--line-2); }
+.rm-step.on { color: var(--text); } .rm-step.on i { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rm-step.done i { background: var(--panel-2); color: var(--accent-2, #3fa9f5); }
+.rm-bar button small { color: var(--faint); margin-left: 4px; font-size: 11px; }
+.frame.tool-remove.mode-check, .frame.tool-remove.mode-copy { cursor: default; }
+.frame.tool-remove.mode-check #brush, .frame.tool-remove.mode-copy #brush { pointer-events: none; }
+.frame .rm-before { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; z-index: 4; pointer-events: none; }
+#rm-copy-cv { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; }
+.rm-dst { position: absolute; transform: translate(-50%, -50%); border: 1.5px dashed rgba(255, 255, 255, .85); border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); z-index: 5; pointer-events: none; }
+.rm-src { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid #fff; z-index: 6; cursor: grab;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(0, 0, 0, .4); background: rgba(63, 169, 245, .18); touch-action: none; }
+.rm-src::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; }
+.rm-src:active { cursor: grabbing; }
+#rm-hold.on { background: var(--accent); color: #fff; }

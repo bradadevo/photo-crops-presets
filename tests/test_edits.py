@@ -96,3 +96,19 @@ def test_white_balance_only_from_something_white_or_gray():
     kit = np.zeros((40, 40, 3), np.float32); kit[:] = (0.85, 0.82, 0.74)
     assert not edits.neutral_enough(navy, 0.5, 0.5)
     assert edits.neutral_enough(kit, 0.5, 0.5)
+
+
+def test_a_removal_can_be_filled_another_way_or_from_a_spot():
+    from photo_presets import edits as ed, retouch
+    rng = np.random.default_rng(3)
+    img = np.zeros((120, 160, 3), np.uint8); img[:, :80] = (40, 140, 40); img[:, 80:] = (120, 160, 230)
+    img = np.clip(img + rng.integers(-6, 7, img.shape), 0, 255).astype(np.uint8)
+    img[50:70, 30:50] = (250, 20, 20)  # a red thing on the green side
+    mask = np.zeros((120, 160), bool); mask[48:72, 28:52] = True
+    out, w = retouch.copy_from(img, mask, 0.0, 0.3)  # from the green below it
+    assert w.max() == 1.0 and abs(out[60, 40].astype(int) - (40, 140, 40)).max() < 25
+    out2, _ = retouch.fill(img, mask, variant=3)  # no AI: blended from around it
+    assert out2[60, 40, 0] < 120
+    assert ed.clean({"removals": [{"points": [[0.1, 0.1]], "fill": {"try": 5}}]})["removals"][0]["fill"] == {"try": 1}
+    assert ed.clean({"removals": [{"points": [[0.1, 0.1]], "fill": {"from": [0.2, -3]}}]})["removals"][0]["fill"] == {"from": [0.2, -1.0]}
+    assert "fill" not in ed.clean({"removals": [{"points": [[0.1, 0.1]], "fill": {"try": 0}}]})["removals"][0]
