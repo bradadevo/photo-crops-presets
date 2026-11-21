@@ -1479,3 +1479,8 @@ textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; m
 /* undo and redo on the picture's bar */
 .hist-btns { display: inline-flex; gap: 2px; }
 .hist-btns button[aria-disabled="true"] { opacity: .35; }
+
+/* crop bar: the crop's real size */
+.crop-px { font-size: 12px; color: var(--muted); padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.crop-px.ai { color: var(--accent-2, #3fa9f5); }
+.crop-px.tight { color: #f5b443; }

@@ -133,6 +133,15 @@ class Slot:
     error: str = ""
     future: Future | None = None
     edit_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    full: tuple | None = None  # the photo's own pixels (as framed), for the crop's real size
+
+    def full_size(self) -> tuple[int, int] | None:
+        if self.full is None and self.result is not None:
+            try:
+                self.full = E.prepared(self.result.source, self.result.crop).image.size
+            except Exception:
+                return None
+        return self.full
 
     def public(self) -> dict:
         pct = 0
@@ -1109,18 +1118,39 @@ async def slot_image(sid: int, ver: int, kind: str):
     return picture(data)
 
 
+ZOOM_CROP = 2160  # px: a crop zoomed into is shown at least this big (twice an Instagram post's width)
+
+
 def _zoomed(r: Result) -> tuple[bytes, bytes]:
     """The look and the photo at ZOOM px, for checking faces and focus (the AI
-    drawing is reused, so this is quick)."""
+    drawing is reused, so this is quick). A crop is made from as many of the photo's
+    own pixels as it has, and, when that is still small, enlarged by the AI detail
+    enlarger, as its export will be: what you check is what you get."""
     p = E.ready(r.source, r.crop, r.recipe)
     img = p.image.copy()
-    img.thumbnail((ZOOM, ZOOM))
+    c = (r.edits or {}).get("crop")
+    share = max(0.05, min(1.0, float(c[2]) - float(c[0]), float(c[3]) - float(c[1]))) if c else 1.0
+    img.thumbnail((min(max(img.size), round(ZOOM / share)),) * 2)
     after, _ = pipeline.render(img, r.recipe, E.library, p.scene, r.seed, E.drawings,
                                E.memo_key(r.source, r.crop, r.recipe, p.frame))
     if edits.edited(r.edits):
         after = pipeline.to_image(E.finalize(r, pipeline.to_array(after), texts=False))
         img = pipeline.to_image(edits.geometry(pipeline.to_array(img), r.edits))
+        if c and max(after.size) < ZOOM_CROP:  # a tight crop: enlarged as its export will be
+            k = ZOOM_CROP / max(after.size)
+            size = (round(after.width * k), round(after.height * k))
+            after = enlarge.fit_pil(after, size)
+            img = img.resize(size, Image.LANCZOS)
     return jpeg(after, quality=90), jpeg(img, quality=90)
+
+
+@app.get("/api/slots/{sid}/fullsize")
+async def full_size(sid: int):
+    """The photo's own pixels (as framed), asked for when you crop: the crop's real size, and whether
+    an export will need the AI detail enlarger."""
+    s = S.slot(sid)
+    size = await asyncio.to_thread(s.full_size)
+    return {"full": list(size) if size else None}
 
 
 @app.get("/img/zoom/{sid}/{ver}/{kind}.jpg")
@@ -2114,6 +2144,31 @@ def _free(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) != 0
 
 
+def _let_page_undo() -> None:
+    """⌘Z to the page (the app's own undo of your edits). pywebview's Mac window otherwise catches ⌘Z for
+    its text undo and the page never sees it (⇧⌘Z got through, so only redo worked)."""
+    try:
+        import AppKit
+        import objc
+        from webview.platforms import cocoa
+        host = cocoa.BrowserView.WebKitHost
+        if getattr(host, "_vs_undo", False):
+            return
+        original = host.keyDown_
+
+        def keyDown_(self, event):
+            cmd = event.modifierFlags() & AppKit.NSCommandKeyMask
+            if cmd and (event.charactersIgnoringModifiers() or "").lower() == "z":
+                objc.super(host, self).keyDown_(event)  # (to the web page: its keydown handles undo and redo)
+                return
+            original(self, event)
+
+        host.keyDown_ = keyDown_
+        host._vs_undo = True
+    except Exception:  # another pywebview: its own handling stays
+        pass
+
+
 def _window(url: str) -> None:
     """VS Digital Pro in its own Mac window, named and with its icon in the Dock."""
     import webview
@@ -2128,6 +2183,7 @@ def _window(url: str) -> None:
                 NSImage.alloc().initWithContentsOfFile_(str(icon)))
     except Exception:
         pass
+    _let_page_undo()
     win = webview.create_window("VS Digital Pro", url, width=1480, height=920, min_size=(980, 620),
                                 background_color="#0b0c0e", text_select=False)
     win.events.closed += _shut_down  # closing the window quits the whole app, engine included

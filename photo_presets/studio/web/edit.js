@@ -373,7 +373,8 @@ function renderEdit(cur) {
     ${design ? `<div class="working">${parts[design]}</div>` : ""}
     ${group("light", "Light", SLIDERS.light.map(sliderRow).join(""))}
     ${group("color", "Color", SLIDERS.color.map(sliderRow).join(""))}
-    ${group("look", "The look", SLIDERS.look.map(sliderRow).join("") + `
+    ${group("look", "The look", SLIDERS.look.filter(([k]) => k !== "strength" || cur.look !== "Original").map(sliderRow).join("")
+       + (cur.look === "Original" ? `<p class="notes">Look strength shows once a look is on this photo (Original is the photo itself, so there's nothing to fade).</p>` : "") + `
       <label class="toggle"><input type="checkbox" id="e-fill" ${a.auto_fill ? "checked" : ""}><span><b>Auto fill light</b><small>Lifts a backlit or shaded player</small></span></label>`)}
     ${advanced}
     ${Object.entries(parts).filter(([k, html]) => k !== design && html).map(([, html]) => html).join("")}
@@ -1189,6 +1190,26 @@ function coverScale(w, h, deg) {
   const t = Math.abs(deg) * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
   return Math.max((w * c + h * s) / w, (w * s + h * c) / h);
 }
+/* The crop's real size (the photo's own pixels), and what an Instagram export does with it */
+const fullSizes = {};
+async function cropPixels(cur, box) {
+  const el = $("#c-px");
+  if (!el) return;
+  let full = fullSizes[cur.id];
+  if (!full) {
+    el.textContent = "";
+    try { full = fullSizes[cur.id] = (await api(`/api/slots/${cur.id}/fullsize`)).full; } catch { return; }
+    if (!full) return;
+  }
+  const w = Math.round((box[2] - box[0]) * full[0]), h = Math.round((box[3] - box[1]) * full[1]);
+  const grow = 1080 / w, size = `${w.toLocaleString()} × ${h.toLocaleString()} px`;
+  el.classList.toggle("ai", grow >= 1.15);
+  el.classList.toggle("tight", grow > 4);
+  el.textContent = grow >= 1.15 ? `✦ ${size} · AI enlarger sharpens it ${grow.toFixed(1)}x for Instagram` : `${size} · sharp for Instagram as it is`;
+  el.title = grow > 4 ? "Very tight: even with the AI enlarger it will look soft on Instagram. Widen the crop a little."
+    : grow >= 1.15 ? "Fewer pixels than an Instagram post (1,080 wide): the export enlarges it with the AI detail enlarger. Zoom in (Z) after Apply to see it."
+    : "More pixels than an Instagram post needs (1,080 wide): no enlarging.";
+}
 function renderCrop(v, cur) {
   const W = cur.base_width, H = cur.base_height;
   const d = st.cropDraft ||= { angle: cur.edits?.angle || 0, box: cur.edits?.crop ? [...cur.edits.crop] : [0, 0, 1, 1], aspect: "free" };
@@ -1201,7 +1222,8 @@ function renderCrop(v, cur) {
       <span class="angle">${icon("level")}<input type="range" id="c-angle" min="-20" max="20" step="0.1" value="${d.angle}"><output id="c-angle-v">${(+d.angle).toFixed(1)}°</output></span>
       <button id="c-auto" title="Level it from the field lines and posts">Auto</button>
       <span class="sep"></span>
-      <button id="c-reset">Reset</button><button id="c-cancel">Cancel</button><button id="c-apply" class="on">Apply</button></div>`;
+      <button id="c-reset">Reset</button><button id="c-cancel">Cancel</button><button id="c-apply" class="on">Apply</button>
+      <span class="crop-px" id="c-px"></span></div>`;
   paintIcons(v);
   fitFrame(W, H);
   const img = $("#crop-img"), box = $("#crop-box"), f = $("#frame");
@@ -1212,6 +1234,7 @@ function renderCrop(v, cur) {
     $("#c-angle-v").textContent = `${(+d.angle).toFixed(1)}°`;
     $("#c-angle").value = d.angle;
     $$("#c-aspect button").forEach((b) => b.classList.toggle("on", b.dataset.v === d.aspect));
+    cropPixels(cur, d.box);
   };
   const ratio = () => ({ free: null, orig: W / H, "4:5": 4 / 5, "1:1": 1, "9:16": 9 / 16, "16:9": 16 / 9 })[d.aspect];
   const fitAspect = () => {
