@@ -58,7 +58,8 @@ if STATE:  # a test copy: its own presets and their pictures too (never your rea
 SESSION = (STATE or CONFIG) / "studio-session.json"  # the photos you are working on, kept for next time
 # the looks made, with their edits, picks and stars, kept for next time (pictures at preview size)
 LOOKS = (STATE / "looks") if STATE else Path("~/.cache/photo-crops-presets/session-looks").expanduser()
-DEFAULT_EXPORT = str(Path.home() / "Pictures" / "Photo Presets")
+# (a test copy exports into its own folder: never into your real Pictures)
+DEFAULT_EXPORT = str(STATE / "Exports") if STATE else str(Path.home() / "Pictures" / "Photo Presets")
 THUMB, VIEW, SWATCH, TRY = 560, 1800, 420, 1400  # px: the strip and grid, a photo, a look's card, trying a look on
 ZOOM = 3600  # px: a look made again, sharper, when you zoom in
 CROPS = ["none", "wide", "crop", "face"]
