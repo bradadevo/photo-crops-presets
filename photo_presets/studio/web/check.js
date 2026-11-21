@@ -95,8 +95,8 @@ async function ckAdded(ids) {
 const CK_USES = [
   ["info", "A clip or photo came out wrong", "Blurry, dark, shaky, grainy or washed out, and you want to know why."],
   ["wand", "Fix something you already shot", "Brighter, steadier, cleaner or sharper. It makes a new copy; your original is never touched."],
-  ["target", "Shoot better next game", "The exact camera settings to change, and why, based on what this file shows."],
-  ["compare", "Compare cameras, settings or games", "Two or more files side by side, best and weakest marked on every line."],
+  ["target", "Shoot better next time", "The exact camera settings to change, and why, based on what this file shows."],
+  ["compare", "Compare cameras, settings or events", "Two or more files side by side, best and weakest marked on every line."],
   ["export", "Keep or share the notes", "A Word report (opens in Google Drive too) and a spreadsheet."],
 ];
 const CK_STEPS = [

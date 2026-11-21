@@ -134,7 +134,7 @@ function renderCull() {
     cu.built = true;
     box.innerHTML = `<aside class="cu-side" id="cu-side"></aside>
       <section class="cu-main"><div class="cu-bar" id="cu-bar"></div><div class="cu-tl" id="cu-tl" title="The whole event over time: tall bars are bursts of shooting (big moments). Click to jump there."></div>
-        <div class="cu-body" id="cu-body"><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div><div class="cu-sprayf" id="cu-sprayf" hidden></div><div class="cu-pplf" id="cu-pplf" hidden></div></div>
+        <div class="cu-body" id="cu-body"><div class="cu-loading" id="cu-loading"><span class="spin"></span>Opening your events…</div><div class="cu-grid" id="cu-grid"><div class="cu-space" id="cu-space"></div></div><div class="cu-one" id="cu-one" hidden></div><div class="cu-sprayf" id="cu-sprayf" hidden></div><div class="cu-pplf" id="cu-pplf" hidden></div></div>
         <div class="cu-keys" id="cu-keys"></div></section>
       <aside class="cu-info" id="cu-info"></aside>
       <div class="cu-drag" data-edge="l" title="Drag to resize · double-click for the usual size"></div><div class="cu-drag" data-edge="r" title="Drag to resize · double-click for the usual size"></div>`;
@@ -151,7 +151,7 @@ function renderCull() {
     cu.shootSig = String(cu.sel);
     await cuPhotos(full);
     cuSort(); cuPaintAll(); cuPoll();
-  });
+  }).finally(() => $("#cu-loading")?.remove());
 }
 // -- elastic panels: drag either edge; they remember their size and give way on a small window ----------
 const CU_W = { l: [180, 420, 250], r: [220, 520, 300] };  // smallest, largest, usual

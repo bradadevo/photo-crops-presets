@@ -322,7 +322,7 @@ function renderEdit(cur) {
   const pane = $("#pane-edit");
   const val = (k) => k === "strength" ? Math.round(a.strength * 100) : a[k];
   const sliderRow = ([k, label, min, max, stp, unit, cls]) => `<div class="slider"><label for="e-${k}" title="${esc(SLIDER_TIPS[k])} · double-click the slider to reset">${label}</label>
-    <output for="e-${k}">${fmtVal(k, val(k), unit)}</output><input type="range" class="${cls || ""}" id="e-${k}" data-k="${k}" data-unit="${unit || ""}" data-def="${ADJ_DEFAULT[k] ?? 0}" min="${min}" max="${max}" step="${stp}" value="${val(k)}"></div>`;
+    <output for="e-${k}">${fmtVal(k, val(k), unit)}</output><input type="range" class="${cls || ""}${min < 0 && max > 0 ? " has-zero" : ""}" ${min < 0 && max > 0 ? `style="--zp:${(-min / (max - min)).toFixed(4)}"` : ""} title="Double-click to reset" id="e-${k}" data-k="${k}" data-unit="${unit || ""}" data-def="${ADJ_DEFAULT[k] ?? 0}" min="${min}" max="${max}" step="${stp}" value="${val(k)}"></div>`;
   const tool = (id, ic, label, tip) => `<button class="tool${st.tool === id || (id === "cutout" && st.fixing) ? " on" : ""}" data-tool="${id}" title="${esc(tip)}">${icon(ic)}<span>${label}</span></button>`;
   // what you are working on (a poster, text, a logo, a part) sits right under the tools;
   // the light and color sliders fold away meanwhile (open them any time)

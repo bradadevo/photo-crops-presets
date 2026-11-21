@@ -448,7 +448,7 @@ function renderViewer() {
     if (viewerSig === "hero") return;
     viewerSig = "hero";
     v.innerHTML = `<div class="hero"><div class="glyph">${icon("image")}</div>
-      <h1>Start with your game photos</h1>
+      <h1>Start with your event photos</h1>
       <p>Drop them anywhere on this window, paste with <kbd>⌘V</kbd>, or choose them. JPG, HEIC and RAW all work, and your originals are never changed.</p>
       <div class="row"><button class="btn primary big" data-add="files">${icon("plus")} Add photos…</button><button class="btn big" data-add="folder">${icon("folder")} Add a folder…</button></div>
       <div class="steps"><span><b>1</b>Add photos</span><span><b>2</b>Pick looks</span><span><b>3</b>Edit the best</span><span><b>4</b>Share</span></div></div>`;
@@ -1136,7 +1136,11 @@ function renderMake() {
   const looks = pickedLooks();
   const many = st.photos.length > 1;
   const photos = st.scope === "all" ? st.photos.length : st.scope === "chosen" ? st.chosen.size : 1;
-  const n = looks.length * photos;
+  const tPhotos = st.scope === "all" ? st.photos : st.scope === "chosen" ? st.photos.filter((p) => st.chosen.has(p.id)) : st.photos.filter((p) => p.id === st.activePhoto);
+  const madeAll = (l) => tPhotos.length > 0 && tPhotos.every((p) => st.slots.some((s) => s.photo === p.id && s.look === l.name && s.crop === st.crop && s.state !== "failed"));
+  const fresh = looks.filter((l) => !madeAll(l)), madeN = looks.length - fresh.length, again = looks.length > 0 && !fresh.length;
+  const send = again ? looks : fresh;  // (looks already made aren't made twice by accident)
+  const n = send.length * photos;
   const can = st.photos.length && n;
   const targets = st.scope === "all" ? st.photos : st.scope === "chosen" ? st.photos.filter((p) => st.chosen.has(p.id)) : st.photos.filter((p) => p.id === st.activePhoto);
   const edited = targets.some((p) => p.edited);
@@ -1151,9 +1155,9 @@ function renderMake() {
       <button data-v="1" class="${st.fromEdits ? "on" : ""}" title="The looks go on top of your edits (light, color, crop, removals): darken the player, then add Stadium Lights for a night shot">My edit</button>
       <button data-v="0" class="${st.fromEdits ? "" : "on"}" title="The looks start from the photo as shot, your edits left out">Original photo</button></div></div>
       <p class="crop-hint">${st.fromEdits ? (photos > 1 ? "Photos you edited keep your edits under the look." : "The look goes on top of your edits.") : "Your edits are left out of these looks."}</p>` : ""}
-    <div class="summary">${looks.length ? `<span><b>${plural(looks.length, "look")}</b> picked · <button id="m-clear">Clear</button></span><span>${n > 0 ? say(estimate(looks, photos)) : ""}</span>`
+    <div class="summary">${looks.length ? `<span><b>${plural(looks.length, "look")}</b> picked${madeN ? ` · ${madeN} already made` : ""} · <button id="m-clear">Clear</button></span><span>${n > 0 && !again ? say(estimate(send, photos)) : ""}</span>`
       : `<span>Tap looks to pick them</span>`}</div>
-    <div class="inline"><button class="btn primary big wide" id="m-go" ${off(!can, !st.photos.length ? "Add a photo first: drop one on the window, paste it, or press + at the top left." : "Tap one or more looks above to pick them, then Make.")}>${n ? `Make ${plural(n, "look")}` : "Make looks"}</button>
+    <div class="inline"><button class="btn ${again ? "" : "primary "}big wide" id="m-go" ${again ? 'title="These looks are already made for this framing. This makes them again, as new copies."' : ""} ${off(!can, !st.photos.length ? "Add a photo first: drop one on the window, paste it, or press + at the top left." : "Tap one or more looks above to pick them, then Make.")}>${again ? "Make again" : n ? `Make ${plural(n, madeN ? "new look" : "look", madeN ? "new looks" : "looks")}` : "Make looks"}</button>
       <button class="btn big" id="m-random" title="Surprise me: six random looks, to discover new styles" ${off(!st.photos.length, "Add a photo first: drop one on the window, paste it, or press + at the top left.")}>${icon("dice")}</button></div>`;
   paintIcons(box);
   box.querySelectorAll("#m-scope button").forEach((b) => b.onclick = () => { st.scope = b.dataset.v; renderMake(); });
@@ -1166,7 +1170,7 @@ function renderMake() {
     st.fromEdits = b.dataset.v === "1"; store.set("fromEdits", st.fromEdits); renderMake(); renderLooks(true);
   });
   $("#m-clear", box)?.addEventListener("click", () => { st.picked.clear(); store.set("looks", []); renderLooks(); renderMake(); });
-  $("#m-go", box).onclick = () => make({ looks: looks.map((l) => l.name) });
+  $("#m-go", box).onclick = () => make({ looks: send.map((l) => l.name) });
   $("#m-random", box).onclick = () => make({ random: 6 });
 }
 
@@ -1350,7 +1354,11 @@ async function addPhotos(kind) {
 }
 async function upload(files) {
   const PHOTO = /\.(jpe?g|png|heic|heif|webp|tiff?|arw|dng|cr2|cr3|nef|raf|orf|rw2)$/i;
+  const all = files;
   files = files.filter((f) => f.type.startsWith("image/") || PHOTO.test(f.name));
+  const left = all.filter((f) => !files.includes(f));
+  if (left.length) toast(left.length === 1 ? `“${left[0].name || "That file"}” isn't a photo, so it wasn't added` : `${left.length} files aren't photos, so they weren't added`,
+    { bad: true, small: "JPG, HEIC, PNG, TIFF and RAW work. Clips go in the Check tab." });
   if (!files.length) return;
   const fd = new FormData();
   const now = new Date(), two = (n) => String(n).padStart(2, "0");
@@ -1372,6 +1380,7 @@ async function upload(files) {
       t.update(`Adding photos · ${Math.min(i + 6, names.length)} of ${names.length}`, "", Math.min(i + 6, names.length) / names.length);
     }
     t.close(); afterAdd(added);
+    if (added.length < names.length) toast(`${names.length - added.length} of ${names.length} weren't added`, { small: added.length ? "They're already in the app, or couldn't be read" : "Already in the app, or the files couldn't be read" });
   } catch { t.close(); if (added.length) afterAdd(added); }
   return added;
 }
