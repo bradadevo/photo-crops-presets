@@ -170,6 +170,7 @@ function renderCkFoot() {
   const picked = [...ck.picked].filter((id) => ckFile(id)?.state === "done");
   const forExport = picked.length ? picked : done.map((f) => f.id);
   foot.innerHTML = ck.files.length ? `
+    <button class="btn${ck.view === "summary" ? " primary" : ""}" id="ck-summary" ${off(!done.length, "Nothing checked yet: the summary appears once a file has been checked.")} title="What to fix now and change next time, across ${picked.length >= 2 ? "the ticked files" : "every checked file"}">${icon("list")} Recommendations</button>
     <button class="btn${ck.view === "compare" ? " primary" : ""}" id="ck-compare" ${off(picked.length < 2, "Tick two or more checked files (the boxes on the left), then compare them side by side.")}>${icon("compare")} Compare${picked.length ? ` (${picked.length})` : ""}</button>
     <div class="menu-wrap"><button class="btn" id="ck-export" ${off(!forExport.length, "Nothing checked yet to export.")}>${icon("export")} Export ${picked.length ? `(${picked.length})` : "all"}</button>
       <div class="menu up" id="ck-export-menu" role="menu" hidden>
@@ -183,6 +184,13 @@ function renderCkFoot() {
     ck.view = ck.view === "compare" ? "file" : "compare"; ck.guide = false;
     $("#check").classList.toggle("comparing", ck.view === "compare");
     if (ck.view === "compare") renderCompare(); else { ck.mainSig = ""; renderCkMain(); renderCkSide(); }
+    renderCkFiles();
+  });
+  $("#ck-summary")?.addEventListener("click", () => {
+    if (!done.length) return;
+    ck.view = ck.view === "summary" ? "file" : "summary"; ck.guide = false;
+    $("#check").classList.toggle("comparing", ck.view === "summary");
+    if (ck.view === "summary") renderCkSummary(); else { ck.mainSig = ""; renderCkMain(); renderCkSide(); }
     renderCkFiles();
   });
   $("#ck-export")?.addEventListener("click", (e) => { e.stopPropagation(); if (forExport.length) $("#ck-export-menu").hidden = !$("#ck-export-menu").hidden; });
@@ -207,6 +215,41 @@ function ckViewUrl(d, fixed) {
 const ckSettings = (d) => Object.fromEntries(d.fixes.map((f) => [f.id, { on: !!f.on, value: f.value }]));
 const anyFixOn = (d) => d.fixes?.some((f) => f.on && f.value);
 
+/* In short: the file's verdict and its few most useful actions, in order (now, next time, a habit) */
+const REC_WHEN = { now: "Fix now", next: "Next time", habit: "Habit" };
+function ckShort(r) {
+  if (!r) return "";
+  return `<section class="ck-card ck-short ${r.level}"><h3>In short <span class="ck-verdict">${esc(r.verdict)}</span></h3>
+    ${r.items.length ? `<ol class="ck-recs">${r.items.map((x) => `<li class="${x.when}"><span class="when">${REC_WHEN[x.when]}</span><span><b>${esc(x.title.replace(/^(Fix this file|Next time): /, ""))}</b>${x.why ? `<small>${esc(x.why)}</small>` : ""}</span></li>`).join("")}</ol>
+      ${r.more ? `<p class="faint">${plural(r.more, "more recommendation")} below.</p>` : ""}` : `<p class="muted">Nothing to change: the settings were right and nothing needs fixing.</p>`}</section>`;
+}
+
+/* The recommendations across the ticked files (or every checked file) */
+async function renderCkSummary() {
+  const main = $("#ck-main");
+  const picked = [...ck.picked].filter((id) => ckFile(id)?.state === "done");
+  const ids = picked.length >= 2 ? picked : [];
+  main.innerHTML = `<div class="ck-hello"><div class="spin" style="width:24px;height:24px"></div></div>`;
+  $("#ck-side").innerHTML = "";
+  const s = await api("/api/check/summary", { ids });
+  const link = (nm) => `<button class="ck-link" data-goto="${s.ids[nm]}">${esc(nm)}</button>`;
+  const group = (cls, title, names) => names.length ? `<div class="ck-sum-group ${cls}"><b>${names.length}</b><span>${title}</span><div>${names.map(link).join("")}</div></div>` : "";
+  main.innerHTML = `<header class="ck-title"><div><h1>Recommendations</h1><p>${ids.length ? `The ${plural(ids.length, "ticked file")}` : `All ${plural(s.count, "checked file")}`} · what to fix now and what to change next time</p></div>
+      <div class="ck-acts"><button class="btn" id="ck-sum-export">${icon("export")} Word report</button><button class="btn ghost" id="ck-sum-back">Done</button></div></header>
+    <section class="ck-card ck-short"><h3>In short</h3><p class="ck-headline">${esc(s.headline)}</p>
+      <div class="ck-sum-groups">${group("good", "ready to use as they are", s.good)}${group("fix", "good with a quick fix", s.fix)}${group("attention", "need attention", s.attention)}</div></section>
+    ${s.changes.length ? `<section class="ck-card"><h3>Change next time</h3><table class="ck-table"><thead><tr><th>Setting</th><th>Change to</th><th>Files</th><th>Why</th></tr></thead>
+      <tbody>${s.changes.map((c) => `<tr><td><b>${esc(c.setting)}</b></td><td>${esc(c.change)}</td><td title="${esc(c.files.join(", "))}">${c.count} of ${s.count}</td><td class="muted">${esc(c.why)}</td></tr>`).join("")}</tbody></table></section>` : ""}
+    ${s.fixes.length ? `<section class="ck-card"><h3>Fixes that help most</h3><ul class="ck-find">${s.fixes.map((x) => `<li class="info">${esc(x.label)} <span class="faint">· ${x.count} of ${s.count} files</span></li>`).join("")}</ul><p class="faint">Open a file to turn its fixes on or off and make a fixed copy.</p></section>` : ""}
+    ${s.worst.length ? `<section class="ck-card"><h3>Look at these first</h3><ul class="ck-find">${s.worst.map((w) => `<li class="warn">${link(w.name)} <span class="faint">· ${plural(w.problems, "thing")} to improve</span></li>`).join("")}</ul></section>` : ""}
+    ${s.habits.length ? `<section class="ck-card"><h3>Habits that help</h3><ol class="ck-habits">${s.habits.map((h) => `<li>${esc(h.text)}</li>`).join("")}</ol></section>` : ""}`;
+  paintIcons(main);
+  const back = () => { ck.view = "file"; $("#check").classList.remove("comparing"); ck.mainSig = ""; renderCkFiles(); };
+  $("#ck-sum-back").onclick = () => { back(); ckLoad(ck.sel || Object.values(s.ids)[0]); };
+  $("#ck-sum-export").onclick = () => ckExport(ids.length ? ids : Object.values(s.ids), "docx");
+  main.querySelectorAll("[data-goto]").forEach((b) => b.onclick = () => { back(); ckLoad(+b.dataset.goto); });
+}
+
 function renderCkMain() {
   const main = $("#ck-main");
   if (!main || ck.view !== "file") return;
@@ -225,6 +268,7 @@ function renderCkMain() {
       <div class="ck-acts"><button class="btn ghost" id="ck-open" title="Open it in ${isVid ? "QuickTime" : "Preview"}">${icon("image")} Open</button>
         <button class="btn ghost" id="ck-reveal">${icon("folder")} Show in Finder</button>
         <button class="icon-btn" id="ck-remove" title="Take it out of this list (the file stays where it is)">${icon("x")}</button></div></header>
+    ${ckShort(d.recommend)}
     <div class="ck-viewer" id="ck-viewer"></div>
     ${isVid ? `<div class="ck-timeline" id="ck-timeline" title="Click anywhere to see that moment">${d.moments.map((m, i) => `<span class="mo" data-mo="${i}" style="left:${m.start / d.duration * 100}%;width:${Math.max(0.6, (m.end - m.start) / d.duration * 100)}%;background:${MOMENT_COLOR[m.kind]}" title="${esc(m.clock)} · ${esc(m.label)}"></span>`).join("")}<span class="head" id="ck-head" style="left:${ck.t / d.duration * 100}%"></span></div>
       <div class="ck-legend">${[...new Set(d.moments.map((m) => m.kind))].map((k) => `<span><i style="background:${MOMENT_COLOR[k]}"></i>${esc(d.moments.find((m) => m.kind === k).label)}</span>`).join("")}${d.moments.length ? "" : `<span class="faint">No problem moments found</span>`}</div>` : ""}

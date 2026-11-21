@@ -21,7 +21,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from PIL import Image
 
-from photo_presets.clipcheck import analyze, fixes, moments, report, still
+from photo_presets.clipcheck import analyze, fixes, moments, recommend, report, still
 
 router = APIRouter()
 VERSION = 3  # bump when the measurements change, so old results are measured again
@@ -170,6 +170,14 @@ def _settings(e: dict) -> dict:
     return {**sug, **(e.get("fixes") or {})}
 
 
+def _rec_input(e: dict) -> dict:
+    """What the recommendations are made from: the findings, the fixes turned on, the settings and habits."""
+    r, on = e["result"], _settings(e)
+    return {"name": Path(e["path"]).name, "kind": r.kind, "findings": r.advice.findings,
+            "fixes_on": [f for f in e.get("suggested", []) if on.get(f["id"], {}).get("on")],
+            "settings": [list(s) for s in r.advice.settings], "habits": r.advice.habits}
+
+
 def _row(e: dict) -> dict:
     out = {"id": e["id"], "name": Path(e["path"]).name, "path": e["path"], "kind": e["kind"], "state": e["state"],
            "error": e.get("error")}
@@ -215,6 +223,22 @@ def detail(fid: int):
     else:
         out["focus_spot"] = list(r.stats.focus_spot)
     out["estimate"] = fixes.estimate_seconds(r.kind, settings, r.info)
+    x = _rec_input(e)
+    out["recommend"] = recommend.for_file(x["findings"], x["fixes_on"], x["settings"], x["habits"])
+    return out
+
+
+@router.post("/api/check/summary")
+async def summary(req: Request):
+    """The recommendations across these files (all checked files when none are given)."""
+    ids = (await req.json()).get("ids") or []
+    F.load()
+    with F.lock:
+        es = [e for e in (F.items.values() if not ids else (F.items.get(i) for i in ids)) if e and e["state"] == "done"]
+        rows = [{**_rec_input(e), "id": e["id"]} for e in sorted(es, key=lambda x: x["added"])]
+    out = recommend.across(rows)
+    ids_by_name = {r["name"]: r["id"] for r in rows}
+    out["ids"] = ids_by_name
     return out
 
 
@@ -532,17 +556,20 @@ async def export(req: Request):
     stem = Path(es[0]["path"]).stem + (f" and {len(es) - 1} more" if len(es) > 1 else "")
     name = f"{stem} - {time.strftime('%Y-%m-%d %H%M')}"
     results = [e["result"] for e in es]
+    together = recommend.across([_rec_input(e) for e in es])
     extras = {}
     for e in es:
         on = _settings(e)
         extras[e["path"]] = {"moments": [{"clock": moments.clock(m.start), "label": m.label, "detail": m.detail}
                                          for m in e.get("moments", [])],
                              "fixes": [f for f in e.get("suggested", []) if on.get(f["id"], {}).get("on")]}
+        x = _rec_input(e)
+        extras[e["path"]]["recommend"] = recommend.for_file(x["findings"], x["fixes_on"], x["settings"], x["habits"])
     out = []
     what = body.get("format", "both")
     if what in ("docx", "both"):
         out.append(str(report.write_docx(results, folder / f"{name}.docx", compare=len(es) > 1 and body.get("compare", True),
-                                         extras=extras)))
+                                         extras=extras, summary=together if len(es) > 1 else None)))
     if what in ("csv", "both"):
         out.append(str(report.write_csv(results, folder / f"{name}.csv")))
     return {"files": out, "folder": str(folder)}

@@ -32,7 +32,7 @@ def _bullets(doc, items: list[str], style: str = "List Bullet") -> None:
 
 
 def write_docx(results: list, path: Path, compare: bool = False, title: str = "Shot check",
-               extras: dict | None = None) -> Path:
+               extras: dict | None = None, summary: dict | None = None) -> Path:
     doc = Document()
     doc.styles["Normal"].font.name = "Arial"
     doc.styles["Normal"].font.size = Pt(10.5)
@@ -44,6 +44,26 @@ def write_docx(results: list, path: Path, compare: bool = False, title: str = "S
     doc.add_paragraph("Settings come from the camera's own data in each file; sharpness, grain, exposure and "
                       "panning are measured from the pixels. Sharpness and grain numbers compare best between "
                       "files from the same camera.")
+
+    if summary:  # the recommendations across every file, first
+        doc.add_heading("Recommendations summary", 1)
+        doc.add_paragraph(summary["headline"]).runs[0].bold = True
+        if summary["changes"]:
+            doc.add_heading("Change next time", 2)
+            _table(doc, [["Setting", "Change to", "Files", "Why"]] + [[c["setting"], c["change"], f"{c['count']} of {summary['count']}", c["why"]]
+                                                                     for c in summary["changes"]])
+        if summary["fixes"]:
+            doc.add_heading("Fixes that help most", 2)
+            _bullets(doc, [f"{x['label']} ({x['count']} of {summary['count']} files)" for x in summary["fixes"]])
+        if summary["worst"]:
+            doc.add_heading("Look at these first", 2)
+            _bullets(doc, [f"{w['name']}: {w['problems']} thing{'s' * (w['problems'] != 1)} to improve" for w in summary["worst"]])
+        if summary["good"]:
+            doc.add_heading("Ready to use as they are", 2)
+            _bullets(doc, summary["good"])
+        if summary["habits"]:
+            doc.add_heading("Habits that help", 2)
+            _bullets(doc, [h["text"] for h in summary["habits"]], "List Number")
 
     if compare:
         for kind in ("video", "photo"):
@@ -62,6 +82,11 @@ def write_docx(results: list, path: Path, compare: bool = False, title: str = "S
             doc.add_paragraph(f"Could not be analyzed: {r.error}")
             continue
         doc.add_paragraph(str(Path(r.path).parent)).runs[0].italic = True
+        rec = (extras or {}).get(r.path, {}).get("recommend")
+        if rec:
+            doc.add_heading("In short", 2)
+            doc.add_paragraph(rec["verdict"]).runs[0].bold = True
+            _bullets(doc, [x["title"] + (f": {x['why']}" if x["why"] else "") for x in rec["items"]], "List Number")
         doc.add_heading("Summary", 2)
         _bullets(doc, r.advice.findings)
         more = (extras or {}).get(r.path, {})

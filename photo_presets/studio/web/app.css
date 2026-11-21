@@ -1454,3 +1454,24 @@ textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; m
 /* a piece's six styles: two even rows, never squeezed together */
 .piece-props [data-prop-style] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; width: 100%; }
 .piece-props [data-prop-style] button { padding: 5px 4px; }
+
+/* Check: the recommendations in short */
+.ck-short h3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ck-verdict { font: 600 12px/1 var(--font); text-transform: none; letter-spacing: 0; padding: 5px 9px; border-radius: 999px; background: var(--panel-2); color: var(--text); }
+.ck-short.good .ck-verdict { background: rgba(52, 199, 123, .16); color: #5fd99a; }
+.ck-short.fix .ck-verdict { background: rgba(63, 169, 245, .16); color: var(--accent-2, #3fa9f5); }
+.ck-short.attention .ck-verdict { background: rgba(245, 166, 35, .16); color: #f5b443; }
+.ck-recs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ck-recs li { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: baseline; }
+.ck-recs .when { font: 600 10.5px/1.4 var(--font-tech, inherit); text-transform: uppercase; letter-spacing: .1em; color: var(--faint); }
+.ck-recs li.now .when { color: var(--accent-2, #3fa9f5); }
+.ck-recs li.next .when { color: #f5b443; }
+.ck-recs small { display: block; color: var(--muted); margin-top: 2px; }
+.ck-headline { font-size: 15px; margin: 0 0 12px; }
+.ck-sum-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.ck-sum-group { padding: 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.ck-sum-group > b { font-size: 22px; margin-right: 6px; }
+.ck-sum-group.good > b { color: #5fd99a; } .ck-sum-group.fix > b { color: var(--accent-2, #3fa9f5); } .ck-sum-group.attention > b { color: #f5b443; }
+.ck-sum-group > div { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
+.ck-link { background: none; border: 0; padding: 0; color: var(--text); text-decoration: underline; text-decoration-color: var(--line-2); cursor: pointer; font: inherit; font-size: 12.5px; }
+.ck-link:hover { color: var(--accent-2, #3fa9f5); }

@@ -106,3 +106,28 @@ def test_the_check_tab_checks_a_photo_compares_and_exports(tmp_path, monkeypatch
         import time; time.sleep(0.1)
     assert job["state"] == "done" and str(tmp_path) in r["dest"]
     assert json.loads((tmp_path / "check.json").read_text())[0]["fixed"]
+
+
+def test_recommendations_in_short_and_across_files():
+    from photo_presets.clipcheck import recommend
+    fine = recommend.for_file(["No problems found.", "Focus: on the eyes"], [], [], [])
+    assert fine["level"] == "good" and fine["items"] == []
+    fix = {"label": "Recover bright areas", "why": "The sky is pure white in places."}
+    shutter = ["Shutter speed", "1/1000 or faster", "Freezes running players."]
+    iso = ["ISO", "Auto, up to 6400", "Keeps the shutter fast in shade."]
+    busy = recommend.for_file(["Motion blur on the player.", "Bright areas lost."], [fix], [shutter, iso], ["Half-press to focus.", "Shoot in bursts."])
+    assert busy["level"] == "attention"
+    assert [x["when"] for x in busy["items"]] == ["now", "next", "next", "habit"]  # fix now first, then next time, then one habit
+    assert busy["items"][0]["title"] == "Fix this file: Recover bright areas"
+    files = [
+        {"name": "a.mp4", "kind": "video", "findings": ["No problems found."], "fixes_on": [], "settings": [], "habits": []},
+        {"name": "b.mp4", "kind": "video", "findings": ["Motion blur."], "fixes_on": [fix], "settings": [shutter], "habits": ["Half-press to focus."]},
+        {"name": "c.mp4", "kind": "video", "findings": ["Motion blur.", "Too dark."], "fixes_on": [fix], "settings": [shutter, iso], "habits": []},
+    ]
+    s = recommend.across(files)
+    assert s["good"] == ["a.mp4"] and s["fix"] == ["b.mp4"] and s["attention"] == ["c.mp4"]
+    assert s["changes"][0]["setting"] == "Shutter speed" and s["changes"][0]["count"] == 2
+    assert s["fixes"][0] == {"label": "Recover bright areas", "count": 2}
+    assert s["worst"][0]["name"] == "c.mp4"
+    assert s["headline"].startswith("1 of 3 ready to use") and "shutter speed (2 of 3)" in s["headline"]
+    assert recommend.across([])["headline"] == "Nothing checked yet."
