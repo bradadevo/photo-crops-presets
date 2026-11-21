@@ -14,7 +14,7 @@ async function renderFindPick(v) {
   v.classList.remove("grid-mode", "survey-mode");
   v.innerHTML = `<div class="frame finding" id="frame"><div class="layer"><img class="after" src="/img/photo/${pid}/view.jpg" alt="${esc(p.name)}" draggable="false"></div>
       <div class="people" id="people"><span class="tag l"><span class="spin"></span> Finding everyone…</span></div></div>
-    <div class="fixbar toolbar"><span class="title"><b>Find a player</b><span>Click your player</span></span><span class="sep"></span>
+    <div class="fixbar toolbar below"><span class="title"><b>Find a player</b><span>Click your player</span></span><span class="sep"></span>
       <button id="find-cancel">Cancel</button></div>`;
   paintIcons(v);
   fitPhotoFrame();

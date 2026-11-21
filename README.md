@@ -336,6 +336,13 @@ picture, and plain rules.
 - **Add** clips and photos with **+** (they stay where they are) or drop them on
   the window. Videos take about a third of their length to check; photos a
   second or two. Results are kept, so a file is checked once.
+- **In short** at the top of each file: a verdict (ready to use, good with a
+  quick fix, or needs attention) and its few most useful recommendations in
+  order: fix now, change next time, one habit. **Recommendations** (under the
+  list) sums up the ticked files, or every checked one: how many are ready to
+  use, the changes that come up most (with how many files), the fixes that help
+  most and which files to look at first; the Word report starts with the same
+  summary.
 - **What's holding it back**, and for videos **when it happens**: a timeline of
   soft pans, shaky stretches, brightness jumps and too-dark or too-bright
   stretches; click one to see that frame, **Play this moment** to watch it.
