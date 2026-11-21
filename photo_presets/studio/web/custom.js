@@ -642,7 +642,7 @@ function pickPhotoForPoster(cur) {
   };
 }
 function pickLookForPoster(cur) {
-  const looks = st.looks.filter((l) => !l.design);
+  const looks = st.looks.filter((l) => !l.design && !l.own);
   const m = modal(`<header><h2>This poster with another look</h2><p class="notes" style="margin:4px 0 0">The same photo and poster; the look you pick on the photo.</p></header>
     <div class="body"><div class="team-pick">
       <button class="tp" data-swap-look="Original"><img src="/img/photo/${cur.photo}/thumb.jpg" alt=""><small>The photo as it is</small></button>

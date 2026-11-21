@@ -945,11 +945,21 @@ async def run(req: Request):
     else:
         saved = presets.load_all()
         names = [n for n in body.get("looks", []) if n in saved]
-        if not names:
+        want_original = "Original" in body.get("looks", [])
+        if not names and not want_original:
             raise HTTPException(400, "Choose at least one look")
-        jobs = [(p, Job(source[p], _for_team(dict(saved[n], name=n), n, run_tag), 0)) for n in names for p in pids]
+        slots = []
+        if want_original:  # the photo as shot, to edit by hand: one per photo and framing, reused when it's there
+            for p in pids:
+                with S.lock:
+                    have = next((s.id for s in S.slots.values() if s.photo == p and s.look == "Original"
+                                 and s.crop == crop and s.state != "failed"), None)
+                slots.append(have if have is not None else start_run([(p, Job(S.photo(p).path, dict(ORIGINAL), 0))], crop)[0])
+        if names:
+            jobs = [(p, Job(source[p], _for_team(dict(saved[n], name=n), n, run_tag), 0)) for n in names for p in pids]
+            slots += start_run(jobs, crop, by_photo=pids)
         save_prefs({"crop": crop})
-        return {"slots": start_run(jobs, crop, by_photo=pids)}
+        return {"slots": slots}
     save_prefs({"crop": crop})
     return {"slots": start_run(jobs, crop)}
 

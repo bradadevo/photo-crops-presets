@@ -190,6 +190,9 @@ const keptSlots = () => st.slots.filter((s) => s.state === "done" && s.kept);
 const visibleSlots = () => st.show === "all" ? st.slots
   : st.show === "picks" ? st.slots.filter((s) => s.kept) : st.slots.filter((s) => (s.rating || 0) >= +st.show);
 const lookByName = (n) => st.looks.find((l) => l.name === n);
+/* "Original": the photo as shot, no style, to edit by hand. Picked and made like any look. */
+const ORIGINAL_LOOK = { name: "Original", own: true, group: "Start here", secs: 3, cutout: true,
+  about: "Your photo as shot, no style added. Edit it by hand: light, color, crop, remove, text." };
 const slotImg = (s, kind = "after") => `/img/slot/${s.id}/${s.ver}/${kind}.jpg`;
 
 // Loading --------------------------------------------------------------------------------
@@ -229,7 +232,7 @@ function schedule() {
 }
 async function loadLooks() {
   const data = await api("/api/looks");
-  st.looks = data.looks; st.groups = ["All", ...data.groups.filter((g) => data.looks.some((l) => l.group === g))];
+  st.looks = [ORIGINAL_LOOK, ...data.looks]; st.groups = ["All", ...data.groups.filter((g) => data.looks.some((l) => l.group === g))];
   st.sizes = data.sizes;
   if (!st.groups.includes(st.filter)) st.filter = "All";
   renderLooks(true);
@@ -485,7 +488,8 @@ function renderViewer() {
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${cur.photo}/view.jpg" alt="" draggable="false"></div>
         <div class="wait">${cur.state === "failed" ? `<b>${icon("x")}</b><span>This look could not be made</span><small>${esc(cur.error)}</small>`
         : `<div class="ring${cur.state === "wait" ? " wait" : ""}" style="--p:${cur.pct};width:64px;height:64px;font-size:14px"><span>${cur.state === "now" ? cur.pct + "%" : ""}</span></div>
-           <span>${cur.state === "now" ? "Making" : "Waiting to make"} <b style="font-size:inherit">${esc(cur.look)}</b></span><small class="note">${esc(cur.note || "")}</small>`}</div>
+           <span>${cur.look === "Original" ? (cur.state === "now" ? "Getting the photo ready to edit" : "Waiting to get the photo ready to edit")
+             : `${cur.state === "now" ? "Making" : "Waiting to make"} <b style="font-size:inherit">${esc(cur.look)}</b>`}</span><small class="note">${esc(cur.note || "")}</small>`}</div>
       </div><div class="caption">${toolbar(cur)}</div>`;
     fitPhotoFrame();
     bindViewer(cur);
@@ -493,13 +497,23 @@ function renderViewer() {
     const p = st.photos.find((x) => x.id === st.activePhoto);
     const any = st.looks.length && pickedLooks().length;
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${p.id}/view.jpg" alt="${esc(p.name)}" draggable="false"></div></div>
-      <div class="caption"><div class="toolbar"><span class="title"><b>${esc(p.name)}</b><span>original</span></span>
-      <span class="sep"></span><button id="edit-photo" title="Edit the photo itself: light, color, crop, remove distractions, text (A)">${icon("sun")} Edit</button>
+      <button class="edit-cue" id="edit-cue" title="Edit this photo by hand (A)">${icon("sun")} Click to edit this photo</button>
+      <div class="caption"><div class="toolbar"><span class="title"><b>${esc(p.name)}</b><span>as shot</span></span>
+      <span class="sep"></span><button id="edit-photo" class="go" title="Edit the photo itself: light, color, crop, remove distractions, text (A)">${icon("sun")}<span class="lbl"> Edit this photo</span></button>
+      <button id="to-looks" title="Ready-made styles: pick them on the right, then Make">${icon("layers")}<span class="lbl"> Add looks</span></button>
       ${doneSlots().length ? `<button id="back-to-looks" title="All the looks made so far (G)">${icon("grid")} Looks made</button>` : ""}</div></div>
-      ${any ? "" : `<div class="hint-line">Pick looks on the right and press <b>Make</b>, or <b>Edit</b> the photo as it is</div>`}`;
+      <div class="hint-line">${any ? `Press <b>Make</b> for your picked looks, or click the photo to edit it by hand`
+        : `Two ways to start: <b>edit this photo</b> by hand, or <b>pick looks</b> on the right for ready-made styles. Every look can be edited too.`}</div>`;
     fitPhotoFrame();
     $("#back-to-looks")?.addEventListener("click", () => { st.view = "grid"; render(); });
     $("#edit-photo").onclick = () => editPhoto(p.id);
+    $("#edit-cue").onclick = () => editPhoto(p.id);
+    $("#frame .layer").onclick = () => editPhoto(p.id);
+    $("#to-looks").onclick = () => {
+      st.tab = "looks"; render();
+      const g = $("#look-grid"); g.scrollTop = 0; g.classList.remove("flash"); void g.offsetWidth; g.classList.add("flash");
+      $("#look-search")?.focus();
+    };
   }
   paintIcons(v);
 }
@@ -1018,7 +1032,7 @@ let tryTimer = null, tryName = null;
 function tryOn(name) {
   clearTimeout(tryTimer);
   const l = lookByName(name), cur = slotById(st.current);
-  if (!l || !st.activePhoto || st.mode !== "edit" || st.view === "grid" || st.fixing || st.survey.length >= 2) return;
+  if (!l || l.own || !st.activePhoto || st.mode !== "edit" || st.view === "grid" || st.fixing || st.survey.length >= 2) return;
   if (cur && cur.photo !== st.activePhoto) return;
   tryName = name;
   tryTimer = setTimeout(() => {
@@ -1048,6 +1062,13 @@ function tryOff() {
 }
 
 function lookCard(l) {
+  if (l.own) {
+    const pid = st.activePhoto;
+    return `<button class="look own" data-name="${esc(l.name)}">
+    <div class="pic">${pid ? `<img src="/img/photo/${pid}/view.jpg" alt="" draggable="false">` : `<span class="ph-art" style="background:${gradientFor(l.name)}"></span>`}<span class="check"></span>
+      <span class="badge"><span>${icon("sun")} Edit by hand</span></span></div>
+    <div class="label"><b>Original</b><small>${esc(l.about)}</small></div></button>`;
+  }
   // its latest picture (made whenever the look is used), until your photo's own is ready
   const art = `<span class="ph-art" style="background:${gradientFor(l.name)}"></span>
     <img src="/img/example/${enc(l.name)}.jpg?v=${pageStamp}" alt="" loading="lazy" draggable="false" onerror="this.hidden=true"
@@ -1089,7 +1110,7 @@ function watchSwatches() {
       if (!e.isIntersecting) continue;
       swatchObserver.unobserve(e.target);
       const card = e.target, l = lookByName(card.dataset.name);
-      if (!l || l.ai || l.design) continue;
+      if (!l || l.ai || l.design || l.own) continue;
       swatchWanted.set(l.name, card);
       const coming = card.querySelector(".coming");
       coming.hidden = false; coming.textContent = "Preview coming…";
@@ -1226,6 +1247,7 @@ async function make(what) {
   if (fromEdits) toast("Putting the looks on top of your edits…", { small: "Your edited photo is saved at full size first" });
   const r = await api("/api/run", { photos, crop: st.crop, from_edits: fromEdits, ...what });
   if (r.slots?.length) { st.current = r.slots[0]; st.view = "single"; st.compare = false; }
+  if (what.looks?.length === 1 && what.looks[0] === "Original" && r.slots?.length === 1) { st.tab = "edit"; st.editWhenReady = r.slots[0]; }
   await refresh();
   $(`#strip [data-key="${r.slots?.[0]}"]`)?.scrollIntoView({ block: "nearest", inline: "start" });
   $("#look-grid .look.on")?.scrollIntoView({ block: "nearest" });
