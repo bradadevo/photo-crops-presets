@@ -918,7 +918,9 @@ function modal(html) {
   paintIcons(root);
   const scrim = $(".scrim", root);
   scrim.onclick = (e) => { if (e.target === scrim || e.target.closest("[data-close]")) closeModal(); };
-  setTimeout(() => $(".modal button.primary, .modal input", root)?.focus(), 30);
+  // the cursor starts on the main button, or a box to type in: never on a switch or tick box
+  setTimeout(() => [...root.querySelectorAll(".modal button.primary, .modal input:not([type=checkbox]):not([type=radio]):not([type=range]):not([readonly]), .modal textarea")]
+    .find((el) => el.offsetParent && el.getClientRects().length && !el.disabled && !el.closest("details:not([open]), [hidden], .fold:not(.open)"))?.focus(), 30);  // (the first one you can see: a folded section's button is skipped)
   return $(".modal", root);
 }
 const closeModal = () => { $("#modal-root").innerHTML = ""; };
@@ -1047,7 +1049,7 @@ function tryOff() {
 
 function lookCard(l) {
   // its latest picture (made whenever the look is used), until your photo's own is ready
-  const art = `<span class="ph-art" style="background:${gradientFor(l.name)}">${esc(initials(l.name))}</span>
+  const art = `<span class="ph-art" style="background:${gradientFor(l.name)}"></span>
     <img src="/img/example/${enc(l.name)}.jpg?v=${pageStamp}" alt="" loading="lazy" draggable="false" onerror="this.hidden=true"
       onload="this.previousElementSibling?.remove()"><span class="coming" hidden></span>`;
   return `<button class="look" data-name="${esc(l.name)}">
@@ -1060,7 +1062,7 @@ const initials = (n) => n.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).slice(
 function gradientFor(name) {
   let h = 0;
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `linear-gradient(135deg, hsl(${h} 45% 22%), hsl(${(h + 50) % 360} 55% 14%))`;
+  return `linear-gradient(135deg, hsl(${h} 16% 19%), hsl(${(h + 40) % 360} 12% 12%))`;
 }
 
 /* Each quick look is shown on the photo you are working on, as its card scrolls into view
@@ -1226,6 +1228,7 @@ async function make(what) {
   if (r.slots?.length) { st.current = r.slots[0]; st.view = "single"; st.compare = false; }
   await refresh();
   $(`#strip [data-key="${r.slots?.[0]}"]`)?.scrollIntoView({ block: "nearest", inline: "start" });
+  $("#look-grid .look.on")?.scrollIntoView({ block: "nearest" });
 }
 
 // The right panel's tabs -------------------------------------------------------------------------
@@ -1466,6 +1469,8 @@ function showHelp() {
 }
 
 document.addEventListener("keydown", (e) => {
+  // Escape always closes an open dialog, wherever the cursor is in it (a switch or a box included)
+  if (e.key === "Escape" && modalOpen() && !e.target.closest?.(".ctx-menu, select")) { e.preventDefault(); e.stopPropagation(); closeModal(); return; }
   if (st.mode === "cull" && cullKey(e)) return;  // (the Culling tab has its own keys and its own undo)
   if (st.mode === "cull" && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") return;
   const undoKey = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z";

@@ -54,6 +54,17 @@ Tiers:
 - **The Problem:** The tab's frame is built at once, but its contents wait for the event list and photos to load. For about 2 seconds the user sees an empty black panel with only the key legend at the bottom. It looks broken, so first-time users click away.
 - **Actionable Fix:** Show a loading line ("Opening your events…" with a spinner) in the empty panels until the first paint replaces it.
 
+### [x] C5. Escape doesn't close the Export dialog (found while checking the Nice to Have fixes)
+- **Pass:** [Pass 2 - User]
+- **Location:** `studio/web/app.js`: `modal()` (where the cursor starts) and the window key handler
+- **The Problem:**
+  - The dialog opened with the cursor on the "Add my logo" switch.
+  - The key handler ignores every key while the cursor is in a field, so Escape did nothing and the user was stuck until they found Cancel.
+  - The first audit walk-through also got stuck right here.
+- **Actionable Fix:**
+  - Escape closes any open dialog, wherever the cursor is.
+  - Dialogs start with the cursor on their first visible main button or text box. Never a switch or tick box, and never one inside a folded section.
+
 ---
 
 ## 2. High Impact: craft, clarity and polish
@@ -91,27 +102,27 @@ Tiers:
 
 ---
 
-## 3. Nice to Have: delight and micro-interactions (not done in this pass)
+## 3. Nice to Have: delight and micro-interactions (done in a second pass)
 
-### [ ] N1. Type scale has 20 sizes, including half pixels
+### [x] N1. Type scale has 20 sizes, including half pixels
 - **Pass:** [Pass 1 - Designer]
 - **Location:** `app.css` (10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5 px…)
 - **The Problem:** Too many near-identical sizes blur the hierarchy.
 - **Actionable Fix:** Collapse to about seven steps (11 · 12 · 13 · 15 · 19 · 26 · 34) with tokens. Do it in a dedicated pass with a visual check of every panel: changing text widths can re-break tight bars like the crop bar.
 
-### [ ] N2. The header's Tools menu jumps sideways on the Culling tab
+### [x] N2. The header's Tools menu jumps sideways on the Culling tab
 - **Pass:** [Pass 2 - User]
 - **Location:** `app.css` `.cull-mode #export-btn { display: none; }`
 - **The Problem:** Culling has its own export, so the header's Export button is removed, and Tools shifts right when switching tabs.
 - **Actionable Fix:** Reserve the space (`visibility: hidden`) or put Culling's own export in that slot.
 
-### [ ] N3. Look cards show initials on a gradient until their sample is made
+### [x] N3. Look cards show initials on a gradient until their sample is made
 - **Pass:** [Pass 1 - Designer]
 - **Location:** `app.js` `renderLooks()` (cards without an example image)
 - **The Problem:** "PT", "GH" on green blocks reads as a placeholder.
 - **Actionable Fix:** A neutral shimmer skeleton, or a bundled sample photo per look.
 
-### [ ] N4. The looks list keeps its scroll position after Make
+### [x] N4. The looks list keeps its scroll position after Make
 - **Pass:** [Pass 2 - User]
 - **Location:** `app.js` `renderLooks()`
 - **The Problem:** The group title can be scrolled out of view, so the picked badges are partly hidden.
@@ -151,6 +162,17 @@ Changes by item:
   - Its tooltip says "double-click to reset".
 - **H4** `app.css`: radii snapped to 2 · 4 · 6 · 8 · 10 · 12.
 
+**Second pass: the Nice to Have items, plus one more Critical found while testing them.**
+- **C5** `app.js`:
+  - Escape closes any dialog.
+  - Dialogs open with the cursor on their main button (Export: Enter exports).
+- **N1** `app.css`: one type scale, 10 · 11 · 12 · 13 · 14 · 15 · 16 · 17 · 19 · 22 · 26 · 34 px, with no half pixels. It's written at the top of the file. The tool-bar overflow test still passes 32 of 32 at three window sizes.
+- **N2** `app.css`: the header's Export space is kept on Culling, so Tools no longer jumps.
+- **N3** `app.js` / `app.css`: look tiles without a sample are a calm tinted tile without initials. They shimmer only while their preview is being made.
+- **N4** `app.js`: after Make, the first picked look is scrolled into view.
+
+The second pass's checks passed 5 of 5, plus 2 of 2 for Escape and the starting cursor, and all 203 automated tests pass.
+
 Restore point: `git checkout pre-ui-audit` returns to the version before this audit.
 
 ### Please check by eye in the app (restart it first)
@@ -159,4 +181,6 @@ Restore point: `git checkout pre-ui-audit` returns to the version before this au
 3. Drop a non-photo (a PDF or text file) on the window: a note names it.
 4. Open **Culling**: "Opening your events…" shows for a moment instead of black.
 5. **Edit → Background brightness**: a small tick marks zero under the track.
-6. Glance over the panels for the slightly tidier corners: nothing should look out of place.
+6. Glance over the panels for the slightly tidier corners and the even text sizes: nothing should look out of place.
+7. **Export → Escape** closes the dialog; **Enter** exports.
+8. Switch to **Culling** and back: Tools stays where it is.
