@@ -418,6 +418,11 @@ function renderStrip() {
 }
 
 function select(id, keepGrid) {
+  const was = st.activePhoto, s0 = slotById(id);
+  if (s0 && was != null && s0.photo !== was) {  // another photo's look: say so (the photo list follows)
+    const ph = st.photos.find((p) => p.id === s0.photo);
+    if (ph) toast(`Now showing ${ph.name}`, { small: `"${s0.look}" is a look of that photo · click a photo on the left to go back` });
+  }
   st.current = id; st.fixing = false; st.zoom.on = false; st.tool = null; st.cropDraft = null; st.areaSel = null; st.textSel = null;
   const s = slotById(id);
   if (s) st.activePhoto = s.photo;
@@ -1209,11 +1214,12 @@ function renderTabs() {
     if (st.tool !== t) setTimeout(() => { if (st.tool !== t) setTool(t); });
   }
   if (cur && st.editWhenReady && st.editWhenReady !== cur.id) st.editWhenReady = null;  // (you moved on)
-  if (!can && st.tab === "edit") st.tab = "looks";
+  const opening = !!(cur && st.editWhenReady === cur.id && !can && cur.state !== "failed");  // (a photo being got ready to edit)
+  if (!can && st.tab === "edit" && !opening) st.tab = "looks";
   $$(".tabs button").forEach((b) => {
     b.classList.toggle("on", b.dataset.tab === st.tab);
     if (b.dataset.tab === "edit") {
-      setOff(b, !st.photos.length || (cur && !can),
+      setOff(b, !st.photos.length || (cur && !can && !opening),
         !st.photos.length ? "Add a photo first, then edit it here."
           : cur?.state === "failed" ? "This look could not be made, so there is nothing to edit. Open another one."
             : "This look is still being made. It can be edited as soon as it's done.");

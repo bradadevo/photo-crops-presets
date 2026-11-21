@@ -300,6 +300,17 @@ let editSig = "";
 const paneSignature = (cur) => `${cur.id}:${cur.ver}:${familyOf(cur.edits?.poster) ? familySlots(familyOf(cur.edits.poster)).map((s) => s.id + s.state).join(",") : ""}:${st.photos.find((p) => p.id === cur.photo)?.edited}:${st.photos.length}:${st.areaSel}:${st.textSel}:${hist.undo.length}:${hist.redo.length}:${st.tool}`;
 
 function renderEdit(cur) {
+  if (cur.state !== "done") {  // a photo being got ready to edit: said plainly, right here
+    const pane = $("#pane-edit"), photo = st.photos.find((p) => p.id === cur.photo);
+    const sig2 = `opening:${cur.id}:${cur.state}:${cur.pct}`;
+    if (editSig === sig2) return;
+    editSig = sig2;
+    pane.innerHTML = `<div class="opening"><div class="spin" style="width:26px;height:26px"></div>
+      <h3>Getting ${esc(photo?.name || "the photo")} ready to edit</h3>
+      <p>Finding the players and tracing them, once per photo: ${cur.pct ? `${cur.pct}% · ` : ""}usually about 20 seconds. The editor opens by itself.</p>
+      <p class="notes">Meanwhile you can pick looks for it in the Looks tab.</p></div>`;
+    return;
+  }
   const sig = paneSignature(cur);
   if (sig === editSig) return;
   editSig = sig;

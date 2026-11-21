@@ -1513,3 +1513,8 @@ textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; m
 .rm-src::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; }
 .rm-src:active { cursor: grabbing; }
 #rm-hold.on { background: var(--accent); color: #fff; }
+
+/* Edit: a photo being got ready */
+#pane-edit .opening { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 48px 18px; }
+#pane-edit .opening h3 { margin: 6px 0 0; font-size: 15px; }
+#pane-edit .opening p { margin: 0; color: var(--muted); max-width: 30ch; }
