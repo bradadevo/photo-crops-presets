@@ -1205,7 +1205,7 @@ async function cropPixels(cur, box) {
   const grow = 1080 / w, size = `${w.toLocaleString()} × ${h.toLocaleString()} px`;
   el.classList.toggle("ai", grow >= 1.15);
   el.classList.toggle("tight", grow > 4);
-  el.textContent = grow >= 1.15 ? `✦ ${size} · AI enlarger sharpens it ${grow.toFixed(1)}x for Instagram` : `${size} · sharp for Instagram as it is`;
+  el.textContent = grow >= 1.15 ? `✦ ${size} · AI sharpens it ${grow.toFixed(1)}x for Instagram` : `${size} · sharp for Instagram`;
   el.title = grow > 4 ? "Very tight: even with the AI enlarger it will look soft on Instagram. Widen the crop a little."
     : grow >= 1.15 ? "Fewer pixels than an Instagram post (1,080 wide): the export enlarges it with the AI detail enlarger. Zoom in (Z) after Apply to see it."
     : "More pixels than an Instagram post needs (1,080 wide): no enlarging.";
@@ -1215,15 +1215,14 @@ function renderCrop(v, cur) {
   const d = st.cropDraft ||= { angle: cur.edits?.angle || 0, box: cur.edits?.crop ? [...cur.edits.crop] : [0, 0, 1, 1], aspect: "free" };
   v.innerHTML = `<div class="frame tool-crop" id="frame"><div class="layer"><img class="after" id="crop-img" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
       <div class="crop-box" id="crop-box"><i class="g1"></i><i class="g2"></i><i class="g3"></i><i class="g4"></i>
-        ${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => `<b class="h h-${h}" data-h="${h}"></b>`).join("")}</div></div>
+        ${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => `<b class="h h-${h}" data-h="${h}"></b>`).join("")}<span class="crop-px" id="c-px"></span></div></div>
     <div class="fixbar toolbar crop-bar below">${histBtns()}
       <div class="seg small" id="c-aspect">${ASPECTS.map(([k, l]) => `<button data-v="${k}" class="${d.aspect === k ? "on" : ""}">${l}</button>`).join("")}</div>
       <span class="sep"></span>
       <span class="angle">${icon("level")}<input type="range" id="c-angle" min="-20" max="20" step="0.1" value="${d.angle}"><output id="c-angle-v">${(+d.angle).toFixed(1)}°</output></span>
       <button id="c-auto" title="Level it from the field lines and posts">Auto</button>
       <span class="sep"></span>
-      <button id="c-reset">Reset</button><button id="c-cancel">Cancel</button><button id="c-apply" class="on">Apply</button>
-      <span class="crop-px" id="c-px"></span></div>`;
+      <button id="c-reset">Reset</button><button id="c-cancel">Cancel</button><button id="c-apply" class="on">Apply</button></div>`;
   paintIcons(v);
   fitFrame(W, H);
   const img = $("#crop-img"), box = $("#crop-box"), f = $("#frame");

@@ -451,6 +451,7 @@ function renderViewer() {
   }
   const sig = viewerSignature(cur);
   v.classList.remove("survey-mode", "has-cutbar");
+  v.classList.toggle("tool-view", !!(st.tool && cur?.state === "done"));  // (room under the picture for a tool's bar, two rows if narrow)
   if (sig === viewerSig) return updateViewerLive(cur);
   viewerSig = sig;
   if (st.finding) { renderFindPick(v); return; }

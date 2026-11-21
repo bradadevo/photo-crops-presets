@@ -531,7 +531,7 @@ input[type=range].tint::-webkit-slider-runnable-track { background: linear-gradi
 .crop-box .h-n { top: -3px; } .crop-box .h-s { bottom: -3px; }
 .crop-box .h-e, .crop-box .h-w { top: 50%; margin-top: -12px; width: 6px; height: 24px; cursor: ew-resize; }
 .crop-box .h-e { right: -3px; } .crop-box .h-w { left: -3px; }
-.crop-bar { flex-wrap: nowrap; max-width: calc(100% - 20px); }
+.crop-bar { max-width: calc(100% - 20px); }
 .toolbar .angle { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; color: var(--muted); }
 .toolbar .angle input { width: 130px; }
 .toolbar .angle output { font-variant-numeric: tabular-nums; min-width: 40px; color: var(--text); }
@@ -1481,6 +1481,15 @@ textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; m
 .hist-btns button[aria-disabled="true"] { opacity: .35; }
 
 /* crop bar: the crop's real size */
-.crop-px { font-size: 12px; color: var(--muted); padding: 0 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.crop-px.ai { color: var(--accent-2, #3fa9f5); }
-.crop-px.tight { color: #f5b443; }
+/* the crop's real size: a label in the crop box's corner, moving with it */
+.crop-box .crop-px { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis;
+  font-size: 11px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, .62); padding: 3px 7px; border-radius: 5px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; pointer-events: auto; cursor: help; }
+.crop-box .crop-px:empty { display: none; }
+.crop-box .crop-px.ai { background: rgba(0, 92, 160, .85); }
+.crop-box .crop-px.tight { background: rgba(170, 100, 0, .9); }
+
+/* a tool's bar under the picture: wraps to a second row when the space is narrow, never squeezed */
+.fixbar.toolbar.below { flex-wrap: wrap; justify-content: center; row-gap: 2px; max-width: calc(100% - 24px); width: max-content; }
+.fixbar.toolbar.below > * { flex-shrink: 0; }
+.viewer.tool-view { padding-bottom: 108px; }
