@@ -1373,6 +1373,12 @@ def customized(p: dict, has_logo: bool = False) -> dict:
     W, H = size_for(800, 1000, p)
     u = _unit(W, H, p)
     els = custom_poster.from_layout(p, words(p, has_logo), W, H, u)
+    taken = {e["id"] for e in els}
+    for e in p.get("extras") or []:  # your own pieces, kept (drawn over the layout's, as before)
+        e = dict(e)
+        if e.get("id") in taken:
+            e["id"] = "x" + str(e["id"])[:10]
+        els.append(e)
     keep = {k: p[k] for k in ("shape", "color", "logo", "size", "colors", "kept", "kept_moves") if k in p}
     return clean({**keep, "template": "custom", "elements": els,
                   "fade_top": 0.3 if p["template"] in ("final", "spotlight") else 0.1,

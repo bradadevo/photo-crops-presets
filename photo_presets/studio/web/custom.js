@@ -27,7 +27,13 @@ function pieceStack(p) {
 function layerPiece(p, id, how) {
   const stack = pieceStack(p), i = stack.indexOf(id);
   if (i < 0) return null;
-  const j = { forward: i + 1, backward: i - 1, front: stack.length - 1, back: 0 }[how];
+  let j = { forward: i + 1, backward: i - 1, front: stack.length - 1, back: 0 }[how];
+  if (how === "forward" || how === "backward") {  // past the next thing it actually overlaps (else no change shows)
+    const dir = how === "forward" ? 1 : -1;
+    for (let k = i + dir; k >= 0 && k < stack.length; k += dir) {
+      if (stack[k] === "PLAYERS" || piecesOverlap(id, stack[k])) { j = k; break; }
+    }
+  }
   if (j < 0 || j >= stack.length || j === i) return null;
   stack.splice(i, 1); stack.splice(j, 0, id);
   const els = p[PK(p)], players = stack.indexOf("PLAYERS");
@@ -35,6 +41,57 @@ function layerPiece(p, id, how) {
   if (players >= 0) p[PK(p)].forEach((e) => { e.behind = stack.indexOf(e.id) < players; });
   const el = p[PK(p)].find((e) => e.id === id);
   return players < 0 ? "Moved" : el.behind ? "Behind the players" : "In front of the players";
+}
+/* Whether two pieces cover any of the same spot on the poster (from where they were last drawn) */
+function piecesOverlap(a, b) {
+  const box = (id) => {
+    const parts = (typeof wordsList !== "undefined" ? wordsList : []).filter((w) => w.key === "el:" + id);
+    if (!parts.length) return null;
+    return { x0: Math.min(...parts.map((w) => w.x0)), y0: Math.min(...parts.map((w) => w.y0)), x1: Math.max(...parts.map((w) => w.x1)), y1: Math.max(...parts.map((w) => w.y1)) };
+  };
+  const A = box(a), B = box(b);
+  if (!A || !B) return true;  // (not known: treated as overlapping, one step)
+  return A.x0 < B.x1 && B.x0 < A.x1 && A.y0 < B.y1 && B.y0 < A.y1;
+}
+/* The layout's own words that this added piece covers (a ready-made layout draws your pieces over its words) */
+function layoutWordsUnder(id) {
+  const parts = (typeof wordsList !== "undefined" ? wordsList : []).filter((w) => w.key === "el:" + id);
+  if (!parts.length) return [];
+  const A = { x0: Math.min(...parts.map((w) => w.x0)), y0: Math.min(...parts.map((w) => w.y0)), x1: Math.max(...parts.map((w) => w.x1)), y1: Math.max(...parts.map((w) => w.y1)) };
+  return wordsList.filter((w) => !w.key.startsWith("el:") && w.key !== "logo" && A.x0 < w.x1 && w.x0 < A.x1 && A.y0 < w.y1 && w.y0 < A.y1).map((w) => w.key);
+}
+/* Forward, backward, front or back, as the eye expects. On a ready-made layout, sending a piece behind
+   one of the layout's own words (a banner behind the title) makes the layout your own first, so the
+   title becomes a piece it can go behind. */
+async function arrangePiece(cur, id, how) {
+  const s = slotById(cur.id), p = s.edits?.poster;
+  if (!p) return;
+  const under = p.template !== "custom" && (how === "backward" || how === "back") ? layoutWordsUnder(id) : [];
+  const stack = pieceStack(p), i = stack.indexOf(id);
+  const nothingBelow = !stack.slice(0, Math.max(0, i)).some((k) => k === "PLAYERS" || piecesOverlap(id, k));  // (only the layout's words left to go behind)
+  if (under.length && (how === "back" || nothingBelow)) {
+    const r = await api("/api/poster/customize", { poster: p });
+    const els = r.poster.elements || [];
+    const me = els.find((e) => e.id === id || e.id === "x" + id);
+    if (me) {
+      // behind the lowest layout word it covers (its piece now): there, or at the very back
+      const words = under.map((k) => String(p[k] ?? "").trim().toUpperCase()).filter(Boolean);
+      const targets = els.filter((e) => e !== me && e.type === "text" && words.includes(String(e.text || "").trim().toUpperCase()));
+      const rest = els.filter((e) => e !== me);
+      let at = how === "back" ? 0 : Math.min(...targets.map((t) => rest.indexOf(t)).filter((x) => x >= 0), rest.length);
+      if (how === "back") me.behind = true; else if (targets[0]) me.behind = !!targets[0].behind;
+      rest.splice(at, 0, me);
+      r.poster.elements = rest;
+      st.pieceSel = me.id;
+    }
+    await changeEdits(s, (ed) => { ed.poster = r.poster; });
+    toast(how === "back" ? "Sent to the back" : "Behind the title now", { small: "The layout is now your own, so its words can be layered too. ⌘Z undoes it." });
+    return;
+  }
+  const said = layerPiece(clone(p), id, how);
+  editSig = "";
+  await changeEdits(s, (ed) => { layerPiece(ed.poster, id, how); });
+  if (said) toast(said);
 }
 function pieceEnds(p, id) {  // [at the very back, at the very front]
   const stack = pieceStack(p), i = stack.indexOf(id);
@@ -47,7 +104,7 @@ function pieceMenu(e, cur, id) {
   const p = cur.edits?.poster;
   if (!p) return;
   st.pieceSel = id;
-  const [back, front] = pieceEnds(p, id), behindOk = canBehind(p);
+  const [atBack, front] = pieceEnds(p, id), behindOk = canBehind(p), back = atBack && !(p.template !== "custom" && layoutWordsUnder(id).length);
   const it0 = (p[PK(p)] || []).find((x) => x.id === id);
   const items = [["front", "Bring to front", "In front of everything", front], ["forward", "Bring forward", "One step toward the front", front],
     ["backward", "Send backward", behindOk ? "One step back (behind the players, after your other pieces)" : "One step back", back],
@@ -61,11 +118,7 @@ function pieceMenu(e, cur, id) {
   ctxPlace(m, e);
   const close = ctxKeep(m);
   const edit = (fn) => { close(); editSig = ""; changeEdits(slotById(cur.id), (ed) => fn(ed.poster)); };
-  m.querySelectorAll("[data-layer]").forEach((b) => b.onclick = () => {
-    const said = layerPiece(clone(p), id, b.dataset.layer);  // (where it ends up, said at once)
-    edit((pp) => { layerPiece(pp, id, b.dataset.layer); });
-    if (said) toast(said);
-  });
+  m.querySelectorAll("[data-layer]").forEach((b) => b.onclick = () => { close(); arrangePiece(cur, id, b.dataset.layer); });
   m.querySelectorAll("[data-turn]").forEach((b) => b.onclick = () => { close(); editSig = ""; setAngle(cur, id, +b.dataset.turn ? normAngle((it0?.angle || 0) + +b.dataset.turn) : 0); });
   m.querySelector('[data-ctx="dup"]').onclick = () => {
     const nid = newId();
@@ -204,7 +257,7 @@ function customSection(p) {
     ${els.length ? `<div class="pieces">${els.map((el, i) => `<div class="piece-row${el.id === st.pieceSel ? " on" : ""}" data-piece="${el.id}">
       <button class="pick" data-pick-piece="${el.id}"><span class="kind">${esc(PIECE_NAMES[el.type])}</span>${el.type === "text" || el.type === "badge" ? `<span class="what">${esc(pieceLabel(el))}</span>` : el.type === "stripes" ? pieceLabel(el) : ""}${el.behind ? `<span class="behind" title="Behind the players">behind</span>` : ""}</button>
       <button class="icon-btn" data-piece-up="${el.id}" title="Bring forward${canBehind(p) && el.behind ? " (in front of the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[1], "It's already at the very front.")}>▲</button>
-      <button class="icon-btn" data-piece-down="${el.id}" title="Send back${canBehind(p) && !el.behind ? " (behind the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[0], canBehind(p) ? "It's already at the very back, behind the players." : "It's already behind your other pieces.")}>▼</button>
+      <button class="icon-btn" data-piece-down="${el.id}" title="Send back${canBehind(p) && !el.behind ? " (behind the players next)" : ""} · or right-click it" ${off(pieceEnds(p, el.id)[0] && !(p.template !== "custom" && layoutWordsUnder(el.id).length), canBehind(p) ? "It's already at the very back, behind the players." : "It's already behind your other pieces.")}>▼</button>
       <button class="icon-btn" data-piece-x="${el.id}" title="Delete">${icon("x")}</button></div>`).join("")}</div>` : `<p class="notes">${custom ? "Nothing on it yet: add a title, a score banner, your logo…" : "Nothing added on top yet. The layout's own words are below."}</p>`}
     ${props}
     ${custom ? "" : "<!--"}${sl("fade_top", "Dark fade at the top", 0, 0.9, 0.05, p.fade_top ?? 0.35, "%").replace('data-prop="fade_top"', 'data-fade="fade_top"')}
@@ -234,11 +287,7 @@ function bindCustom(cur, pane, set) {
   box.querySelectorAll("[data-pick-piece]").forEach((b) => b.onclick = () => {
     st.pieceSel = st.pieceSel === b.dataset.pickPiece ? null : b.dataset.pickPiece; editSig = ""; renderTabs(); paintWords(s0());
   });
-  const move = (id, by) => {
-    const how = by > 0 ? "forward" : "backward", said = layerPiece(clone(s0().edits.poster), id, how);
-    set((p) => { layerPiece(p, id, how); });
-    if (said) toast(said);
-  };
+  const move = (id, by) => arrangePiece(s0(), id, by > 0 ? "forward" : "backward");
   box.querySelectorAll("[data-piece]").forEach((row) => row.oncontextmenu = (e) => pieceMenu(e, s0(), row.dataset.piece));
   box.querySelectorAll("[data-piece-up]").forEach((b) => b.onclick = () => move(b.dataset.pieceUp, 1));
   box.querySelectorAll("[data-piece-down]").forEach((b) => b.onclick = () => move(b.dataset.pieceDown, -1));
@@ -657,3 +706,48 @@ function placeGraphic(cur, id, at) {
   });
   toast(`${art?.name || "Logo"} placed`, { small: "Drag it to move it, its corner to resize it · Delete takes it off" });
 }
+
+/* ⌘C / ⌘V copy and paste the chosen poster piece (a banner, a band, text, a badge, stripes…); ⌘D
+   duplicates it. The copy lands a little down and right, chosen, ready to drag. A layout's own word
+   is copied as a text piece with its words. (The Mac app sends ⌘V as a paste, so that is caught too.) */
+function copyPiece(cur) {
+  const p = cur.edits?.poster;
+  if (!p || !st.pieceSel) return false;
+  if (st.pieceSel.startsWith("w:")) {
+    const k = st.pieceSel.slice(2), text = String(p[k] ?? "").trim();
+    if (!text) return false;
+    const w = wordsList.find((x) => x.key === k);
+    st.pieceClip = { type: "text", text, style: "heavy", size: w ? Math.max(0.03, Math.min(0.3, (w.y1 - w.y0) / (text.split("\n").length) * 0.9)) : 0.08,
+      x: w ? (w.x0 + w.x1) / 2 : 0.5, y: w ? (w.y0 + w.y1) / 2 : 0.5, color: (p.colors || {})[k] || "#ffffff" };
+    return true;
+  }
+  const el = (p[PK(p)] || []).find((x) => x.id === st.pieceSel);
+  if (!el) return false;
+  st.pieceClip = clone(el);
+  return true;
+}
+function pastePiece(cur) {
+  if (!st.pieceClip || !cur.edits?.poster) return false;
+  const nid = newId(), el = { ...clone(st.pieceClip), id: nid };
+  el.x = Math.min(0.95, (el.x ?? 0.5) + 0.03); el.y = Math.min(0.95, (el.y ?? 0.5) + 0.03);
+  st.pieceClip = { ...st.pieceClip, x: el.x, y: el.y };  // (the next paste lands further on)
+  st.pieceSel = nid; editSig = "";
+  changeEdits(cur, (ed) => { const pp = ed.poster; pp[PK(pp)] = [...(pp[PK(pp)] || []), el]; });
+  toast("Pasted", { small: "Drag it into place · ⌘Z takes it back" });
+  return true;
+}
+const typingSomewhere = (e) => !!e.target.closest?.("input, textarea, [contenteditable]");
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || typingSomewhere(e) || st.tool !== "poster") return;
+  const cur = slotById(st.current), k = e.key.toLowerCase();
+  if (!cur?.edits?.poster || cur.state !== "done") return;
+  if (k === "c" && !String(window.getSelection()) && copyPiece(cur)) { e.preventDefault(); e.stopImmediatePropagation(); toast("Copied", { small: "⌘V pastes it · ⌘D duplicates in one go" }); }
+  else if (k === "v" && st.pieceClip && pastePiece(cur)) { e.preventDefault(); e.stopImmediatePropagation(); }
+  else if (k === "d" && copyPiece(cur)) { e.preventDefault(); e.stopImmediatePropagation(); pastePiece(cur); }
+}, true);
+document.addEventListener("paste", (e) => {
+  if (typingSomewhere(e) || st.tool !== "poster" || !st.pieceClip) return;
+  if ([...(e.clipboardData?.items || [])].some((it) => it.kind === "file")) return;  // (a picture pasted: the app's own paste)
+  const cur = slotById(st.current);
+  if (cur?.state === "done" && pastePiece(cur)) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);

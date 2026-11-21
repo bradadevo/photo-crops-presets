@@ -1424,7 +1424,7 @@ function showHelp() {
     ["B (hold)", "Show the original"], ["G", "Contact sheet / one at a time"], ["E", "Export the picks (or this one)"],
     ["A", "Edit this look"], ["R", "Crop and straighten"], ["T", "Add text"], ["1 – 5, 0", "Rate it, or clear the rating"],
     ["⌘Z, ⇧⌘Z", "Undo, redo"], ["Delete", "Remove this look, or the selected ones (with Undo)"], ["⌘-click, Shift-click", "Select several looks (Shift: everything between)"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
-    ["⌘-click", "Compare pictures side by side"], ["⌘C", "Copy the picture (paste into Messages or Mail)"],
+    ["⌘-click", "Compare pictures side by side"], ["⌘C", "Copy the picture (paste into Messages or Mail); in Poster: copy the chosen piece"], ["⌘V, ⌘D", "In Poster: paste the copied piece, or duplicate the chosen one"],
     ["⌘V", "Paste a photo"], ["Esc", "Close, or go back"]];
   modal(`<header><h2>Keyboard shortcuts</h2></header><div class="body"><div class="help-list">${keys.map(([k, t]) => `<kbd>${k}</kbd><span>${t}</span>`).join("")}</div></div>
     <footer><button class="btn primary" data-close>Done</button></footer>`);
