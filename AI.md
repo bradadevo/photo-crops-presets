@@ -73,7 +73,8 @@ smearing them. The app then:
 - mixes back a little of the plain enlargement, so skin keeps its real
   texture and doesn't look plastic;
 - only uses it when a crop is actually enlarged (about 7 seconds a photo);
-- never uses it to redraw faces.
+- sharpens faces like the rest of the picture, but it isn't a face generator:
+  it rebuilds fine detail from what's there and never invents a different face.
 
 **What it can't do:** it can't recover a photo that was out of focus or
 blurred by motion. It sharpens detail that is faintly there; it can't
@@ -92,8 +93,8 @@ photo, so the app has rules built in:
 
 1. **Faces are always the child's own.** In illustration looks, the real head
    (face, hair, ears) is kept from the photo and only painted in the look's
-   style. The AI never draws a new face. The enlarger never redraws faces
-   either.
+   style. The AI never draws a new face. (The enlarger sharpens faces with the
+   rest of the picture, from what's there; it doesn't invent features.)
 2. **No made-up text.** Drawing models can't write: they invent jersey
    numbers and garble sponsor names. After every drawing, Apple Vision
    compares the text with the photo. Invented text is painted out, and the

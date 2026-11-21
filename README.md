@@ -127,7 +127,10 @@ Mac notification says when the looks (or an export, or a reel) are ready.
 - **Compare** (**C**) puts a before/after slider on the picture; hold **B** to
   see the original.
 - **Zoom** (**Z** or double-click; drag to move) to check faces and focus: the
-  look is made again at 3600 px for it, so it is sharp. Compare works zoomed
+  look is made again at 3600 px for it, so it is sharp. A cropped picture is shown sharp without zooming
+  too: the quick preview first, then (a moment after you stop editing) the crop
+  made again from the photo's own pixels, with the AI detail enlarger when it
+  needs it, exactly as it will export. Compare works zoomed
   in too.
 - **⌘-click** 2 to 6 pictures to see them **side by side**, each with its pick.
 - **Share** (the arrow-out-of-a-box button): **AirDrop** (to your iPhone, full
@@ -269,8 +272,8 @@ exports just that one. The export window:
   posted to Instagram, a big print) is enlarged with the **AI detail
   enlarger** (Real-ESRGAN, on this Mac, about 7 s a photo): crisp hair, skin,
   numbers and kit instead of a soft blow-up, with a little of the plain
-  enlargement mixed back so skin keeps its real texture; it never redraws
-  faces. Crops over 4 megapixels, or a Mac without the model, use plain
+  enlargement mixed back so skin keeps its real texture; it sharpens faces
+  with the rest of the picture but never invents features. Crops over 4 megapixels, or a Mac without the model, use plain
   enlarging. When the export is done, its note says which files the AI
   enlarger sharpened and by how much (✦), so you can see when it was used;
   Culling's finish page says the same for its crops. Files are named with the size, e.g.

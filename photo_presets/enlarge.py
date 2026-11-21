@@ -1,7 +1,8 @@
 """Enlarging a tight crop without the soft, smeared look: the photo-trained Real-ESRGAN model (free,
 runs on the Mac) draws the crop at 4x with clean edges in hair, skin, numbers and kit, then it's fitted
 to the size asked for. A little of the plain enlargement is mixed back in so skin keeps its real
-texture (no plastic look). Faces are never redrawn or invented: the model only sharpens what's there.
+texture (no plastic look). Faces are sharpened with the rest of the picture, from what's there: it
+isn't a face generator and never invents features.
 
 Used whenever an export makes a crop bigger than its own pixels (an Instagram size from a tight crop,
 a print, or the culling's "enlarge" choice). Without the model (or past the size it can do in good

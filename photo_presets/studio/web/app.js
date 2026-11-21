@@ -480,6 +480,7 @@ function renderViewer() {
     bindViewer(cur);
     bindPicks(cur);
     watchPicture(cur);
+    sharpCrop(cur);
   } else if (cur) {
     v.innerHTML = `<div class="frame" id="frame"><div class="layer"><img class="after" src="/img/photo/${cur.photo}/view.jpg" alt="" draggable="false"></div>
         <div class="wait">${cur.state === "failed" ? `<b>${icon("x")}</b><span>This look could not be made</span><small>${esc(cur.error)}</small>`
@@ -532,6 +533,25 @@ function toolbar(cur) {
   </div>`;
 }
 
+
+/* A cropped picture is shown sharp: the quick preview first, then (once you pause) the crop made again
+   from the photo's own pixels, with the AI detail enlarger when it needs it, as Zoom and the export do. */
+let sharpTimer = null;
+function sharpCrop(cur) {
+  clearTimeout(sharpTimer);
+  const c = cur.edits?.crop;
+  if (!c || st.fixing || st.compare || st.zoom.on || cur.edits?.poster || Math.min(c[2] - c[0], c[3] - c[1]) > 0.8) return;
+  const id = cur.id, ver = cur.ver;
+  sharpTimer = setTimeout(() => {
+    const big = new Image();
+    big.onload = () => {
+      const s = slotById(st.current), img = $("#frame img.after");
+      if (!s || s.id !== id || s.ver !== ver || !img || st.zoom.on || st.compare || st.tool || st.fixing) return;
+      img.src = big.src; img.dataset.sharp = "1";
+    };
+    big.src = `/img/zoom/${id}/${ver}/after.jpg`;
+  }, 900);
+}
 
 function updateViewerLive(cur) {
   if (!cur || cur.state === "done") return;
