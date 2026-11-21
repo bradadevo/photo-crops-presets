@@ -409,6 +409,22 @@ def backdrop(a, p, ctx):
     return a + (np.clip(grad, 0, 1) - a) * float(p["amount"])
 
 
+@op("new_background", cutout=True, label="New background", bg="Studio Grey", color="#1f2a44", blur=0.0, dim=0.0,
+    match=0.35, wrap=0.5)
+def new_background(a, p, ctx):
+    """The player in front of one of the backgrounds made here (backgrounds.py), the same way the
+    Background tool does it: sharp (no blur) unless the step asks for it."""
+    from photo_presets import backgrounds
+    if ctx.alpha is None:
+        ctx.notes.append("New background skipped: no player cut-out here")
+        return a
+    h, w = a.shape[:2]
+    name = p.get("bg") if p.get("bg") in backgrounds.NAMES else "Studio Grey"
+    bg = backgrounds.make(name, w, h, p.get("color") or "#1f2a44")
+    return backgrounds.compose(a, ctx.alpha, bg, float(p.get("blur", 0)), float(p.get("dim", 0)),
+                               float(p.get("match", 0.35)), float(p.get("wrap", 0.5)))
+
+
 # Studio smoke and light ---------------------------------------------------------
 
 # Grounding: where the field ends, and the players' shadows on it -----------------

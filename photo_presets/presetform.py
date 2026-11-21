@@ -42,6 +42,7 @@ DEFAULTS = {
     "sm_on": False, "sm_color": "#f4f1ee", "sm_two": False, "sm_color2": "#d9a520", "sm_place": "sides",
     "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0, "sm_ground": 0.7,
     "ns_on": False, "ns_keep": 0.15,
+    "nb_on": False, "nb_bg": "Studio Grey", "nb_color": "#1f2a44", "nb_blur": 0.0,
     "lights_on": False, "lights_count": 2, "lights_amount": 0.8,
     "st_on": False, "st_height": 0.7, "st_amount": 0.9, "st_color": "#fff3dc",
     "rain_on": False, "rain_amount": 0.5, "rain_angle": 12.0,
@@ -174,6 +175,8 @@ def to_recipe(v: dict) -> dict:
             s.append({"op": "texture", "asset": v[n], "blend": v[f"{n}_blend"], "opacity": v[f"{n}_opacity"]})
     if v["fog_on"]:
         s.append({"op": "fog", "density": v["fog_density"], "height": v["fog_height"], "color": v["fog_color"]})
+    if v["nb_on"]:  # a new background (the Background tool's, as a look)
+        s.append({"op": "new_background", "bg": v["nb_bg"], "color": v["nb_color"], "blur": v["nb_blur"]})
     if v["ns_on"]:
         s.append({"op": "night_sky", "amount": 1.0, "keep": v["ns_keep"]})
     if v["sm_on"]:
@@ -294,6 +297,8 @@ def from_recipe(recipe: dict) -> dict:
                      sm_ground=g("ground", 0.7))
         elif op == "night_sky":
             v.update(ns_on=True, ns_keep=g("keep", 0.15))
+        elif op == "new_background":
+            v.update(nb_on=True, nb_bg=g("bg", "Studio Grey"), nb_color=g("color", "#1f2a44"), nb_blur=g("blur", 0.0))
         elif op == "stage_lights":
             v.update(lights_on=True, lights_count=g("count", 2), lights_amount=g("amount", 0.8))
         elif op == "stadium_lights":

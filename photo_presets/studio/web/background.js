@@ -43,7 +43,7 @@ function bindBackgroundSection(cur, pane) {
   const set = (fn) => changeEdits(s0(), (ed) => { fn(ed); });
   const color0 = () => s0().edits?.background?.color || s0().edits?.poster?.color || "#1f2a44";
   box.querySelectorAll("[data-bg]").forEach((b) => b.onclick = () => set((ed) => {
-    ed.background = { blur: 0.15, dim: 0, match: 0.35, wrap: 0.5, ...(ed.background || {}), src: b.dataset.bg, color: color0() };
+    ed.background = { blur: 0, dim: 0, match: 0.35, wrap: 0.5, ...(ed.background || {}), src: b.dataset.bg, color: color0() };
   }));
   box.querySelector("#bg-file")?.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
@@ -56,7 +56,7 @@ function bindBackgroundSection(cur, pane) {
       const { src } = await r.json();
       await loadBackgrounds(true);
       t.done("Added: it's kept for every photo");
-      set((ed) => { ed.background = { blur: 0.1, dim: 0, match: 0.35, wrap: 0.5, ...(ed.background || {}), src, color: color0() }; });
+      set((ed) => { ed.background = { blur: 0, dim: 0, match: 0.35, wrap: 0.5, ...(ed.background || {}), src, color: color0() }; });
     } catch (err) { t.close(); toast(String(err.message || err), { bad: true }); }
   });
   box.querySelectorAll("#bg-color [data-v]").forEach((b) => b.onclick = () => set((ed) => { ed.background.color = b.dataset.v; }));

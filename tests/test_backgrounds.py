@@ -64,3 +64,20 @@ def test_refine_edge_brings_in_hair_and_keeps_the_grass_out():
     coarse = ((xx - 100) ** 2 + (yy - 100) ** 2 < 55 ** 2).astype(np.float32)
     out = scene.refine_edge(coarse, I, scene.brush_mask([(0.4, 0.2), (0.6, 0.2)], 0.08, (h, w)), 8)
     assert out[36, 80] > 0.8 and out[36, 84] < 0.2 and out[100, 100] == 1.0 and out[10, 10] == 0.0
+
+
+def test_every_background_is_also_a_sharp_look_under_other():
+    from PIL import Image
+
+    from photo_presets.assets import Library, Sources
+
+    from photo_presets import pipeline, presets
+    from photo_presets.scene import Scene
+    assert len(presets.BACKGROUND_LOOKS) == len(backgrounds.NAMES)
+    groups = presets.grouped(presets.STARTERS)
+    assert sorted(groups[presets.OTHER]) == sorted(presets.BACKGROUND_LOOKS)
+    img = Image.new("RGB", (80, 80), (120, 200, 90))
+    matte = np.zeros((80, 80), np.float32)
+    matte[20:60, 30:50] = 1
+    out = np.asarray(pipeline.render(img, presets.STARTERS["Studio Grey Background"], Library(Sources([], [], [], [], [], [])), Scene(matte=matte))[0])
+    assert out[2, 2, 1] < 150  # the green grass replaced by the grey backdrop

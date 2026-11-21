@@ -67,7 +67,7 @@ FIX, RUN, OUTPUT, PREVIEW = 0, 1, 2, 5  # the worker's order of importance
 
 # the look groups, short, for the picker's filters
 SHORT_GROUPS = {
-    presets.GRADES: "Pro grades", presets.BOLD: "Bold", presets.EDITORIAL: "Editorial", presets.STUDIO: "Studio", presets.MINE: "Mine",
+    presets.GRADES: "Pro grades", presets.BOLD: "Bold", presets.EDITORIAL: "Editorial", presets.STUDIO: "Studio", presets.OTHER: "Other", presets.MINE: "Mine",
 }
 
 

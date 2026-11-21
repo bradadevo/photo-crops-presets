@@ -246,6 +246,13 @@ STARTERS: dict[str, dict] = {
 
 STARTERS.update(ART_STARTERS)
 
+# The Background tool's backgrounds, as looks too (sharp: no blur), under Other
+from photo_presets import backgrounds as _backgrounds  # noqa: E402
+
+BACKGROUND_LOOKS = {f"{n} Background": n for n in _backgrounds.NAMES}
+STARTERS.update({look: {"protect_faces": True, "steps": [{"op": "new_background", "bg": n}]}
+                 for look, n in BACKGROUND_LOOKS.items()})
+
 
 def load_all() -> dict[str, dict]:
     """Starters, then your saved presets (yours win on the same name)."""
@@ -289,7 +296,8 @@ def delete(name: str) -> bool:
 # How the app lists the starters: in groups, each with a one-line description
 BOLD, EDITORIAL, STUDIO, MINE = "Bold and dramatic", "Clean editorial", "Studio, smoke and lights", "My presets"
 GRADES = "Pro color grades"
-GROUPS = [GRADES, BOLD, EDITORIAL, STUDIO, *ART_GROUPS, MINE]
+OTHER = "Other"
+GROUPS = [GRADES, BOLD, EDITORIAL, STUDIO, *ART_GROUPS, OTHER, MINE]
 ABOUT: dict[str, tuple[str, str]] = {
     "Grit & Glory": (BOLD, "Gritty black and white with smoke at the feet and rough edges"),
     "Friday Night Lights": (BOLD, "A night-game color grade, a soft spotlight on the player and film grain"),
@@ -331,6 +339,8 @@ ABOUT: dict[str, tuple[str, str]] = {
 
 
 ABOUT.update(ART_ABOUT)
+ABOUT.update({look: (OTHER, f"New background: {_backgrounds.ABOUT[n][0].lower()}{_backgrounds.ABOUT[n][1:]}")
+              for look, n in BACKGROUND_LOOKS.items()})
 
 
 def describe(name: str, recipe: dict | None = None) -> str:
