@@ -502,8 +502,8 @@ function renderViewer() {
       <span class="sep"></span><button id="edit-photo" class="go" title="Edit the photo itself: light, color, crop, remove distractions, text (A)">${icon("sun")}<span class="lbl"> Edit this photo</span></button>
       <button id="to-looks" title="Ready-made styles: pick them on the right, then Make">${icon("layers")}<span class="lbl"> Add looks</span></button>
       ${doneSlots().length ? `<button id="back-to-looks" title="All the looks made so far (G)">${icon("grid")} Looks made</button>` : ""}</div></div>
-      <div class="hint-line">${any ? `Press <b>Make</b> for your picked looks, or click the photo to edit it by hand`
-        : `Two ways to start: <b>edit this photo</b> by hand, or <b>pick looks</b> on the right for ready-made styles. Every look can be edited too.`}</div>`;
+      ${st.slots.length ? "" : `<div class="hint-line">${any ? `Press <b>Make</b> for your picked looks, or click the photo to edit it by hand`
+        : `Two ways to start: <b>edit this photo</b> by hand, or <b>pick looks</b> on the right. <span class="faint">ⓘ beside Photos shows the steps.</span>`}</div>`}`;
     fitPhotoFrame();
     $("#back-to-looks")?.addEventListener("click", () => { st.view = "grid"; render(); });
     $("#edit-photo").onclick = () => editPhoto(p.id);
@@ -1066,7 +1066,7 @@ function lookCard(l) {
     const pid = st.activePhoto;
     return `<button class="look own" data-name="${esc(l.name)}">
     <div class="pic">${pid ? `<img src="/img/photo/${pid}/view.jpg" alt="" draggable="false">` : `<span class="ph-art" style="background:${gradientFor(l.name)}"></span>`}<span class="check"></span>
-      <span class="badge"><span>${icon("sun")} Edit by hand</span></span></div>
+      <span class="badge"><span>${icon("sun")} No style · edit by hand</span></span></div>
     <div class="label"><b>Original</b><small>${esc(l.about)}</small></div></button>`;
   }
   // its latest picture (made whenever the look is used), until your photo's own is ready
@@ -1164,6 +1164,7 @@ function renderMake() {
   const fresh = looks.filter((l) => !madeAll(l)), madeN = looks.length - fresh.length, again = looks.length > 0 && !fresh.length;
   const send = again ? looks : fresh;  // (looks already made aren't made twice by accident)
   const n = send.length * photos;
+  const onlyOriginal = looks.length === 1 && looks[0].own;  // (nothing is made: the photo is opened to edit)
   const can = st.photos.length && n;
   const targets = st.scope === "all" ? st.photos : st.scope === "chosen" ? st.photos.filter((p) => st.chosen.has(p.id)) : st.photos.filter((p) => p.id === st.activePhoto);
   const edited = targets.some((p) => p.edited);
@@ -1178,9 +1179,9 @@ function renderMake() {
       <button data-v="1" class="${st.fromEdits ? "on" : ""}" title="The looks go on top of your edits (light, color, crop, removals): darken the player, then add Stadium Lights for a night shot">My edit</button>
       <button data-v="0" class="${st.fromEdits ? "" : "on"}" title="The looks start from the photo as shot, your edits left out">Original photo</button></div></div>
       <p class="crop-hint">${st.fromEdits ? (photos > 1 ? "Photos you edited keep your edits under the look." : "The look goes on top of your edits.") : "Your edits are left out of these looks."}</p>` : ""}
-    <div class="summary">${looks.length ? `<span><b>${plural(looks.length, "look")}</b> picked${madeN ? ` · ${madeN} already made` : ""} · <button id="m-clear">Clear</button></span><span>${n > 0 && !again ? say(estimate(send, photos)) : ""}</span>`
+    <div class="summary">${looks.length ? `<span>${onlyOriginal ? `<b>Original</b> picked${madeN ? " · ready to edit" : ""}` : `<b>${plural(looks.length, "look")}</b> picked${madeN ? ` · ${madeN} already made` : ""}`} · <button id="m-clear">Clear</button></span><span>${n > 0 && !again ? say(estimate(send, photos)) : ""}</span>`
       : `<span>Tap looks to pick them</span>`}</div>
-    <div class="inline"><button class="btn ${again ? "" : "primary "}big wide" id="m-go" ${again ? 'title="These looks are already made for this framing. This makes them again, as new copies."' : ""} ${off(!can, !st.photos.length ? "Add a photo first: drop one on the window, paste it, or press + at the top left." : "Tap one or more looks above to pick them, then Make.")}>${again ? "Make again" : n ? `Make ${plural(n, madeN ? "new look" : "look", madeN ? "new looks" : "looks")}` : "Make looks"}</button>
+    <div class="inline"><button class="btn ${again && !onlyOriginal ? "" : "primary "}big wide" id="m-go" ${again && !onlyOriginal ? 'title="These looks are already made for this framing. This makes them again, as new copies."' : ""} ${off(!can, !st.photos.length ? "Add a photo first: drop one on the window, paste it, or press + at the top left." : "Tap one or more looks above to pick them, then Make.")}>${onlyOriginal ? (photos > 1 ? `Edit ${photos} photos` : "Edit this photo") : again ? "Make again" : n ? `Make ${plural(n, madeN ? "new look" : "look", madeN ? "new looks" : "looks")}` : "Make looks"}</button>
       <button class="btn big" id="m-random" title="Surprise me: six random looks, to discover new styles" ${off(!st.photos.length, "Add a photo first: drop one on the window, paste it, or press + at the top left.")}>${icon("dice")}</button></div>`;
   paintIcons(box);
   box.querySelectorAll("#m-scope button").forEach((b) => b.onclick = () => { st.scope = b.dataset.v; renderMake(); });
@@ -1416,6 +1417,7 @@ async function afterAdd(added) {
   renderLooks(true);
   toast(`Added ${plural(added.length, "photo")}`);
 }
+document.addEventListener("click", (e) => { if (e.target.closest?.("#guide-btn")) showGuide(); });
 function bindAdd(root) {
   root.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => { closeMenus(); addPhotos(b.dataset.add); });
 }
@@ -1478,6 +1480,19 @@ function menu(btn, m) {
 }
 document.addEventListener("click", (e) => { if (!e.target.closest?.(".menu")) closeMenus(); });
 
+/* How the Looks page works: steps, from the ⓘ beside Photos */
+function showGuide() {
+  modal(`<header><h2>How this page works</h2></header><div class="body cu-helpbody">
+    <ol class="ck-steps">
+      <li><span class="n">1</span><div><b>Add photos</b><p>Drop them on the window, paste with <kbd>⌘V</kbd>, or press <b>+</b> beside Photos. Your originals are never changed.</p></div></li>
+      <li><span class="n">2</span><div><b>Edit a photo by hand</b><p>Click the photo (or <b>Edit this photo</b> under it, or pick <b>Original</b> in the looks). Light, color, crop, remove distractions, text, posters. Everything can be undone with <kbd>⌘Z</kbd>.</p></div></li>
+      <li><span class="n">3</span><div><b>Or try ready-made looks</b><p>Tap looks on the right to pick them, then <b>Make</b>. Hover a look to preview it on your photo. <b>All N</b> puts them on every photo at once.</p></div></li>
+      <li><span class="n">4</span><div><b>Fine-tune any of them</b><p>Every picture, a look or the Original, opens in the <b>Edit</b> tab. The strip under the picture holds everything you've made; <kbd>←</kbd> <kbd>→</kbd> moves through it, <kbd>C</kbd> compares with the photo as shot.</p></div></li>
+      <li><span class="n">5</span><div><b>Keep the best and share</b><p>Press <kbd>Space</kbd> to pick your favourites, then <b>Export</b> (sizes for Instagram and print), or turn them into a <b>Reel</b>.</p></div></li>
+    </ol>
+    <p class="faint">Press <kbd>?</kbd> for every keyboard shortcut.</p></div>
+    <footer><button class="btn primary" data-close>Got it</button></footer>`);
+}
 function showHelp() {
   closeMenus();
   const keys = [["← →", "Previous / next look"], ["Space or P", "Pick this look"], ["C", "Compare with the original"],
