@@ -19,6 +19,7 @@ function pushHist(entry) {
   if (hist.undo.length > 100) hist.undo.shift();
   hist.redo = [];
   keepHist();
+  paintUndoButtons();
   editSig = "";
   if (st.tab === "edit") {
     if (typingInPanel()) paintUndoButtons(); else renderTabs();  // (never redrawn under your typing)
@@ -29,7 +30,19 @@ const typingInPanel = () => !!document.activeElement?.closest?.("#pane-edit inpu
 function paintUndoButtons() {
   setOff($("#e-undo"), !hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.");
   setOff($("#e-redo"), !hist.redo.length, "Nothing to redo: after an undo, this puts it back.");
+  $$("[data-hist]").forEach((b) => b.dataset.hist === "undo"
+    ? setOff(b, !hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.")
+    : setOff(b, !hist.redo.length, "Nothing to redo: after an undo, this puts it back."));
 }
+/* Undo and redo at the start of the picture's own bar (every tool's too), while editing */
+const histBtns = () => `<span class="hist-btns"><button data-hist="undo" title="Undo (⌘Z)" ${off(!hist.undo.length, "Nothing to undo yet: your edits can be undone here, one step at a time.")}>${icon("undo")}</button>
+  <button data-hist="redo" title="Redo (⇧⌘Z)" ${off(!hist.redo.length, "Nothing to redo: after an undo, this puts it back.")}>${icon("redo")}</button></span><span class="sep"></span>`;
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.("[data-hist]");
+  if (!b || b.getAttribute("aria-disabled") === "true") return;
+  e.stopPropagation();
+  (b.dataset.hist === "undo" ? undo : redo)();
+}, true);
 async function undo() { await closeBursts(); await travel(hist.undo, hist.redo, "before"); }
 async function redo() { await closeBursts(); await travel(hist.redo, hist.undo, "after"); }
 async function travel(from, to, side) {
@@ -50,6 +63,7 @@ async function travel(from, to, side) {
   toast(side === "before" ? "Undone" : "Redone", { small: hist.undo.length ? `${plural(hist.undo.length, "more step")} to undo` : "" });
   editSig = "";
   renderTabs();
+  paintUndoButtons();
 }
 
 /* A slot back from the server: shown everywhere, the big picture swapped in without a flash. */
@@ -604,7 +618,7 @@ function renderTool(v, cur) {
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
       ${t === "text" || t === "logo" ? `<div class="texts" id="texts"></div>` : ""}</div>
-    <div class="fixbar toolbar below">${bar}</div>`;
+    <div class="fixbar toolbar below">${histBtns()}${bar}</div>`;
   paintIcons(v);
   if (base) fitFrame(cur.base_width, cur.base_height); else fitFrame(cur.width, cur.height);
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
@@ -1181,7 +1195,7 @@ function renderCrop(v, cur) {
   v.innerHTML = `<div class="frame tool-crop" id="frame"><div class="layer"><img class="after" id="crop-img" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
       <div class="crop-box" id="crop-box"><i class="g1"></i><i class="g2"></i><i class="g3"></i><i class="g4"></i>
         ${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((h) => `<b class="h h-${h}" data-h="${h}"></b>`).join("")}</div></div>
-    <div class="fixbar toolbar crop-bar below">
+    <div class="fixbar toolbar crop-bar below">${histBtns()}
       <div class="seg small" id="c-aspect">${ASPECTS.map(([k, l]) => `<button data-v="${k}" class="${d.aspect === k ? "on" : ""}">${l}</button>`).join("")}</div>
       <span class="sep"></span>
       <span class="angle">${icon("level")}<input type="range" id="c-angle" min="-20" max="20" step="0.1" value="${d.angle}"><output id="c-angle-v">${(+d.angle).toFixed(1)}°</output></span>
@@ -1281,7 +1295,7 @@ function renderBrush(v, cur) {
   v.innerHTML = `<div class="frame tool-remove mode-${b.mode}" id="frame"><div class="layer"><img class="after" src="${slotImg(cur, "base")}" alt="" draggable="false"></div>
       <img class="rm-preview" id="rm-preview" alt="" hidden><canvas id="brush"></canvas><div class="brush-ring" id="ring" hidden></div>
       <span class="tag l rm-status" id="rm-status" hidden></span></div>
-    <div class="fixbar toolbar rm-bar below">
+    <div class="fixbar toolbar rm-bar below">${histBtns()}
       <div class="seg small" id="rm-mode"><button data-v="click" title="Click a person or a thing: all of it goes">${icon("target")} Click</button><button data-v="brush" title="Paint over what should go">${icon("eraser")} Brush</button></div>
       <span class="angle" id="rm-size" ${b.mode === "brush" ? "" : "hidden"}>Size<input type="range" id="b-size" min="0.006" max="0.08" step="0.002" value="${b.r}"></span>
       <button id="rm-people" title="Select every person who is not one of the players kept" hidden>${icon("plus")} Background people</button>

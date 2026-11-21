@@ -1475,3 +1475,7 @@ textarea.field { font: inherit; line-height: 1.35; resize: none; height: auto; m
 .ck-sum-group > div { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
 .ck-link { background: none; border: 0; padding: 0; color: var(--text); text-decoration: underline; text-decoration-color: var(--line-2); cursor: pointer; font: inherit; font-size: 12.5px; }
 .ck-link:hover { color: var(--accent-2, #3fa9f5); }
+
+/* undo and redo on the picture's bar */
+.hist-btns { display: inline-flex; gap: 2px; }
+.hist-btns button[aria-disabled="true"] { opacity: .35; }

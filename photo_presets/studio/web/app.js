@@ -497,7 +497,7 @@ function renderViewer() {
 }
 
 const viewerSignature = (cur) => JSON.stringify([cur?.id, cur?.ver, cur?.state, st.compare, st.fixing, st.fixVer,
-  st.activePhoto, st.tool, st.areaSel, st.finding]);
+  st.activePhoto, st.tool, st.areaSel, st.finding, st.tab]);
 
 function toolbar(cur) {
   const list = visibleSlots();
@@ -505,6 +505,7 @@ function toolbar(cur) {
   const done = cur.state === "done";
   const photo = st.photos.find((p) => p.id === cur.photo);
   return `<div class="toolbar">
+    ${st.tab === "edit" && cur.state === "done" ? histBtns() : ""}
     <button data-nav="-1" title="Previous (←)" ${off(i <= 0, "This is the first look.")}>${icon("left")}</button>
     <span class="of">${i < 0 ? "–" : i + 1} / ${list.length}</span>
     <button data-nav="1" title="Next (→)" ${off(i >= list.length - 1, "This is the last look.")}>${icon("right")}</button>
@@ -1221,7 +1222,9 @@ function renderTabs() {
   stalePreviews();
   $("#pane-edit").hidden = st.tab !== "edit";
   if (st.tab === "edit") renderEdit(cur);
+  if (st.tab !== drawnTab) { drawnTab = st.tab; renderViewer(); }  // (the picture's bar: undo and redo while editing)
 }
+let drawnTab = null;
 
 // Reel ---------------------------------------------------------------------------------------
 const reelForm = store.get("reel", { title: "", closing: "", sec: 2, max: 59, start: 0 });
@@ -1530,7 +1533,7 @@ function init() {
   $$(".tabs button").forEach((b) => b.onclick = () => {
     const cur = slotById(st.current);
     if (b.dataset.tab === "edit" && !(cur && cur.state === "done")) { editPhoto(); return; }
-    st.tab = b.dataset.tab; editSig = ""; renderTabs();
+    st.tab = b.dataset.tab; editSig = ""; renderTabs(); renderViewer();
   });
   $("#look-search").oninput = (e) => { st.query = e.target.value; renderLooks(true); };
   $("#show").onchange = (e) => { st.show = e.target.value; render(); };

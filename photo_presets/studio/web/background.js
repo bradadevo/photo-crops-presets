@@ -107,7 +107,7 @@ const FIX_VIEWS = [["tint", "Blue"], ["black", "On black"], ["white", "On white"
 function fixBar() {
   const mode = st.fixMode || (st.fixAdd === false ? "click-out" : "click-add");
   const tune = st.fixTune || [0, 0];
-  return `<div class="fixbar toolbar below cut-bar">
+  return `<div class="fixbar toolbar below cut-bar">${histBtns()}
     <div class="seg small">${FIX_MODES.map(([k, ic, l, tip]) => `<button data-fix-mode="${k}" class="${mode === k ? "on" : ""}" title="${esc(tip)}">${icon(ic)} ${l}</button>`).join("")}</div>
     ${mode.startsWith("click") ? "" : `<span class="angle" title="Brush size · [ and ] keys">Size<input type="range" id="fix-r" min="0.004" max="0.08" step="0.002" value="${st.fixR || 0.02}"></span>`}
     <span class="sep"></span>
