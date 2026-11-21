@@ -360,7 +360,8 @@ function tileCreate(sheet) {
       if (act === "keep") { toggleKeep([s.id]); return; }
       if (act === "export") { openExport([s.id]); return; }
       if (act === "delete") { deleteLooks([s.id]); return; }
-      if ((e.metaKey || e.shiftKey || e.ctrlKey) && slotById(s.id)?.state === "done") { toggleSurvey(s.id); return; }
+      if (e.shiftKey && slotById(s.id)?.state === "done") { rangeSurvey(s.id); return; }  // Shift: everything between
+      if ((e.metaKey || e.ctrlKey) && slotById(s.id)?.state === "done") { toggleSurvey(s.id); return; }  // ⌘: one more (or one less)
       st.survey = [];
       select(s.id, sheet);
     };
@@ -403,7 +404,10 @@ function renderStrip() {
   show.innerHTML = [["all", "All"], ["picks", `Picks (${kept})`], ...[1, 2, 3, 4, 5].map((n) => [String(n), "★".repeat(n) + (n < 5 ? " and up" : "")])]
     .map(([v, l]) => `<option value="${v}" ${st.show === v ? "selected" : ""}>${l}</option>`).join("");
   $("#keep-none").hidden = !kept;
-  $("#drop-unpicked").hidden = !kept || kept === done;
+  $("#drop-unpicked").hidden = !done;
+  setOff($("#drop-unpicked"), !kept || kept === done, kept ? "Every look is picked, so there's nothing unpicked to remove."
+    : "Pick the looks to keep first (Space, or the ✓ on each), then this removes the rest.");
+  $("#drop-picked").hidden = !kept;
   $("#keep-all").hidden = !done || kept === done;
   wrap.classList.toggle("grid", st.view === "grid");
   $("#view-single").classList.toggle("on", st.view === "single");
@@ -701,14 +705,24 @@ async function copyPicture(s) {
 
 function toggleSurvey(id) {
   if (!st.survey.length && st.current && st.current !== id && slotById(st.current)?.state === "done") st.survey = [st.current];
-  st.survey = st.survey.includes(id) ? st.survey.filter((x) => x !== id) : [...st.survey, id].slice(-6);
+  st.survey = st.survey.includes(id) ? st.survey.filter((x) => x !== id) : [...st.survey, id];  // (any number: compare shows six)
   if (st.survey.length >= 2 && st.view === "grid") { /* the sheet's head offers to open them */ }
   viewerSig = ""; render();
 }
 
+/* Shift-click: every finished look from the last one chosen (or the one open) to this one, added */
+function rangeSurvey(id) {
+  const list = visibleSlots().filter((s) => s.state === "done").map((s) => s.id);
+  const from = st.survey.at(-1) ?? st.current, a = list.indexOf(from), b = list.indexOf(id);
+  if (a < 0 || b < 0) { toggleSurvey(id); return; }
+  const span = list.slice(Math.min(a, b), Math.max(a, b) + 1);
+  st.survey = [...st.survey.filter((x) => !span.includes(x)), ...(a <= b ? span : span.reverse())];
+  viewerSig = ""; render();
+}
+
 function renderSurvey(v) {
-  const ids = st.survey;
-  const sig = "survey:" + ids.map((id) => id + ":" + slotById(id).ver + ":" + slotById(id).kept).join(",");
+  const all = st.survey, ids = all.slice(0, 6);
+  const sig = "survey:" + all.length + ":" + ids.map((id) => id + ":" + slotById(id).ver + ":" + slotById(id).kept).join(",");
   if (sig === viewerSig) return;
   viewerSig = sig;
   v.classList.remove("grid-mode"); v.classList.add("survey-mode");
@@ -720,8 +734,8 @@ function renderSurvey(v) {
         <button data-k="${id}" class="${s.kept ? "kept" : ""}" title="Pick">${icon(s.kept ? "pick" : "pickO")}</button>
         <button data-x="${id}" title="Take out of the comparison">${icon("x")}</button></div></div>`;
   }).join("")}</div>
-  <div class="caption"><div class="toolbar"><span class="title"><b>Comparing ${ids.length}</b><span>⌘-click pictures to add or take out · click one to open it</span></span>
-    <span class="sep"></span><button id="sv-keep">${icon("pick")} Pick all ${ids.length}</button><button id="sv-done">Done</button></div></div>`;
+  <div class="caption"><div class="toolbar"><span class="title"><b>${all.length} selected</b><span>${all.length > 6 ? `Showing the first 6 · ` : ""}⌘-click or Shift-click looks to add or take out · click one to open it</span></span>
+    <span class="sep"></span><button id="sv-keep">${icon("pick")} Pick all ${all.length}</button><button id="sv-rm" title="Remove the selected looks (Delete): undo is one click">${icon("trash")} Remove ${all.length}</button><button id="sv-done">Done</button></div></div>`;
   paintIcons(v);
   v.querySelectorAll(".cell").forEach((c) => c.onclick = (e) => {
     const id = +c.dataset.id;
@@ -730,7 +744,8 @@ function renderSurvey(v) {
     if (e.metaKey || e.shiftKey) { toggleSurvey(id); return; }
     st.survey = []; select(id);
   });
-  $("#sv-keep").onclick = () => { const off = ids.filter((id) => !slotById(id).kept); toggleKeep(off.length ? off : ids); };
+  $("#sv-keep").onclick = () => { const off = all.filter((id) => !slotById(id).kept); toggleKeep(off.length ? off : all); };
+  $("#sv-rm").onclick = () => { const go = [...all]; st.survey = []; deleteLooks(go); };
   $("#sv-done").onclick = () => { st.survey = []; viewerSig = ""; render(); };
 }
 
@@ -754,7 +769,7 @@ function renderSheet(v) {
   }
   const done = doneSlots().length;
   v.querySelector(".sheet-head span").textContent = done
-    ? `${plural(done, "look")} · pick the keepers · ⌘-click to compare side by side · double-click to open` : "Your looks appear here as they are made";
+    ? `${plural(done, "look")} · pick the keepers · ⌘-click or Shift-click to select several · double-click to open` : "Your looks appear here as they are made";
   let cmp = v.querySelector("#sheet-compare");
   if (!cmp) {
     cmp = document.createElement("button"); cmp.id = "sheet-compare"; cmp.className = "btn primary";
@@ -762,7 +777,16 @@ function renderSheet(v) {
     v.querySelector(".sheet-head").appendChild(cmp);
   }
   cmp.hidden = st.survey.length < 2;
-  cmp.textContent = `Compare ${st.survey.length} side by side`;
+  cmp.textContent = `Compare ${Math.min(6, st.survey.length)} side by side`;
+  let rm = v.querySelector("#sheet-remove");
+  if (!rm) {
+    rm = document.createElement("button"); rm.id = "sheet-remove"; rm.className = "btn";
+    rm.title = "Remove the selected looks (Delete): undo is one click";
+    rm.onclick = () => { const go = [...st.survey]; st.survey = []; deleteLooks(go); };
+    v.querySelector(".sheet-head").appendChild(rm);
+  }
+  rm.hidden = st.survey.length < 2;
+  rm.textContent = `Remove ${st.survey.length}`;
   reconcile($("#sheet"), visibleSlots(), (s) => s.id, tileCreate(true), tileUpdate);
   paintIcons(v);
 }
@@ -1393,7 +1417,7 @@ function showHelp() {
   const keys = [["← →", "Previous / next look"], ["Space or P", "Pick this look"], ["C", "Compare with the original"],
     ["B (hold)", "Show the original"], ["G", "Contact sheet / one at a time"], ["E", "Export the picks (or this one)"],
     ["A", "Edit this look"], ["R", "Crop and straighten"], ["T", "Add text"], ["1 – 5, 0", "Rate it, or clear the rating"],
-    ["⌘Z, ⇧⌘Z", "Undo, redo"], ["Delete", "Remove this look (with Undo)"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
+    ["⌘Z, ⇧⌘Z", "Undo, redo"], ["Delete", "Remove this look, or the selected ones (with Undo)"], ["⌘-click, Shift-click", "Select several looks (Shift: everything between)"], ["Z or double-click", "Zoom in to check faces and focus (drag to move)"],
     ["⌘-click", "Compare pictures side by side"], ["⌘C", "Copy the picture (paste into Messages or Mail)"],
     ["⌘V", "Paste a photo"], ["Esc", "Close, or go back"]];
   modal(`<header><h2>Keyboard shortcuts</h2></header><div class="body"><div class="help-list">${keys.map(([k, t]) => `<kbd>${k}</kbd><span>${t}</span>`).join("")}</div></div>
@@ -1447,6 +1471,7 @@ document.addEventListener("keydown", (e) => {
     const up = (u) => { if (u.key.toLowerCase() === "b") { st.compare = false; st.split = 50; renderViewer(); document.removeEventListener("keyup", up); } };
     document.addEventListener("keyup", up);
   }
+  else if ((k === "delete" || k === "backspace") && st.survey.length >= 2 && !st.tool) { e.preventDefault(); const go = [...st.survey]; st.survey = []; deleteLooks(go); }
   else if ((k === "delete" || k === "backspace") && cur?.state === "done" && !st.tool) { e.preventDefault(); deleteLooks([cur.id]); }
   else if (k === "g" && st.slots.length) { st.view = st.view === "grid" ? "single" : "grid"; render(); }
   else if (k === "e") exportDefault();
@@ -1513,6 +1538,7 @@ function init() {
   $("#keep-all").onclick = () => { const ids = doneSlots().filter((s) => !s.kept).map((s) => s.id); toggleKeep(ids); };
   $("#keep-none").onclick = () => toggleKeep(keptSlots().map((s) => s.id));
   $("#drop-unpicked").onclick = () => deleteLooks(doneSlots().filter((s) => !s.kept).map((s) => s.id));
+  $("#drop-picked").onclick = () => deleteLooks(keptSlots().map((s) => s.id));
   $("#clear-looks").onclick = () => {
     const m = modal(`<header><h2>Remove all looks?</h2></header><div class="body"><p style="margin:0;color:var(--muted)">The ${plural(doneSlots().length, "look")} made so far leave this session. Your photos stay, and anything you exported is kept.</p></div>
       <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="rm-go">Remove all</button></footer>`);

@@ -134,9 +134,12 @@ Mac notification says when the looks (or an export, or a reel) are ready.
   size), **Messages**, **Mail**, **Add to Photos** (it reaches your iPhone
   through iCloud Photos), or **Copy** (**⌘C**). What is shared is the finished
   picture, full size, with its edits, text, your name and copyright.
-- **Remove a look** you do not want: the bin button, or **Delete**; **Undo**
-  is right there. **Remove unpicked** clears every look you did not pick, and
-  **Remove all** everything.
+- **Remove looks**: the bin button or **Delete** removes the one you're on.
+  To remove several, select them: **⌘-click** adds one at a time, **Shift-click**
+  everything between; the bar then says **N selected** with **Remove N** (or
+  press **Delete**). **Remove unpicked** removes every look you didn't pick,
+  **Remove picked** the ones you did (for marking the rejects), and **Remove
+  all** everything. **Undo** is right there every time.
 
 **5. Edit** (the **Edit** tab, or **A**). Everything changes the picture as you
 drag, and **⌘Z** / **⇧⌘Z** undo and redo every step (the arrows at the top of
