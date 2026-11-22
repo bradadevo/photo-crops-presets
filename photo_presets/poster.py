@@ -481,7 +481,7 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
     if logo is not None and t == "custom":
         pass  # (its logo is one of its pieces)
     elif logo is not None and p.get("logo_at"):
-        out = _logo_placed(out, logo, W, H, p["logo_at"])
+        out = _logo_placed(out, logo, W, H, p["logo_at"], _placed_height(W, p), p)
     elif logo is not None and t in MORE:
         out = _logo_at(out, logo, W, H, LOGO_AT[t])
     elif logo is not None:
@@ -1327,11 +1327,28 @@ LOGO_AT = {"name": "tl", "goal": "tr", "teamcolor": "br", "matchday": "band", "c
            "frosted": "tr"}
 
 
-def _logo_placed(out: np.ndarray, logo: Image.Image, W: int, H: int, at: dict) -> np.ndarray:
-    """The logo with its middle where you dragged it, its width a share of the poster's."""
-    lw = max(4, int(at["size"] * W))
+def _placed_height(W: int, p: dict) -> int:
+    """How tall the poster was (at this width) when you dragged things on it: its own shape. An export
+    to another size (a 9:16 story from a 4:5 post) sets only "aspect", and keeps the shape it was made in."""
+    return int(round(W / SHAPES.get(p.get("shape", "post"), 0.8)))
+
+
+def _logo_placed(out: np.ndarray, logo: Image.Image, W: int, H: int, at: dict, H0: int | None = None,
+                 p: dict | None = None) -> np.ndarray:
+    """The logo with its middle where you dragged it, its width a share of the poster's. On another
+    shape than it was dragged on (H0 tall), it keeps its distance from the nearest edge, top or
+    bottom, the way the poster's own badges and words do (measured in the poster's unit), so a logo
+    level with the number badge stays level with it on a 9:16 story."""
+    k = 1.0
+    cy = at["y"] * H
+    if H0 and H0 != H:
+        u, u0 = _unit(W, H, p or {}), _unit(W, H0, p or {})
+        k = u / u0
+        cy0 = at["y"] * H0
+        cy = cy0 * k if at["y"] <= 0.5 else H - (H0 - cy0) * k
+    lw = max(4, int(at["size"] * W * k))
     lh = max(1, int(lw * logo.height / logo.width))
-    x, y = at["x"] * W - lw / 2, at["y"] * H - lh / 2
+    x, y = at["x"] * W - lw / 2, cy - lh / 2
     lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     lay.alpha_composite(logo.resize((lw, lh), Image.LANCZOS), (int(x), int(y)))
     _note_box("logo", (x, y, x + lw, y + lh))

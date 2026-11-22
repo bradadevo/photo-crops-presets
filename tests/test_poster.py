@@ -307,3 +307,23 @@ def test_every_layout_takes_words_on_several_lines():
         for k in one:
             if k in boxes and k in single and (t, k) != ("featured", "name"):  # (featured: the name is drawn in two parts)
                 assert boxes[k]["y1"] - boxes[k]["y0"] > single[k]["y1"] - single[k]["y0"], (t, k)
+
+
+def test_a_dragged_logo_stays_level_with_the_top_on_a_taller_export():
+    """A logo dragged level with the number badge on a 4:5 post stays level with it on the 9:16 story
+    (it keeps its distance from the top, as the badge does; it used to slide down the taller poster)."""
+    from PIL import Image as _Image
+    logo = _Image.new("RGBA", (100, 100), (255, 0, 0, 255))
+    p = {"template": "card", "shape": "post", "logo_at": {"x": 0.85, "y": 0.13, "size": 0.13}}
+    W = 1080
+
+    def logo_middle_y(H, aspect=None):
+        q = dict(p) | ({"aspect": aspect} if aspect else {})
+        out = poster._logo_placed(np.zeros((H, W, 3), np.float32), logo, W, H, q["logo_at"], poster._placed_height(W, q), q)
+        rows = np.nonzero(out[..., 0].max(1) > 0.5)[0]
+        return (rows.min() + rows.max()) / 2
+    post, story = logo_middle_y(1350), logo_middle_y(1920, 1080 / 1920)
+    assert abs(post - story) <= 2  # the same distance from the top (u is the same at this width)
+    low = dict(p, logo_at={"x": 0.85, "y": 0.9, "size": 0.13})  # one near the bottom keeps its distance from the bottom
+    p.update(low)
+    assert abs((1350 - logo_middle_y(1350)) - (1920 - logo_middle_y(1920, 1080 / 1920))) <= 2
