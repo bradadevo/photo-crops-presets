@@ -335,12 +335,13 @@ function renderEdit(cur) {
     background: st.tool === "background" || e.background ? backgroundSection(e) : "",
     poster: st.tool === "poster" || e.poster ? posterSection(e) : "",
     text: texts.length ? `<div class="section"><h3>Text</h3>${texts.map((t, i) => `<div class="item${st.textSel === i ? " on" : ""}" data-text="${i}">
-      <div class="item-head"><textarea class="field text-in" rows="1" data-ti="${i}" placeholder="Type here">${esc(t.text)}</textarea><button class="icon-btn" data-del-text="${i}" title="Remove this text">${icon("trash")}</button></div>
+      <div class="item-head"><textarea class="field text-in" rows="1" data-ti="${i}" placeholder="Type here">${esc(t.text)}</textarea>${fontColorBtn(t.color, `data-tcolor="${i}"`, st.textSel === i, "Text color")}<button class="icon-btn" data-del-text="${i}" title="Remove this text">${icon("trash")}</button></div>
+      ${st.textSel === i ? `<div class="swatches word-colors" data-color-of="${i}"><span class="swatch-label">Text color</span>${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}
+        <label class="pick-own" title="Any color"><input type="color" data-own-color-of="${i}" value="${/^#[0-9a-f]{6}$/i.test(t.color || "") ? t.color : "#ffffff"}"></label></div>` : ""}
       ${st.textSel === i ? `<div class="seg full small" data-style-of="${i}">${TEXT_STYLES.map(([v, l]) => `<button data-v="${v}" class="${t.style === v ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="slider"><label>Size</label><output>${Math.round(t.size * 100)}</output><input type="range" data-size-of="${i}" min="0.02" max="0.2" step="0.005" value="${t.size}"></div>
       ${fontPicker(t.font, "Style's own", `data-font-of="${i}"`)}
-      ${angleControl(t.angle, `data-angle-of="${i}"`)}
-      <div class="swatches" data-color-of="${i}">${TEXT_COLORS.map((c) => `<button data-v="${c}" class="${t.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>` : ""}
+      ${angleControl(t.angle, `data-angle-of="${i}"`)}` : ""}
       </div>`).join("")}</div>` : "",
     logo: st.tool === "logo" || (e.logos || []).length ? logoSection(e) : "",
   };
@@ -543,6 +544,14 @@ function bindEditPane(cur, pane) {
   pane.querySelectorAll("[data-color-of] button").forEach((b) => b.onclick = () => {
     const i = +b.parentElement.dataset.colorOf;
     changeEdits(slotById(cur.id), (e) => { e.texts[i].color = b.dataset.v; });
+  });
+  pane.querySelectorAll("[data-own-color-of]").forEach((inp) => inp.onchange = () => {
+    const i = +inp.dataset.ownColorOf;
+    changeEdits(slotById(cur.id), (e) => { e.texts[i].color = inp.value; });
+  });
+  pane.querySelectorAll("[data-tcolor]").forEach((b) => b.onclick = () => {  // its colors open right under its box
+    const i = +b.dataset.tcolor;
+    if (st.textSel !== i) { st.textSel = i; editSig = ""; renderTabs(); }
   });
   pane.querySelectorAll("[data-size-of]").forEach((r) => {
     let snap = null, timer = null;
@@ -949,14 +958,14 @@ function posterSection(e) {
         <button data-v="badge" class="${(p.number_style || "badge") === "badge" ? "on" : ""}" title="A solid badge on the card's corner, in front">Badge</button>
         <button data-v="behind" class="${p.number_style === "behind" ? "on" : ""}" title="Big, behind the card">Big, behind</button></div></div>` : ""}
       ${(POSTER_FIELDS[p.template] || []).map(([k, l]) => `<div class="fld"><label>${l}</label><div class="fld-row"><textarea class="field poster-in" rows="1" data-pk="${k}" placeholder="(left off the poster)" title="Return starts a new line (up to 3)">${esc(p[k] ?? "")}</textarea>
-        ${k === "away_score" ? "" : `<button class="color-dot${p.colors?.[k] ? "" : " auto"}" data-color-pk="${k}" style="${p.colors?.[k] ? `background:${p.colors[k]}` : ""}" title="Its color" aria-label="Color of ${esc(l)}"></button>`}
+        ${k === "away_score" ? "" : fontColorBtn(p.colors?.[k], `data-color-pk="${k}"`, st.colorPk === k, `Text color of ${l}`)}
         ${k === "away_score" ? "" : `<button class="aa-btn${st.stylePk === k ? " on" : ""}${p.moves?.[k]?.f || p.moves?.[k]?.r ? " set" : ""}" data-style-pk="${k}" title="Its font, size and angle" aria-label="Style of ${esc(l)}">Aa</button>`}
         <button class="icon-btn" data-clear-pk="${k}" title="Take this off the poster" ${off(!(p[k] ?? ""), "It's already off the poster: type in the box to put it back.")}>${icon("x")}</button></div>
         ${st.stylePk === k ? `<div class="word-style" data-word-style="${k}">
           <div class="slider"><label title="Or drag its corner on the picture">Size</label><output>${Math.round((p.moves?.[k]?.s || 1) * 100)}%</output><input type="range" data-word-size min="0.3" max="4" step="0.05" value="${p.moves?.[k]?.s || 1}"></div>
           ${fontPicker(p.moves?.[k]?.f, "Layout's own")}${angleControl(p.moves?.[k]?.r)}
           <p class="notes">Drag it on the picture to place it; its round handle turns it.</p></div>` : ""}
-        ${st.colorPk === k ? `<div class="swatches word-colors" data-word-colors="${k}"><button data-v="" class="auto${p.colors?.[k] ? "" : " on"}" title="As the layout has it" aria-label="As the layout has it">A</button>${WORD_COLORS.map((c) => `<button data-v="${c}" class="${p.colors?.[k] === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}
+        ${st.colorPk === k ? `<div class="swatches word-colors" data-word-colors="${k}"><span class="swatch-label">Text color</span><button data-v="" class="auto${p.colors?.[k] ? "" : " on"}" title="As the layout has it" aria-label="As the layout has it">A</button>${WORD_COLORS.map((c) => `<button data-v="${c}" class="${p.colors?.[k] === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}
           <label class="pick-own" title="Any color"><input type="color" data-own-color="${k}" value="${p.colors?.[k] || "#ffffff"}"></label></div>` : ""}</div>`).join("")}
       <div class="swatches" id="pp-color" title="Team color">${TEAM_COLORS.map((c) => `<button data-v="${c}" class="${p.color === c ? "on" : ""}" style="background:${c}" aria-label="${c}"></button>`).join("")}</div>
       ${(st.kit || []).length && p.template !== "custom" ? `<div class="kit-grid small" id="pp-logo" title="Logo on the poster">
@@ -1194,6 +1203,12 @@ async function addLogo(file, quiet) {
   try { meta = await api("/api/logos", fd); if (quiet) t.close(); else t.done("Logo added", "Click it to put it on the picture"); } catch { t.close(); }
   await loadKit();
   return meta;
+}
+
+/* The text color button beside a text box, as in Word: an A over a bar of its color (a rainbow bar:
+   the layout's own color). Its colors open right under the box. */
+function fontColorBtn(color, attrs, open, label) {
+  return `<button class="font-color${color ? "" : " auto"}${open ? " on" : ""}" ${attrs} style="${color ? `--c:${esc(color)}` : ""}" title="${esc(label)}" aria-label="${esc(label)}">A<i></i></button>`;
 }
 
 // Crop and straighten ---------------------------------------------------------------------------

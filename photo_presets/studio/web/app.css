@@ -722,6 +722,14 @@ details.group:not([open]) > summary svg { transform: rotate(-90deg); }
 details.group > summary:hover h3, details.group > summary:hover svg { color: var(--text); }
 .group-body { padding-bottom: 8px; }
 /* each poster word's own color */
+.font-color { flex: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: transparent;
+  color: var(--text); font: 700 15px/1 var(--font, inherit); cursor: pointer; display: inline-flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 2px; padding: 0; }
+.font-color i { display: block; width: 18px; height: 4px; border-radius: 2px; background: var(--c, #fff); }
+.font-color.auto i { background: linear-gradient(90deg, #fff, #d4af37, #c8102e, #0b3d91); }
+.font-color:hover { border-color: rgba(255,255,255,.4); }
+.font-color.on { border-color: var(--accent); }
+.swatch-label { font-size: 12px; color: var(--text-2, #aab); margin-right: 4px; align-self: center; }
 .color-dot { width: 24px; height: 24px; flex: none; border-radius: 50%; border: 2px solid var(--line-2); cursor: pointer; padding: 0; }
 .color-dot.auto { background: conic-gradient(#fff 0 25%, #d4af37 0 50%, #c8102e 0 75%, #0b3d91 0); }
 .color-dot:hover { border-color: var(--text); }
