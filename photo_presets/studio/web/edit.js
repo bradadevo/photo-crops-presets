@@ -75,9 +75,10 @@ function updateSlot(s, { keepPane = false } = {}) {
     const img = $("#frame img.after");
     const sameGeometry = img && img.dataset.base === `${s.width}x${s.height}` && !st.tool && !st.fixing;
     if (sameGeometry) {
-      const pre = new Image();
-      pre.onload = () => { if (img.isConnected) img.src = pre.src; };
-      pre.src = slotImg(s);
+      const pre = new Image(), quick = needsQuick(s);
+      pre.onload = () => { if (img.isConnected) { img.src = pre.src; if (!quick) shownPics[s.id] = { src: pre.src, shape: pre.naturalWidth / pre.naturalHeight }; } };
+      pre.src = slotImg(s) + (quick ? "?quick=1" : "");  // (a crop still being sharpened: the quick picture, at once)
+      if (quick) sharpCrop(s);
       viewerSig = viewerSignature(s);
       paintTexts(s); paintWords(s);
     } else { viewerSig = ""; renderViewer(); }
@@ -627,7 +628,7 @@ function renderTool(v, cur) {
   if (t === "crop") return renderCrop(v, cur);
   if (t === "remove") return renderBrush(v, cur);
   const base = t === "area";
-  const src = base ? slotImg(cur, st.areaSel != null && cur.edits?.areas?.[st.areaSel] ? `area-${st.areaSel}` : "base") : slotImg(cur);
+  const src = base ? slotImg(cur, st.areaSel != null && cur.edits?.areas?.[st.areaSel] ? `area-${st.areaSel}` : "base") : slotImg(cur) + (needsQuick(cur) ? "?quick=1" : "");
   const bar = {
     area: `<span class="title"><b>Adjust a part</b><span>Click a face, the player, the sky or the grass</span></span><span class="sep"></span><button data-done>Done</button>`,
     kitpick: `<span class="title"><b>Kit color pop</b><span>Click the kit (a shirt, the shorts) to pick its color</span></span><span class="sep"></span><button data-done>Cancel</button>`,

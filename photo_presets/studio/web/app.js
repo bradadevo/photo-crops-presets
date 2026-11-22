@@ -467,7 +467,7 @@ function renderViewer() {
   if (cur && cur.state === "done" && st.tool) { renderTool(v, cur); return; }
   if (cur && cur.state === "done") {
     const fv = st.fixView && st.fixView !== "tint" ? "-" + st.fixView : "";
-    const src = st.fixing ? `/img/slot/${cur.id}/0/fix${fv}.jpg?v=${st.fixVer}` : slotImg(cur);
+    const src = st.fixing ? `/img/slot/${cur.id}/0/fix${fv}.jpg?v=${st.fixVer}` : slotImg(cur) + (needsQuick(cur) ? "?quick=1" : "");
     v.innerHTML = `<div class="frame${st.fixing ? " fixing" : ""}${st.zoom.on ? " zoomed" : ""}" id="frame" style="--split:${st.split}%;${zoomVars()}">
         <div class="layer"><img class="after" src="${src}" alt="${esc(cur.title)}" draggable="false" data-base="${st.fixing ? "" : `${cur.width}x${cur.height}`}"></div>
         ${st.fixing || st.zoom.on || st.compare ? "" : `<div class="texts" id="texts"></div>`}
@@ -553,6 +553,26 @@ function toolbar(cur) {
    export. While it's being made, say so; when it's done, say that too (once per crop). */
 const sharpSaid = new Set();
 let sharpWatch = 0, sharpBusy = null;
+/* A tight crop not sharpened yet (this session): its pictures are asked for quick, meanwhile. */
+function needsQuick(s) {
+  const c = s?.edits?.crop;
+  return !!c && Math.min(c[2] - c[0], c[3] - c[1]) <= 0.8 && st.prefs?.sharp_crops !== false && !sharpDone.has(`${s.id}:${c.join(",")}`);
+}
+
+/* The sharp crop is ready: the quick picture on screen gives way to it (the current version's). */
+function swapSharp(id) {
+  const f = $("#frame"), img = f?.querySelector("img.after");
+  if (!img || st.current !== id || !img.src.includes("quick=1")) return;
+  const sharp = img.src.replace(/[?&]quick=1/, "");
+  const next = new Image();
+  next.onload = () => {
+    if (!img.isConnected || !img.src.includes("quick=1")) return;
+    img.src = sharp; f.querySelector(".ready-note")?.remove();
+    shownPics[id] = { src: sharp, shape: next.naturalWidth / next.naturalHeight };
+  };
+  next.src = sharp;
+}
+
 async function sharpCrop(cur) {
   const c = cur?.edits?.crop;
   if (!c || Math.min(c[2] - c[0], c[3] - c[1]) > 0.8 || st.prefs?.sharp_crops === false) return;
@@ -560,11 +580,12 @@ async function sharpCrop(cur) {
   if (sharpBusy === key) return;  // (already saying so: one note, not one per click)
   const turn = ++sharpWatch;
   let s;
-  try { s = await api(`/api/slots/${cur.id}/sharp`); } catch { return; }
+  try { s = await api(`/api/slots/${cur.id}/sharp?start=1`); } catch { return; }
+  if (s.ready) { sharpDone.add(key); swapSharp(cur.id); }
   if (!s.needed || s.ready || turn !== sharpWatch || sharpBusy === key) return;
   sharpBusy = key;
-  const t = toast("Enhancing the crop with AI…", { sticky: true, spin: true,
-    small: "A few seconds, only once. Nothing to do: it stays sharp in the poster and the export." });
+  const t = toast("Sharpening the crop from the full-size photo…", { sticky: true, spin: true,
+    small: "Only once for this crop (the AI fills in detail if it needs to). Nothing to do: keep working." });
   for (let i = 0; i < 360; i++) {
     await new Promise((r) => setTimeout(r, 500));
     try { s = await api(`/api/slots/${cur.id}/sharp`); } catch { break; }
@@ -572,9 +593,10 @@ async function sharpCrop(cur) {
   }
   t.close();
   if (sharpBusy === key) sharpBusy = null;
+  if (s.ready) { sharpDone.add(key); swapSharp(cur.id); }
   if (s.ready && !sharpSaid.has(key)) {
     sharpSaid.add(key);
-    toast("Crop enhanced", { small: "It stays sharp from here on: the poster, thumbnails and export all use it." });
+    toast("Crop sharpened", { small: "Saved: it stays sharp from here on, even after you quit (poster, thumbnails, export)." });
   }
 }
 
@@ -1705,12 +1727,27 @@ window.addEventListener("resize", () => {  // a smaller window: the panels give 
    sharp, with a small "Updating…" note in the corner; the new one takes its place when it's ready.
    Only the very first time (nothing shown yet for this picture) does the photo show softly with a note. */
 const shownPics = {};  // each picture's last one on screen: its address and shape
+const sharpDone = new Set();  // tight crops already made sharp (picture id and crop): no quick picture first
 function watchPicture(cur) {
   const f = $("#frame"), img = f?.querySelector("img.after");
   if (!img) return;
   const want = new URL(img.getAttribute("src"), location.href).href, shape = cur.width / cur.height;
   const remember = (el) => { if (el.naturalWidth) shownPics[cur.id] = { src: el.src, shape: el.naturalWidth / el.naturalHeight }; };
   if (img.complete && img.naturalWidth) { remember(img); return; }
+  const c = cur.edits?.crop;
+  const sharpKey = c ? `${cur.id}:${c.join(",")}` : "";
+  if (c && Math.min(c[2] - c[0], c[3] - c[1]) <= 0.8 && st.prefs?.sharp_crops !== false && !sharpDone.has(sharpKey)
+      && /\/img\/slot\/\d+\/\d+\/(after|full)\.jpg(\?quick=1)?$/.test(want)) {
+    // a tight crop being made sharp: the picture as it is (normal quality) shows at once, never blurred,
+    // and the sharp one takes its place when it's ready
+    // (only the quick picture is asked for: the sharp one is made once in the background and swapped in by
+    // sharpCrop when it's ready, so every slider shows at once meanwhile)
+    if (!want.includes("quick=1")) img.src = want + "?quick=1";
+    f.querySelector(".ready-note")?.remove();
+    f.insertAdjacentHTML("beforeend", `<span class="tag ready-note corner"><span class="spin"></span> Sharpening…</span>`);
+    sharpCrop(cur);
+    return;
+  }
   const last = shownPics[cur.id];
   if (last && last.src !== want && Math.abs(last.shape - shape) / shape < 0.03) {
     img.src = last.src;  // (from the browser's memory: at once, and sharp)

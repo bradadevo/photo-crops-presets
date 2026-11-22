@@ -1084,12 +1084,12 @@ async def traced(r: Result) -> None:
         await asyncio.wrap_future(W.submit(FIX, E.part, r, a["x"], a["y"], 8, 8))
 
 
-def _variant(r: Result, kind: str) -> bytes:
+def _variant(r: Result, kind: str, quick: bool = False) -> bytes:
     """after: the picture as edited, without its text (the page draws the text, to move it);
     thumb, full: with its text; before: the original, straightened and cropped the same;
     base: parts adjusted, not yet straightened or cropped (for cropping and brushing);
     area-N: base with part N shown in blue."""
-    if kind in ("after", "thumb", "full") and E.needs_sharp(r) and (kind != "thumb" or E.sharp_ready(r)):
+    if kind in ("after", "thumb", "full") and E.needs_sharp(r) and (not (quick or kind == "thumb") or E.sharp_ready(r)):
         # a tight crop: the sharp one, every time (a thumbnail only when it's made already: never starts the AI)
         out = E.sharp_finished(r, texts=kind != "after")
         return jpeg(pipeline.to_image(out), THUMB, 84) if kind == "thumb" else jpeg(pipeline.to_image(out), quality=92 if kind == "full" else 90)
@@ -1114,7 +1114,9 @@ def _variant(r: Result, kind: str) -> bytes:
 
 
 @app.get("/img/slot/{sid}/{ver}/{kind}.jpg")
-async def slot_image(sid: int, ver: int, kind: str):
+async def slot_image(sid: int, ver: int, kind: str, quick: int = 0):
+    """quick=1: the picture at once from the preview (no waiting for a sharp crop to be made): shown
+    while the sharp one is made, never blurred."""
     s = S.slot(sid)
     r = s.result
     if kind.startswith("fix"):  # fix, fix-black, fix-white, fix-mask: the cut-out as you check it
@@ -1130,19 +1132,37 @@ async def slot_image(sid: int, ver: int, kind: str):
         if kind in ("after", "full", "base"):
             return picture(PICTURES.get(("after", sid, s.ver), lambda: jpeg(r.after, quality=90)))
     await traced(r)
+    if quick and kind in ("after", "full") and E.needs_sharp(r) and not E.sharp_ready(r):
+        data = await asyncio.to_thread(PICTURES.get, (kind + "-quick", sid, s.ver), lambda: _variant(r, kind, quick=True))
+        return picture(data)
     if kind in ("after", "full") and E.needs_sharp(r) and not E.sharp_ready(r):
-        await asyncio.wrap_future(W.submit(FIX, E.sharp_base, r))  # (made once, on the worker: it uses the AI model)
+        await asyncio.wrap_future(_start_sharpening(r))  # (made once, on the worker: it uses the AI model)
     data = await asyncio.to_thread(PICTURES.get, (kind, sid, s.ver), lambda: _variant(r, kind))
     return picture(data)
 
 
+SHARPENING: dict = {}  # crops being made sharp: their one job
+
+
+def _start_sharpening(r: Result):
+    """The crop made sharp on the worker: one job per crop, however many ask for it."""
+    key = E.sharp_key(r)
+    job = SHARPENING.get(key)
+    if job is None or job.done():
+        job = SHARPENING[key] = W.submit(FIX, E.sharp_base, r)
+    return job
+
+
 @app.get("/api/slots/{sid}/sharp")
-async def sharp_state(sid: int):
-    """Whether this picture's crop is made sharp by the AI (needed), and whether that's done (ready):
-    the app says "Enhancing the crop…" while it works."""
+async def sharp_state(sid: int, start: int = 0):
+    """Whether this picture's crop is made sharp (needed), and whether that's done (ready); start=1 starts
+    making it in the background (the app shows the picture as it is meanwhile, and says so)."""
     r = S.slot(sid).result
     need = r is not None and E.needs_sharp(r)
-    return {"on": E.sharp_on, "needed": need, "ready": bool(need and E.sharp_ready(r))}
+    ready = bool(need and E.sharp_ready(r))
+    if need and not ready and start:
+        _start_sharpening(r)
+    return {"on": E.sharp_on, "needed": need, "ready": ready}
 
 
 @app.post("/api/prefs/sharp")
