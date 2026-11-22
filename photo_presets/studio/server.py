@@ -1144,6 +1144,25 @@ async def slot_image(sid: int, ver: int, kind: str, quick: int = 0):
 SHARPENING: dict = {}  # crops being made sharp: their one job
 
 
+def _warm_up() -> None:
+    """After a restart, in the background (lowest priority): the AI models loaded and each look's picture
+    made, so the first click on a look shows it at once (not "Getting the picture ready" for seconds).
+    A tight crop: its sharp copy loaded from disk when it was saved (no AI is started here)."""
+    def one(sid: int):
+        s = S.slots.get(sid)
+        if s is None or s.result is None:
+            return
+        r = s.result
+        quick = E.needs_sharp(r) and not E.sharp_ready(r)
+        key = ("after-quick" if quick else "after", sid, s.ver)
+        try:
+            PICTURES.get(key, lambda: _variant(r, "after", quick=quick))
+        except Exception:
+            pass  # (only a head start: the picture is made when it's shown)
+    for sid in list(S.slots):
+        W.submit(PREVIEW, one, sid)
+
+
 def _start_sharpening(r: Result):
     """The crop made sharp on the worker: one job per crop, however many ask for it."""
     key = E.sharp_key(r)
@@ -1186,6 +1205,10 @@ def _zoomed(r: Result) -> tuple[bytes, bytes]:
     drawing is reused, so this is quick). A crop is made from as many of the photo's
     own pixels as it has, and, when that is still small, enlarged by the AI detail
     enlarger, as its export will be: what you check is what you get."""
+    if E.needs_sharp(r):  # a tight crop: its sharp picture (made once and kept), not made again for zoom
+        after = pipeline.to_image(E.sharp_finished(r, texts=False))
+        before = pipeline.to_image(edits.geometry(pipeline.to_array(r.before), r.edits)).resize(after.size, Image.LANCZOS)
+        return jpeg(after, quality=90), jpeg(before, quality=90)
     p = E.ready(r.source, r.crop, r.recipe)
     img = p.image.copy()
     c = (r.edits or {}).get("crop")
@@ -2318,6 +2341,7 @@ def main() -> int:
     E.sharp_on = bool(prefs().get("sharp_crops", True))  # (tight crops made sharp by the AI: your setting)
     _classic()
     S.restore()
+    _warm_up()
     K.start()
     import signal
     signal.signal(signal.SIGTERM, lambda *_: _shut_down())  # stopped by the Mac (log out, restart): saved first

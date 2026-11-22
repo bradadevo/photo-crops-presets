@@ -1769,7 +1769,8 @@ function watchPicture(cur) {
     return;
   }
   f.classList.add("waiting");
-  f.style.setProperty("--placeholder", `url("/img/photo/${cur.photo}/view.jpg")`);
+  // (the look's own thumbnail, as framed: its crop and poster; the photo under it until that's there)
+  f.style.setProperty("--placeholder", `url("${slotImg(cur, "thumb")}"), url("/img/photo/${cur.photo}/view.jpg")`);
   if (!f.querySelector(".ready-note")) f.insertAdjacentHTML("beforeend", `<span class="tag ready-note"><span class="spin"></span> Getting the picture ready…</span>`);
   const done = () => { f.classList.remove("waiting"); f.querySelector(".ready-note")?.remove(); remember(img); };
   img.addEventListener("load", done, { once: true });
