@@ -296,19 +296,26 @@ class Engine:
         c = (r.edits or {}).get("crop")
         return bool(self.sharp_on and c) and min(float(c[2]) - float(c[0]), float(c[3]) - float(c[1])) <= SHARP_SHARE
 
+    CROP_KEYS = ("removals", "angle", "crop")  # (the edits that change the sharp crop itself)
+
     def sharp_key(self, r: "Result") -> str:
-        e = {k: v for k, v in (r.edits or {}).items() if k not in ("poster", "texts", "logos")}
-        return hashlib.sha1(json.dumps([str(r.source), r.crop, r.recipe, e, r.seed, self.removals.get(str(r.source))],
+        """What the sharp crop depends on: the photo, the look (not its sliders), the removals and the
+        crop. Sliders, colors, a new background, parts, the poster and text go on top: changing them
+        never runs the AI again."""
+        e = {k: v for k, v in (r.edits or {}).items() if k in self.CROP_KEYS}
+        look = {k: v for k, v in r.recipe.items() if k != "adjust"}
+        return hashlib.sha1(json.dumps([str(r.source), r.crop, look, e, r.seed, self.removals.get(str(r.source))],
                                        sort_keys=True, default=str).encode()).hexdigest()
 
     def sharp_ready(self, r: "Result") -> bool:
         return self.sharp_key(r) in self._sharp
 
-    def sharp_base(self, r: "Result") -> tuple[np.ndarray, np.ndarray | None]:
-        """The crop made sharp, once: the look made again from as many of the photo's own pixels as
-        the crop has, then (when that is still small) enlarged by the AI detail enlarger to SHARP_EDGE.
-        With its edits except the poster, text and logos (those go on top), and the players' cut-out
-        at its size. Kept, so the view, the poster and every click after use the same sharp picture."""
+    def sharp_base(self, r: "Result") -> dict:
+        """The crop made sharp, once: the look (before its sliders) made again from as many of the
+        photo's own pixels as the crop has, straightened and cropped, then (when that is still small)
+        enlarged by the AI detail enlarger toward SHARP_EDGE (at most 4x). With it: the photo under the
+        look the same way (for Look strength), the players' cut-out, their faces, and the uncropped size.
+        Kept, so every slider, color, background, poster and click after uses the same sharp picture."""
         key = self.sharp_key(r)
         if key in self._sharp:
             self._sharp.move_to_end(key)
@@ -320,12 +327,14 @@ class Engine:
         p = self.ready(r.source, r.crop, r.recipe)
         img = p.image.copy()
         img.thumbnail((min(max(img.size), round(SHARP_EDGE / share)),) * 2)
-        look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed, self.drawings,
+        recipe = {k: v for k, v in r.recipe.items() if k != "adjust"}
+        look, _ = pipeline.render(img, recipe, self.library, p.scene, r.seed, self.drawings,
                                   self.memo_key(r.source, r.crop, r.recipe, p.frame))
+        crop_only = dataclasses.replace(r, edits={k: v for k, v in e.items() if k in self.CROP_KEYS})
         arr = pipeline.to_array(look)
         h0, w0 = arr.shape[:2]
-        plain = dataclasses.replace(r, edits={k: v for k, v in e.items() if k not in ("poster", "texts", "logos")})
-        arr = self.finalize(plain, arr, texts=False)  # removals, new background, parts, straighten and crop
+        arr = self.finalize(crop_only, arr, texts=False)  # removals, straightened and cropped
+        before = self.finalize(crop_only, pipeline.matched(pipeline.to_array(img), r.recipe), texts=False)
         m = self.cutout(r)
         if m is not None:
             m = edits.geometry(cv2.resize(m, (w0, h0), interpolation=cv2.INTER_LINEAR), e)
@@ -333,23 +342,56 @@ class Engine:
             k = min(SHARP_EDGE / max(arr.shape[:2]), 4.0)  # (at most what the AI enlarger draws: 4x)
             size = (round(arr.shape[1] * k), round(arr.shape[0] * k))
             arr = enlarge.fit(arr, size)
+            before = np.clip(cv2.resize(before, size, interpolation=cv2.INTER_LANCZOS4), 0, 1).astype(np.float32)
             if m is not None:
                 m = cv2.resize(m, size, interpolation=cv2.INTER_LINEAR)
-        self._sharp[key] = (arr, m)
+        self._sharp[key] = got = {"look": arr, "before": before, "matte": m, "size0": (w0, h0)}
         while len(self._sharp) > 6:
             self._sharp.popitem(last=False)
-        return arr, m
+        return got
+
+    def _crop_faces(self, r: "Result") -> list | None:
+        """The faces (for Face light) where they are in the crop: shares of its width and height."""
+        e = r.edits or {}
+        if float(e.get("angle") or 0):
+            return None
+        x0, y0, x1, y1 = [float(v) for v in e["crop"]]
+        return [((fx - x0) / (x1 - x0), (fy - y0) / (y1 - y0), fr / (x1 - x0)) for fx, fy, fr in self.faces(r)
+                if x0 <= fx <= x1 and y0 <= fy <= y1] or None
 
     def sharp_finished(self, r: "Result", texts: bool = True) -> np.ndarray:
-        """The sharp crop with its poster (laid out on the sharp picture), and its text when asked."""
-        arr, m = self.sharp_base(r)
+        """The sharp crop as edited, quickly (no AI): its sliders, new background, parts, poster and text,
+        in the same order as the preview (sliders, then the background, then parts, then the poster)."""
+        b = self.sharp_base(r)
         e = r.edits or {}
+        m = b["matte"]
+        under = json.dumps([self.sharp_key(r), r.recipe.get("adjust"), e.get("background"), e.get("areas")],
+                           sort_keys=True, default=str)
+        if b.get("under_key") != under:  # (the photo as edited, under the poster: kept, so moving a word is quick)
+            b["under"], b["under_key"] = self._sharp_under(r, b), under
+        out = b["under"]
         if e.get("poster"):
-            arr = self._with_poster(e, arr, m)
+            out = self._with_poster(e, out, m)
         if texts:
-            arr = edits.draw_texts(arr, e.get("texts"))
-            arr = brand.draw(arr, e.get("logos"), self.brand_dir)
-        return arr
+            out = edits.draw_texts(out, e.get("texts"))
+            out = brand.draw(out, e.get("logos"), self.brand_dir)
+        return out
+
+    def _sharp_under(self, r: "Result", b: dict) -> np.ndarray:
+        """The sharp crop with its sliders, new background and parts (what the poster goes on)."""
+        e = r.edits or {}
+        out, m = b["look"], b["matte"]
+        if pipeline.adjusted(r.recipe):
+            out, _ = pipeline.finish(b["before"], out, r.recipe, m, self._crop_faces(r) if pipeline.adjustments(r.recipe)["face_light"] else None)
+        if e.get("background") and m is not None:
+            out = self.with_background(out, m, e["background"])
+        if e.get("areas"):
+            w0, h0 = b["size0"]
+            for a in e["areas"]:
+                pm = edits.geometry(self.part(r, a["x"], a["y"], h0, w0), e)
+                pm = cv2.resize(pm.astype(np.float32), out.shape[1::-1], interpolation=cv2.INTER_LINEAR)
+                out = edits.adjust_part(out, pm, a)
+        return out
 
     def _with_poster(self, e: dict, out: np.ndarray, m: np.ndarray | None) -> np.ndarray:
         logo = brand.load(self.brand_dir, e["poster"].get("logo") or "") if e["poster"].get("logo") else None

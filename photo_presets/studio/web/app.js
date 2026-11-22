@@ -552,22 +552,26 @@ function toolbar(cur) {
    that sharp picture is the one shown from then on: in the view, the poster, the thumbnails and the
    export. While it's being made, say so; when it's done, say that too (once per crop). */
 const sharpSaid = new Set();
-let sharpWatch = 0;
+let sharpWatch = 0, sharpBusy = null;
 async function sharpCrop(cur) {
   const c = cur?.edits?.crop;
   if (!c || Math.min(c[2] - c[0], c[3] - c[1]) > 0.8 || st.prefs?.sharp_crops === false) return;
-  const key = `${cur.id}:${c.join(",")}`, turn = ++sharpWatch;
+  const key = `${cur.id}:${c.join(",")}`;
+  if (sharpBusy === key) return;  // (already saying so: one note, not one per click)
+  const turn = ++sharpWatch;
   let s;
   try { s = await api(`/api/slots/${cur.id}/sharp`); } catch { return; }
-  if (!s.needed || s.ready || turn !== sharpWatch) return;
+  if (!s.needed || s.ready || turn !== sharpWatch || sharpBusy === key) return;
+  sharpBusy = key;
   const t = toast("Enhancing the crop with AI…", { sticky: true, spin: true,
     small: "A few seconds, only once. Nothing to do: it stays sharp in the poster and the export." });
-  for (let i = 0; i < 360 && turn === sharpWatch; i++) {
+  for (let i = 0; i < 360; i++) {
     await new Promise((r) => setTimeout(r, 500));
     try { s = await api(`/api/slots/${cur.id}/sharp`); } catch { break; }
     if (!s.needed || s.ready) break;
   }
   t.close();
+  if (sharpBusy === key) sharpBusy = null;
   if (s.ready && !sharpSaid.has(key)) {
     sharpSaid.add(key);
     toast("Crop enhanced", { small: "It stays sharp from here on: the poster, thumbnails and export all use it." });
@@ -1697,15 +1701,40 @@ window.addEventListener("resize", () => {  // a smaller window: the panels give 
   for (const [name, w] of Object.entries(saved)) if (PANELS[name] && w) setPanelWidth(name, w);
 });
 
-/* While a picture is still being made (the first time after a restart, a poster's players are found
-   again), the photo shows at once, softly, with a note; the picture takes its place when ready. */
+/* While a picture is being made again (a slider, a color, the poster), the last one stays on screen,
+   sharp, with a small "Updating…" note in the corner; the new one takes its place when it's ready.
+   Only the very first time (nothing shown yet for this picture) does the photo show softly with a note. */
+const shownPics = {};  // each picture's last one on screen: its address and shape
 function watchPicture(cur) {
   const f = $("#frame"), img = f?.querySelector("img.after");
-  if (!img || (img.complete && img.naturalWidth)) return;
+  if (!img) return;
+  const want = new URL(img.getAttribute("src"), location.href).href, shape = cur.width / cur.height;
+  const remember = (el) => { if (el.naturalWidth) shownPics[cur.id] = { src: el.src, shape: el.naturalWidth / el.naturalHeight }; };
+  if (img.complete && img.naturalWidth) { remember(img); return; }
+  const last = shownPics[cur.id];
+  if (last && last.src !== want && Math.abs(last.shape - shape) / shape < 0.03) {
+    img.src = last.src;  // (from the browser's memory: at once, and sharp)
+    f.querySelector(".ready-note")?.remove();
+    f.insertAdjacentHTML("beforeend", `<span class="tag ready-note corner"><span class="spin"></span> Updating…</span>`);
+    const next = new Image();
+    next.onload = () => {
+      remember(next);
+      if (!img.isConnected) return;
+      img.src = want;
+      f.querySelector(".ready-note")?.remove();
+    };
+    next.onerror = () => {
+      const note = f.querySelector(".ready-note");
+      if (note) note.innerHTML = `Couldn't update · <button class="link" id="ready-retry">Try again</button>`;
+      $("#ready-retry")?.addEventListener("click", () => { img.src = want.split("?")[0] + "?r=" + Date.now(); watchPicture(cur); });
+    };
+    next.src = want;
+    return;
+  }
   f.classList.add("waiting");
   f.style.setProperty("--placeholder", `url("/img/photo/${cur.photo}/view.jpg")`);
   if (!f.querySelector(".ready-note")) f.insertAdjacentHTML("beforeend", `<span class="tag ready-note"><span class="spin"></span> Getting the picture ready…</span>`);
-  const done = () => { f.classList.remove("waiting"); f.querySelector(".ready-note")?.remove(); };
+  const done = () => { f.classList.remove("waiting"); f.querySelector(".ready-note")?.remove(); remember(img); };
   img.addEventListener("load", done, { once: true });
   img.addEventListener("error", () => {
     const note = f.querySelector(".ready-note");

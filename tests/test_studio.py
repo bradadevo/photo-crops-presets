@@ -158,3 +158,29 @@ def test_a_sharp_crop_stays_sharp_when_a_poster_is_added_and_can_be_switched_off
     assert off[0] < with_poster[0]  # switched off: the plain preview
     assert client.get("/api/slots/999/sharp").json()["needed"] is False
     client.post("/api/prefs/sharp", json={"on": True})
+
+
+def test_sliders_colors_and_moving_words_never_run_the_crop_enhancement_again(client, monkeypatch):
+    """The AI makes a tight crop sharp once; after that, sliders, poster colors and moving a word only
+    redraw on top of it (the hang: every slider used to redo the whole enhancement)."""
+    _made(client, monkeypatch)
+    monkeypatch.setattr(server.E, "sharp_on", True)
+    from photo_presets import enlarge
+    runs = []
+    real = enlarge.fit
+    monkeypatch.setattr(enlarge, "fit", lambda *a, **k: (runs.append(1), real(*a, **k))[1])
+    crop = {"crop": [0, 0, 0.5, 1]}
+    poster = {"template": "card", "title": "LINCOLN"}
+    get = lambda: client.get(f"/img/slot/999/{server.S.slot(999).ver}/after.jpg").status_code
+    client.post("/api/slots/999/edit", json={"edits": crop | {"poster": poster}})
+    assert get() == 200 and len(runs) == 1
+    adj = server.S.slot(999).public()["adjust"]
+    for v in (-0.3, -0.6):
+        client.post("/api/slots/999/edit", json={"adjust": adj | {"background": v}})
+        assert get() == 200
+    for color in ("#b3121a", "#0b3d91"):
+        client.post("/api/slots/999/edit", json={"edits": crop | {"poster": poster | {"color": color}}})
+        assert get() == 200
+    client.post("/api/slots/999/edit", json={"edits": crop | {"poster": poster | {"moves": {"title": {"x": 0.01, "y": 0, "s": 1}}}}})
+    assert get() == 200
+    assert len(runs) == 1  # enhanced once, kept for everything after

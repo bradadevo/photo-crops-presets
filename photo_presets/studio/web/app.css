@@ -775,6 +775,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .frame.waiting::before { content: ""; position: absolute; inset: 0; backdrop-filter: blur(10px) brightness(.7); z-index: 1; }
 .frame.waiting img.after { opacity: 0; }
 .frame .tag.ready-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; display: inline-flex; gap: 8px; align-items: center; }
+.frame .tag.ready-note.corner { left: auto; top: 10px; right: 10px; transform: none; opacity: .92; }
 .ready-note .link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
 /* the photo in a poster: drag it to place it */
 .frame.photo-drag { cursor: grab; }
