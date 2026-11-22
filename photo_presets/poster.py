@@ -316,11 +316,32 @@ def _say(d: ImageDraw.ImageDraw, key: str, xy, text: str, font, turn: float = 0.
         lay = Image.new("RGBA", (side, side), (0, 0, 0, 0))
         ImageDraw.Draw(lay).text((xy[0] - mid[0] + side / 2, xy[1] - mid[1] + side / 2), text, font=font, **kw)
         fonts.paste(image, fonts.turned(lay, angle, (side / 2, side / 2)), mid[0] - side / 2, mid[1] - side / 2)
+        if _inked(kw):
+            white = Image.new("RGBA", lay.size, (255, 255, 255, 0))
+            white.putalpha(lay.getchannel("A"))
+            fonts.paste(_NOTE.ink, fonts.turned(white, angle, (side / 2, side / 2)), mid[0] - side / 2, mid[1] - side / 2)
     else:
         d.text(xy, text, font=font, **kw)
+        if _inked(kw):
+            ImageDraw.Draw(_NOTE.ink).text(xy, text, font=font, **(kw | {"fill": (255, 255, 255, 255), "stroke_fill": (255, 255, 255, 255)}))
     boxes = getattr(_NOTE, "boxes", None)
     if boxes is not None:
         boxes.append((key, box))
+
+
+def _inked(kw: dict) -> bool:
+    """Whether this word is noted in the ink: drawn solid (not a faint echo or outline behind the player),
+    while a poster with pieces behind the players is made."""
+    if getattr(_NOTE, "ink", None) is None:
+        return False
+    fill = kw.get("fill", (255, 255, 255, 255))
+    return not (isinstance(fill, tuple) and len(fill) == 4 and fill[3] < 120)
+
+
+def _ink_badge(box) -> None:
+    """A number badge noted in the ink (it stays in front of pieces put behind the players)."""
+    if getattr(_NOTE, "ink", None) is not None:
+        ImageDraw.Draw(_NOTE.ink).ellipse(box, fill=(255, 255, 255, 255))
 
 
 def words(p: dict, has_logo: bool = False, logo_img: Image.Image | None = None) -> list[dict]:
@@ -370,6 +391,8 @@ def compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None, logos
         _NOTE.middles = None
         _NOTE.pic = None
         _NOTE.moves = None
+        _NOTE.ink = None
+        _NOTE.front = None
 
 
 def word_color(key: str, default: tuple) -> tuple:
@@ -389,6 +412,9 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
     W, H = size_for(iw, ih, p)
     u = _NOTE.u = _unit(W, H, p)
     fx, fy, box = _focus(matte)
+    _NOTE.front = None  # the players as the layout placed them (set by layouts that move the picture into a card)
+    behind = p["template"] not in ("custom",) and any(e.get("behind") for e in p.get("extras") or [])
+    _NOTE.ink = Image.new("RGBA", (W, H), (0, 0, 0, 0)) if behind else None  # the layout's words and badges
     t = p["template"]
     color = np.array(_rgb(p.get("color", "#1f2a44")), np.float32)
     if t == "spotlight":
@@ -460,9 +486,16 @@ def _compose(arr: np.ndarray, matte: np.ndarray | None, p: dict, logo=None) -> n
         boxes = getattr(_NOTE, "boxes", None)
         team = tuple(int(c * 255) for c in color)
         mm = None
-        if matte is not None and t != "spotlight":  # (the players where the layout put them)
+        front = getattr(_NOTE, "front", None)
+        if front is not None:  # (the players where the layout put them: in its card, moved and zoomed)
+            mm = front[..., None]
+        elif matte is not None and t != "spotlight":  # (the players as the full-poster picture)
             mm, _ = _cover(matte.astype(np.float32), W, H, (fx, fy - 0.05))
             mm = cv2.GaussianBlur(np.clip((mm - 0.35) / 0.4, 0, 1), (0, 0), 0.8)[..., None]
+        ink = getattr(_NOTE, "ink", None)
+        if ink is not None:  # the layout's words and number badges stay in front of the pieces behind, too
+            a = cv2.GaussianBlur(np.asarray(ink.getchannel("A"), np.float32) / 255, (0, 0), 0.7)[..., None]
+            mm = a if mm is None else np.maximum(mm, a)
         for behind in (True, False):
             if mm is None:  # (no players found: every piece on top)
                 group = [] if behind else p["extras"]
@@ -547,6 +580,9 @@ def _framed(out, arr, matte, W: int, H: int, rect, box, border: bool = True) -> 
         solid = np.clip((full - 0.35) / 0.4, 0, 1)  # the player only, not the cut-out's faint haze
         a = (cv2.GaussianBlur(solid, (0, 0), 0.8) * outside)[..., None]
         out = out * (1 - a) + src * a
+        inside = np.zeros((H, W), np.float32)
+        inside[cy0:cy1, cx0:cx1] = 1
+        _NOTE.front = cv2.GaussianBlur(solid, (0, 0), 0.8) * np.maximum(inside, outside)  # (for pieces put behind them)
     return out
 
 
@@ -587,6 +623,7 @@ def _spotlight(arr, matte, p, W, H, color, box) -> np.ndarray:
             cx, cy, r = cx + mv.get("x", 0) * W, cy + mv.get("y", 0) * H, r * mv.get("s", 1)
         ring = max(3, int(u * 0.0064))
         d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=_c255(color), outline=(255, 255, 255, 255), width=ring)
+        _ink_badge((cx - r, cy - r, cx + r, cy + r))
         f = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
         _NOTE.moves = _badge_moves(p)  # (placed with its badge; its font and angle its own)
         _say(d, "number", (cx, cy + r * 0.04), num, font=f, fill=(255, 255, 255, 255), anchor="mm")
@@ -831,6 +868,10 @@ def _player_card(pic, m, p, W, H, color, has_logo):
     sx = int(np.clip(cx - sw / 2, 0, W - sw))
     sy = int(np.clip(cy - sh / 2, 0, H - sh))
     out[y0:y1, x0:x1] = cv2.resize(pic[sy:sy + int(sh), sx:sx + int(sw)], (cw, ch), interpolation=cv2.INTER_AREA)
+    if m is not None:  # (the player as placed in the window, for pieces put behind them)
+        front = np.zeros((H, W), np.float32)
+        front[y0:y1, x0:x1] = cv2.resize(m[sy:sy + int(sh), sx:sx + int(sw), 0], (cw, ch), interpolation=cv2.INTER_AREA)
+        _NOTE.front = front
     lay, d = _layer((W, H))
     rule = max(2, int(u * 0.004))
     d.rectangle((x0 - rule * 2, y0 - rule * 2, x1 + rule * 2, y1 + rule * 2), outline=GOLD + (255,), width=rule)
@@ -849,6 +890,7 @@ def _player_card(pic, m, p, W, H, color, has_logo):
         r = u * 0.062
         bx, by = x0 + r * 1.25, y0 + r * 1.25
         d.ellipse((bx - r, by - r, bx + r, by + r), fill=_c255(color), outline=GOLD + (255,), width=max(3, int(u * 0.006)))
+        _ink_badge((bx - r, by - r, bx + r, by + r))
         nf = _fit_font(num, HEAVY, r * 1.35, r * 1.15)
         _NOTE.moves = _badge_moves(p)
         _say(d, "number", (bx, by + r * 0.04), num, font=nf, fill=(255, 255, 255, 255), anchor="mm")

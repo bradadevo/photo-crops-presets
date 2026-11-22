@@ -451,12 +451,64 @@ function setAngle(cur, id, a) {  // (kept on the poster: a long piece stood up n
   });
 }
 
-/* Arrow keys nudge the chosen piece; Delete takes it off (not while typing): a custom poster's piece,
-   a poster's logo, or a text or logo put on the picture. */
+/* Arrow keys nudge what's chosen on the picture (Shift: bigger steps): a poster's word or logo, a piece
+   (a band, stripes, a badge…), or a text or logo put on the picture. They do while the last thing you
+   clicked was the picture, even when that click put the cursor in the word's box; once you click in
+   a box or type, they move the cursor again. Delete takes the chosen thing off (not while typing). */
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest?.("#frame, #texts")) st.nudgeArmed = true;
+  else if (e.target.closest?.("input, textarea, [contenteditable], select")) st.nudgeArmed = false;
+}, true);
+document.addEventListener("input", (e) => { if (e.target.closest?.("input:not([type=range]), textarea, [contenteditable]")) st.nudgeArmed = false; }, true);
+
+function nudgeChosen(cur, dx, dy) {
+  const e2 = clone(cur.edits), p = e2.poster, sel = st.pieceSel;
+  const shift = (q) => document.querySelectorAll(q).forEach((el) => {  // (its outline moves at once; the picture follows)
+    if (el.style.left.endsWith("%")) el.style.left = parseFloat(el.style.left) + dx * 100 + "%";
+    if (el.style.top.endsWith("%")) el.style.top = parseFloat(el.style.top) + dy * 100 + "%";
+  });
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  let done = false;
+  if (st.tool === "poster" && sel && p) {
+    if (sel.startsWith("w:")) {
+      const k = sel.slice(2), m = { x: 0, y: 0, s: 1, ...((p.moves || {})[k] || {}) };
+      m.x += dx; m.y += dy;
+      p.moves = { ...(p.moves || {}), [k]: m };
+      done = true;
+    } else if (sel === "logo" && p.template !== "custom") {
+      const w = wordsList.find((x) => x.key === "logo");
+      const at = p.logo_at || (w && { x: (w.x0 + w.x1) / 2, y: (w.y0 + w.y1) / 2, size: w.x1 - w.x0 });
+      if (at) { p.logo_at = { ...at, x: at.x + dx, y: at.y + dy }; done = true; }
+    } else {
+      const it = (p[PK(p)] || []).find((x) => x.id === sel);
+      if (it) { it.x += dx; it.y += dy; done = true; }
+    }
+    if (done) shift(`.pc[data-pc="${CSS.escape(sel)}"]`);
+  } else if (st.tool === "text" && st.textSel != null && e2.texts?.[st.textSel]) {
+    const t = e2.texts[st.textSel];
+    t.x = clamp(t.x + dx); t.y = clamp(t.y + dy); done = true;
+    shift(`#texts .tx[data-i="${st.textSel}"]`);
+  } else if (st.tool === "logo" && st.logoSel != null && e2.logos?.[st.logoSel]) {
+    const l = e2.logos[st.logoSel];
+    l.x = clamp(l.x + dx); l.y = clamp(l.y + dy); done = true;
+    shift(`#texts .lg[data-li="${st.logoSel}"]`);
+  }
+  if (done) saveSoon(cur.id, e2, 250);
+  return done;
+}
+
 document.addEventListener("keydown", (e) => {
-  if (e.target.closest?.("input, textarea, [contenteditable]") || e.metaKey || e.ctrlKey) return;
+  const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+  const typing = e.target.closest?.("input, textarea, [contenteditable], select");
+  if ((typing && !(arrow && st.nudgeArmed && !e.target.matches?.("[type=range]"))) || e.metaKey || e.ctrlKey || e.altKey) return;
   const cur = slotById(st.current);
   if (!cur?.edits || cur.state !== "done") return;
+  if (arrow) {
+    const step = e.shiftKey ? 0.02 : 0.004;
+    if (nudgeChosen(cur, arrow[0] * step, arrow[1] * step)) { e.preventDefault(); e.stopPropagation(); }
+    return;
+  }
+  if (typing) return;
   const del = e.key === "Delete" || e.key === "Backspace";
   if (st.tool === "poster" && st.pieceSel?.startsWith("w:") && cur.edits.poster && del) {
     e.preventDefault(); e.stopPropagation();
@@ -473,13 +525,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (st.tool === "poster" && st.pieceSel && cur.edits.poster?.[PK(cur.edits.poster)]) {
-    const step = e.shiftKey ? 0.02 : 0.004;
-    const by = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
-    if (by) {
-      e.preventDefault(); e.stopPropagation();
-      const e2 = clone(cur.edits), it = e2.poster[PK(e2.poster)].find((x) => x.id === st.pieceSel);
-      if (it) { it.x += by[0]; it.y += by[1]; saveSoon(cur.id, e2, 250); }
-    } else if (del) {
+    if (del) {
       e.preventDefault(); e.stopPropagation();
       const id = st.pieceSel; st.pieceSel = null;
       changeEdits(cur, (ed) => { ed.poster[PK(ed.poster)] = ed.poster[PK(ed.poster)].filter((x) => x.id !== id); });

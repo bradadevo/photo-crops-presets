@@ -327,3 +327,29 @@ def test_a_dragged_logo_stays_level_with_the_top_on_a_taller_export():
     low = dict(p, logo_at={"x": 0.85, "y": 0.9, "size": 0.13})  # one near the bottom keeps its distance from the bottom
     p.update(low)
     assert abs((1350 - logo_middle_y(1350)) - (1920 - logo_middle_y(1920, 1080 / 1920))) <= 2
+
+
+def test_a_band_behind_the_player_stays_behind_the_words_badge_and_the_player_in_the_card():
+    """A band put behind the players on the Player Card: the player (where the card put them), the
+    name and the number badge stay in front of it; no ghost of the player's shape anywhere else."""
+    H, W = 500, 400
+    arr = np.zeros((H, W, 3), np.float32) + 0.5
+    matte = np.zeros((H, W), np.float32)
+    matte[120:420, 150:250] = 1
+    arr[matte > 0] = (0.9, 0.1, 0.1)  # the player: red
+    band = {"id": "b", "type": "stripes", "x": 0.5, "y": 0.5, "behind": True, "colors": ["#00ff00"], "dir": "h",
+            "w": 1.2, "h": 1.2, "opacity": 1.0}  # covers the whole poster
+    p = poster.clean({"template": "card", "shape": "post", "title": "LINCOLN", "number": "14", "extras": [band]})
+    out = poster.compose(arr, matte, p)
+    plain = poster.compose(arr, matte, poster.clean({**p, "extras": []}))
+    green = (out[..., 1] > 0.8) & (out[..., 0] < 0.3)
+    red = (out[..., 0] > 0.7) & (out[..., 1] < 0.3)
+    assert red.sum() > 0.8 * ((plain[..., 0] > 0.7) & (plain[..., 1] < 0.3)).sum()  # the player still in front
+    assert green.mean() > 0.4  # the band shows everywhere else
+    Hp, Wp = out.shape[:2]
+    words = {w["key"]: w for w in poster.words(p)}
+    for k in ("title", "number"):
+        w = words[k]
+        y0, y1, x0, x1 = int(w["y0"] * Hp), int(w["y1"] * Hp), int(w["x0"] * Wp), int(w["x1"] * Wp)
+        same = np.abs(out[y0:y1, x0:x1] - plain[y0:y1, x0:x1]).max(-1) < 0.05
+        assert same.mean() > 0.3, k  # the word's own letters (and its badge) drawn over the band
