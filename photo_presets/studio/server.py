@@ -332,6 +332,7 @@ class Session:
 E = Engine()
 E.brand_dir = STATE or CONFIG
 E.bg_dir = ADDED.parent / "backgrounds"  # your own background pictures (a test copy: its own)
+E.sharp_dir = ADDED.parent / "sharp"  # tight crops made sharp by the AI, kept across restarts
 S = Session()
 W = Worker()
 
@@ -1088,7 +1089,8 @@ def _variant(r: Result, kind: str) -> bytes:
     thumb, full: with its text; before: the original, straightened and cropped the same;
     base: parts adjusted, not yet straightened or cropped (for cropping and brushing);
     area-N: base with part N shown in blue."""
-    if kind in ("after", "thumb", "full") and E.needs_sharp(r):  # a tight crop: the sharp one, every time
+    if kind in ("after", "thumb", "full") and E.needs_sharp(r) and (kind != "thumb" or E.sharp_ready(r)):
+        # a tight crop: the sharp one, every time (a thumbnail only when it's made already: never starts the AI)
         out = E.sharp_finished(r, texts=kind != "after")
         return jpeg(pipeline.to_image(out), THUMB, 84) if kind == "thumb" else jpeg(pipeline.to_image(out), quality=92 if kind == "full" else 90)
     arr = E.base_after(r)
@@ -1128,7 +1130,7 @@ async def slot_image(sid: int, ver: int, kind: str):
         if kind in ("after", "full", "base"):
             return picture(PICTURES.get(("after", sid, s.ver), lambda: jpeg(r.after, quality=90)))
     await traced(r)
-    if kind in ("after", "thumb", "full") and E.needs_sharp(r) and not E.sharp_ready(r):
+    if kind in ("after", "full") and E.needs_sharp(r) and not E.sharp_ready(r):
         await asyncio.wrap_future(W.submit(FIX, E.sharp_base, r))  # (made once, on the worker: it uses the AI model)
     data = await asyncio.to_thread(PICTURES.get, (kind, sid, s.ver), lambda: _variant(r, kind))
     return picture(data)

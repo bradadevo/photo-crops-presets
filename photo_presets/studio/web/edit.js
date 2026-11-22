@@ -1046,8 +1046,14 @@ function bindPosterSection(cur, pane) {
       await api("/api/posters/restore", { poster: r0.poster }); await loadPosters(); editSig = ""; renderTabs();
     } } });
   });
-  pane.querySelectorAll("[data-color-pk]").forEach((b) => b.onclick = () => {  // its palette opens under it
-    st.colorPk = st.colorPk === b.dataset.colorPk ? null : b.dataset.colorPk; editSig = ""; renderTabs();
+  pane.querySelectorAll("[data-color-pk]").forEach((b) => b.onclick = () => {  // its colors open under it (always open, in view)
+    const k = b.dataset.colorPk;
+    if (st.colorPk !== k) { st.colorPk = k; editSig = ""; renderTabs(); }
+    requestAnimationFrame(() => {
+      const pal = $(`[data-word-colors="${k}"]`);
+      pal?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      pal?.classList.add("flash"); setTimeout(() => pal?.classList.remove("flash"), 700);
+    });
   });
   pane.querySelectorAll("[data-style-pk]").forEach((b) => b.onclick = () => {  // its font, size and angle open under it
     st.stylePk = st.stylePk === b.dataset.stylePk ? null : b.dataset.stylePk; st.colorPk = null; editSig = ""; renderTabs();

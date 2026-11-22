@@ -77,6 +77,7 @@ class Job:
 
 SHARP_SHARE = 0.8  # a crop this tight (or tighter) is made sharp from the photo's own pixels
 SHARP_EDGE = 1800  # px: the sharp crop's long edge on screen (the size of the previews)
+SHARP_KEEP = 60  # sharp crops kept on disk (the most recently used), about 10 MB each
 POSTER_EDGE = 2400  # px: an export's poster laid out on a crop at least this big (enlarged by the AI when smaller)
 
 
@@ -102,6 +103,7 @@ class Engine:
         # view, the poster and the export; switched off in the Crop tool's bar ("AI sharpen")
         self.sharp_on = True
         self._sharp: OrderedDict = OrderedDict()
+        self.sharp_dir = Path("~/.cache/photo-crops-presets/sharp").expanduser()  # (kept on disk: a restart reuses them)
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -308,7 +310,47 @@ class Engine:
                                        sort_keys=True, default=str).encode()).hexdigest()
 
     def sharp_ready(self, r: "Result") -> bool:
-        return self.sharp_key(r) in self._sharp
+        """Made already: in memory, or saved on disk from before (a restart loads it, no AI)."""
+        key = self.sharp_key(r)
+        return key in self._sharp or (self.sharp_dir / key / "look.png").exists()
+
+    def _sharp_save(self, key: str, got: dict) -> None:
+        """The sharp crop saved (16-bit PNGs: no banding, about 10 MB), the oldest removed past SHARP_KEEP."""
+        folder = self.sharp_dir / key
+        try:
+            tmp = folder.with_name(key + ".part")
+            tmp.mkdir(parents=True, exist_ok=True)
+            for name in ("look", "before"):
+                a = np.clip(got[name], 0, 1)
+                cv2.imwrite(str(tmp / f"{name}.png"), cv2.cvtColor((a * 65535).round().astype(np.uint16), cv2.COLOR_RGB2BGR))
+            if got["matte"] is not None:
+                cv2.imwrite(str(tmp / "matte.png"), (np.clip(got["matte"], 0, 1) * 255).round().astype(np.uint8))
+            (tmp / "size0.json").write_text(json.dumps(list(got["size0"])))
+            if folder.exists():
+                import shutil
+                shutil.rmtree(folder, ignore_errors=True)
+            tmp.rename(folder)
+            kept = sorted((d for d in self.sharp_dir.iterdir() if d.is_dir() and not d.name.endswith(".part")),
+                          key=lambda d: d.stat().st_mtime, reverse=True)
+            for old in kept[SHARP_KEEP:]:
+                import shutil
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass  # (only a time saver: it is made again if it can't be kept)
+
+    def _sharp_load(self, key: str) -> dict | None:
+        folder = self.sharp_dir / key
+        try:
+            if not (folder / "look.png").exists():
+                return None
+            read = lambda n: cv2.cvtColor(cv2.imread(str(folder / f"{n}.png"), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB).astype(np.float32) / 65535
+            m = cv2.imread(str(folder / "matte.png"), cv2.IMREAD_GRAYSCALE) if (folder / "matte.png").exists() else None
+            got = {"look": read("look"), "before": read("before"), "matte": None if m is None else m.astype(np.float32) / 255,
+                   "size0": tuple(json.loads((folder / "size0.json").read_text()))}
+            os.utime(folder, None)  # (recently used: kept longest)
+            return got
+        except (OSError, ValueError, cv2.error):
+            return None
 
     def sharp_base(self, r: "Result") -> dict:
         """The crop made sharp, once: the look (before its sliders) made again from as many of the
@@ -320,6 +362,12 @@ class Engine:
         if key in self._sharp:
             self._sharp.move_to_end(key)
             return self._sharp[key]
+        got = self._sharp_load(key)  # (made before this restart: loaded, no AI)
+        if got is not None:
+            self._sharp[key] = got
+            while len(self._sharp) > 6:
+                self._sharp.popitem(last=False)
+            return got
         from photo_presets import enlarge
         e = r.edits or {}
         c = e["crop"]
@@ -348,6 +396,7 @@ class Engine:
         self._sharp[key] = got = {"look": arr, "before": before, "matte": m, "size0": (w0, h0)}
         while len(self._sharp) > 6:
             self._sharp.popitem(last=False)
+        self._sharp_save(key, got)
         return got
 
     def _crop_faces(self, r: "Result") -> list | None:

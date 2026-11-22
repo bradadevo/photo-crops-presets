@@ -19,6 +19,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "PREFS", tmp_path / "prefs.json")
     monkeypatch.setattr(server, "LOOKS", tmp_path / "looks")
     monkeypatch.setattr(server, "S", server.Session())
+    monkeypatch.setattr(server.E, "sharp_dir", tmp_path / "sharp")
+    monkeypatch.setattr(server.E, "_sharp", __import__("collections").OrderedDict())
+    server.PICTURES.items.clear()  # (pictures made by another test for the same slot number)
     return TestClient(server.app)
 
 
@@ -184,3 +187,23 @@ def test_sliders_colors_and_moving_words_never_run_the_crop_enhancement_again(cl
     client.post("/api/slots/999/edit", json={"edits": crop | {"poster": poster | {"moves": {"title": {"x": 0.01, "y": 0, "s": 1}}}}})
     assert get() == 200
     assert len(runs) == 1  # enhanced once, kept for everything after
+
+
+def test_a_sharp_crop_is_kept_on_disk_so_a_restart_never_runs_the_ai_again(client, monkeypatch):
+    """Quit and reopen: the enhanced crop is loaded from disk (no AI), and thumbnails never start the AI."""
+    _made(client, monkeypatch)
+    monkeypatch.setattr(server.E, "sharp_on", True)
+    from photo_presets import enlarge
+    runs = []
+    real = enlarge.fit
+    monkeypatch.setattr(enlarge, "fit", lambda *a, **k: (runs.append(1), real(*a, **k))[1])
+    client.post("/api/slots/999/edit", json={"edits": {"crop": [0, 0, 0.5, 1]}})
+    ver = server.S.slot(999).ver
+    assert client.get(f"/img/slot/999/{ver}/thumb.jpg").status_code == 200 and runs == []  # (a thumbnail: no AI)
+    first = Image.open(io.BytesIO(client.get(f"/img/slot/999/{ver}/after.jpg").content)).size
+    assert len(runs) == 1 and any((server.E.sharp_dir).iterdir())
+    server.E._sharp.clear()  # (as after a restart: nothing in memory)
+    server.PICTURES.items.clear()
+    assert client.get("/api/slots/999/sharp").json()["ready"] is True
+    again = Image.open(io.BytesIO(client.get(f"/img/slot/999/{ver}/after.jpg").content)).size
+    assert again == first and len(runs) == 1  # loaded from disk, the AI not run again
