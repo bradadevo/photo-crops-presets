@@ -626,7 +626,7 @@ function renderTool(v, cur) {
     text: `<span class="title"><b>Text</b><span>Drag to place it · type in the panel</span></span><span class="sep"></span><button data-add-text>${icon("plus")} Add text</button><button data-done>Done</button>`,
     logo: `<span class="title"><b>Logo</b><span>Pick one in the panel · drag it to place it</span></span><span class="sep"></span><button data-done>Done</button>`,
     background: `<span class="title"><b>Background</b><span>Pick one in the panel · right-click the picture for more</span></span><span class="sep"></span><button data-done>Done</button>`,
-    poster: `<span class="title"><b>Poster</b><span>${cur.edits?.poster?.template === "custom" ? "Drag a piece to move it · its corner resizes it · arrows nudge" : "Click a word to change it · or pick a layout in the panel"}</span></span><span class="sep"></span><button data-done>Done</button>`,
+    poster: `<span class="title"><b>Poster</b><span>${cur.edits?.poster?.template === "custom" ? "Drag a piece to move it · its corner resizes it · arrows nudge" : "Click a word to change it · arrow keys nudge it · or pick a layout in the panel"}</span></span><span class="sep"></span><button data-done>Done</button>`,
   }[t];
   v.innerHTML = `<div class="frame tool-${t}" id="frame"><div class="layer"><img class="after" src="${src}" alt="" draggable="false" data-base="${base ? "" : `${cur.width}x${cur.height}`}"></div>
       ${t === "text" || t === "logo" ? `<div class="texts" id="texts"></div>` : ""}</div>
@@ -636,6 +636,7 @@ function renderTool(v, cur) {
   if (t === "text" || t === "logo") { paintTexts(cur); bindTexts(cur); }
   if (t === "poster") { paintWords(cur); bindPhotoDrag(cur); }
   watchPicture(cur);
+  if (!base) sharpCrop(cur);
   $("[data-done]", v).onclick = () => { if (t !== "kitpick") return setTool(t); st.tool = null; viewerSig = ""; editSig = ""; render(); };
   $("[data-add-text]", v)?.addEventListener("click", () => addText(slotById(cur.id)));
   const f = $("#frame");
@@ -1214,12 +1215,23 @@ async function cropPixels(cur, box) {
   }
   const w = Math.round((box[2] - box[0]) * full[0]), h = Math.round((box[3] - box[1]) * full[1]);
   const grow = 1080 / w, size = `${w.toLocaleString()} × ${h.toLocaleString()} px`;
-  el.classList.toggle("ai", grow >= 1.15);
-  el.classList.toggle("tight", grow > 4);
-  el.textContent = grow >= 1.15 ? `✦ ${size} · AI sharpens it ${grow.toFixed(1)}x for Instagram` : `${size} · sharp for Instagram`;
-  el.title = grow > 4 ? "Very tight: even with the AI enlarger it will look soft on Instagram. Widen the crop a little."
-    : grow >= 1.15 ? "Fewer pixels than an Instagram post (1,080 wide): the export enlarges it with the AI detail enlarger. Zoom in (Z) after Apply to see it."
-    : "More pixels than an Instagram post needs (1,080 wide): no enlarging.";
+  const ai = st.prefs?.sharp_crops !== false;
+  el.classList.toggle("ai", grow >= 1.15 && grow <= 4);
+  el.classList.toggle("tight", grow > 4 || (grow >= 1.15 && !ai));
+  // (the first words say whether you need to do anything; the rest, on hover, is the why)
+  if (grow > 4) {
+    el.textContent = `⚠ Action needed: widen the crop · ${size} is too few pixels, it will look soft on Instagram even with AI`;
+    el.title = "Drag a corner of the crop outward until this note changes. Instagram shows posts 1,080 px wide.";
+  } else if (grow >= 1.15 && !ai) {
+    el.textContent = `⚠ Action needed: turn on ✦ AI sharpen (or widen the crop) · ${size} will look soft on Instagram`;
+    el.title = "AI sharpen is off, so this crop would be enlarged plainly. Turn it on in this bar, or drag a corner outward.";
+  } else if (grow >= 1.15) {
+    el.textContent = `✓ Nothing to do · ${size}: AI sharpens it automatically`;
+    el.title = `Fewer pixels than an Instagram post (1,080 wide), so the AI detail enlarger sharpens it ${grow.toFixed(1)}x. Done once after Apply; it stays in the poster and export.`;
+  } else {
+    el.textContent = `✓ Nothing to do · ${size}: sharp for Instagram`;
+    el.title = "More pixels than an Instagram post needs (1,080 wide): nothing is enlarged.";
+  }
 }
 function renderCrop(v, cur) {
   const W = cur.base_width, H = cur.base_height;
@@ -1232,6 +1244,8 @@ function renderCrop(v, cur) {
       <span class="sep"></span>
       <span class="angle">${icon("level")}<input type="range" id="c-angle" min="-20" max="20" step="0.1" value="${d.angle}"><output id="c-angle-v">${(+d.angle).toFixed(1)}°</output></span>
       <button id="c-auto" title="Level it from the field lines and posts">Auto</button>
+      <span class="sep"></span>
+      <button id="c-sharp" class="${st.prefs?.sharp_crops === false ? "" : "on"}" title="AI sharpen: a tight crop is made sharp with the AI detail enlarger, once, and stays sharp in the poster and export. On by default.">✦ AI sharpen ${st.prefs?.sharp_crops === false ? "off" : "on"}</button>
       <span class="sep"></span>
       <button id="c-reset">Reset</button><button id="c-cancel">Cancel</button><button id="c-apply" class="on">Apply</button></div>`;
   paintIcons(v);
@@ -1268,6 +1282,18 @@ function renderCrop(v, cur) {
   $("#c-angle").oninput = (e) => { d.angle = +e.target.value; paint(); };
   $("#c-angle").ondblclick = () => { d.angle = 0; paint(); };
   $("#c-auto").onclick = async () => { const r = await api(`/api/slots/${cur.id}/level`); d.angle = r.angle; paint(); toast(r.angle ? `Leveled by ${r.angle.toFixed(1)}°` : "It already looks level"); };
+  $("#c-sharp").onclick = async () => {
+    const on = st.prefs?.sharp_crops === false;
+    try {
+      const got = await api("/api/prefs/sharp", { on });
+      st.prefs = { ...(st.prefs || {}), sharp_crops: got.on };
+      (got.slots || []).forEach((s) => { const old = slotById(s.id); if (old) Object.assign(old, s); });
+    } catch { return; }
+    const b = $("#c-sharp");
+    b.classList.toggle("on", on); b.textContent = `✦ AI sharpen ${on ? "on" : "off"}`;
+    toast(on ? "AI sharpen on" : "AI sharpen off", { small: on ? "Tight crops are made sharp once, and stay sharp in the poster and export." : "Tight crops are enlarged plainly (softer). Turn it back on here any time." });
+    cropPixels(cur, d.box);
+  };
   $("#c-reset").onclick = () => { d.angle = 0; d.box = [0, 0, 1, 1]; d.aspect = "free"; paint(); };
   $("#c-cancel").onclick = () => setTool("crop");
   $("#c-apply").onclick = async () => {

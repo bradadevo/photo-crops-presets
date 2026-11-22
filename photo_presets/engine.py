@@ -75,6 +75,11 @@ class Job:
         return f"{self.path.stem} · {self.recipe.get('name', 'look')}"
 
 
+SHARP_SHARE = 0.8  # a crop this tight (or tighter) is made sharp from the photo's own pixels
+SHARP_EDGE = 1800  # px: the sharp crop's long edge on screen (the size of the previews)
+POSTER_EDGE = 2400  # px: an export's poster laid out on a crop at least this big (enlarged by the AI when smaller)
+
+
 class Engine:
     def __init__(self, library: Library | None = None):
         self.library = library or Library()
@@ -93,6 +98,10 @@ class Engine:
         self._parts: OrderedDict = OrderedDict()  # traced parts of pictures, for adjusting them on their own
         self._people: OrderedDict = OrderedDict()  # each picture's people (outlines), for removing them
         self._gone: OrderedDict = OrderedDict()  # what each removal takes, and pictures with it removed
+        # tight crops made sharp once (the photo's own pixels, then the AI detail enlarger), kept for the
+        # view, the poster and the export; switched off in the Crop tool's bar ("AI sharpen")
+        self.sharp_on = True
+        self._sharp: OrderedDict = OrderedDict()
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -280,8 +289,89 @@ class Engine:
         return backgrounds.compose(arr, m, self.background_image(bg, w, h), bg.get("blur", 0), bg.get("dim", 0),
                                    bg.get("match", 0.35), bg.get("wrap", 0.5))
 
+    # Tight crops, sharp everywhere ------------------------------------------------------------
+
+    def needs_sharp(self, r: "Result") -> bool:
+        """A crop tight enough that the preview's own pixels would look soft (and the switch is on)."""
+        c = (r.edits or {}).get("crop")
+        return bool(self.sharp_on and c) and min(float(c[2]) - float(c[0]), float(c[3]) - float(c[1])) <= SHARP_SHARE
+
+    def sharp_key(self, r: "Result") -> str:
+        e = {k: v for k, v in (r.edits or {}).items() if k not in ("poster", "texts", "logos")}
+        return hashlib.sha1(json.dumps([str(r.source), r.crop, r.recipe, e, r.seed, self.removals.get(str(r.source))],
+                                       sort_keys=True, default=str).encode()).hexdigest()
+
+    def sharp_ready(self, r: "Result") -> bool:
+        return self.sharp_key(r) in self._sharp
+
+    def sharp_base(self, r: "Result") -> tuple[np.ndarray, np.ndarray | None]:
+        """The crop made sharp, once: the look made again from as many of the photo's own pixels as
+        the crop has, then (when that is still small) enlarged by the AI detail enlarger to SHARP_EDGE.
+        With its edits except the poster, text and logos (those go on top), and the players' cut-out
+        at its size. Kept, so the view, the poster and every click after use the same sharp picture."""
+        key = self.sharp_key(r)
+        if key in self._sharp:
+            self._sharp.move_to_end(key)
+            return self._sharp[key]
+        from photo_presets import enlarge
+        e = r.edits or {}
+        c = e["crop"]
+        share = max(0.05, min(1.0, float(c[2]) - float(c[0]), float(c[3]) - float(c[1])))
+        p = self.ready(r.source, r.crop, r.recipe)
+        img = p.image.copy()
+        img.thumbnail((min(max(img.size), round(SHARP_EDGE / share)),) * 2)
+        look, _ = pipeline.render(img, r.recipe, self.library, p.scene, r.seed, self.drawings,
+                                  self.memo_key(r.source, r.crop, r.recipe, p.frame))
+        arr = pipeline.to_array(look)
+        h0, w0 = arr.shape[:2]
+        plain = dataclasses.replace(r, edits={k: v for k, v in e.items() if k not in ("poster", "texts", "logos")})
+        arr = self.finalize(plain, arr, texts=False)  # removals, new background, parts, straighten and crop
+        m = self.cutout(r)
+        if m is not None:
+            m = edits.geometry(cv2.resize(m, (w0, h0), interpolation=cv2.INTER_LINEAR), e)
+        if max(arr.shape[:2]) < SHARP_EDGE * 0.9:
+            k = min(SHARP_EDGE / max(arr.shape[:2]), 4.0)  # (at most what the AI enlarger draws: 4x)
+            size = (round(arr.shape[1] * k), round(arr.shape[0] * k))
+            arr = enlarge.fit(arr, size)
+            if m is not None:
+                m = cv2.resize(m, size, interpolation=cv2.INTER_LINEAR)
+        self._sharp[key] = (arr, m)
+        while len(self._sharp) > 6:
+            self._sharp.popitem(last=False)
+        return arr, m
+
+    def sharp_finished(self, r: "Result", texts: bool = True) -> np.ndarray:
+        """The sharp crop with its poster (laid out on the sharp picture), and its text when asked."""
+        arr, m = self.sharp_base(r)
+        e = r.edits or {}
+        if e.get("poster"):
+            arr = self._with_poster(e, arr, m)
+        if texts:
+            arr = edits.draw_texts(arr, e.get("texts"))
+            arr = brand.draw(arr, e.get("logos"), self.brand_dir)
+        return arr
+
+    def _with_poster(self, e: dict, out: np.ndarray, m: np.ndarray | None) -> np.ndarray:
+        logo = brand.load(self.brand_dir, e["poster"].get("logo") or "") if e["poster"].get("logo") else None
+        return poster.compose(out, m, e["poster"], logo, lambda lid: brand.load(self.brand_dir, lid) if lid else None)
+
+    def _grown(self, r: "Result", out: np.ndarray, m: np.ndarray | None, edge: int):
+        """An export's crop (its own full-size pixels) enlarged by the AI detail enlarger before its poster
+        is laid out on it, when it has fewer pixels than edge: the photo sharp, the words drawn crisp."""
+        if not self.sharp_on or max(out.shape[:2]) >= edge * 0.9:
+            return out, m
+        from photo_presets import enlarge
+        key = ("grow", self.sharp_key(r), out.shape, edge)
+        if key not in self._sharp:
+            k = edge / max(out.shape[:2])
+            size = (round(out.shape[1] * k), round(out.shape[0] * k))
+            self._sharp[key] = (enlarge.fit(out, size), None if m is None else cv2.resize(m, size, interpolation=cv2.INTER_LINEAR))
+            while len(self._sharp) > 6:
+                self._sharp.popitem(last=False)
+        return self._sharp[key]
+
     def finalize(self, r: "Result", arr: np.ndarray, areas: bool = True, geometry: bool = True,
-                 texts: bool = True, removals: bool = True) -> np.ndarray:
+                 texts: bool = True, removals: bool = True, sharpen: int = 0) -> np.ndarray:
         """The result's picture (floats 0-1, any size) with its edits: parts
         adjusted, straightened and cropped, and its text."""
         e = r.edits or {}
@@ -302,8 +392,9 @@ class Engine:
                 m = self.cutout(r)
                 if m is not None:
                     m = edits.geometry(cv2.resize(m, (w0, h0), interpolation=cv2.INTER_LINEAR), e)
-                logo = brand.load(self.brand_dir, e["poster"].get("logo") or "") if e["poster"].get("logo") else None
-                out = poster.compose(out, m, e["poster"], logo, lambda lid: brand.load(self.brand_dir, lid) if lid else None)
+                if sharpen and e.get("crop"):  # (an export: a tight crop made sharp before the poster goes on)
+                    out, m = self._grown(r, out, m, sharpen)
+                out = self._with_poster(e, out, m)
         if texts:  # (and logos: drawn on top like text)
             out = edits.draw_texts(out, e.get("texts"))
             out = brand.draw(out, e.get("logos"), self.brand_dir)
@@ -629,7 +720,7 @@ class Engine:
             if edits.edited(r.edits):
                 where = edits.map_point(*where, fw, fh, r.edits)
                 players = edits.map_box(players, fw, fh, r.edits)
-                full = self.finalize(r, full, texts=False)  # text is drawn on each size
+                full = self.finalize(r, full, texts=False, sharpen=POSTER_EDGE)  # text is drawn on each size
             taken = images.taken_at(p.exif)
             exif = deliver.credited_exif(p.exif, credit, taken.year if taken else None)
             xmp = deliver.xmp(credit, taken.year if taken else None)
@@ -643,7 +734,7 @@ class Engine:
                     if poster_here and abs(tw / th - full.shape[1] / full.shape[0]) > 0.02:
                         # a poster in another shape: laid out again for it (never cropped: no words cut off)
                         again = dataclasses.replace(r, edits={**r.edits, "poster": {**poster_here, "aspect": tw / th}})
-                        arr, grow = deliver.sized(self.finalize(again, made, texts=False), size, where, players,
+                        arr, grow = deliver.sized(self.finalize(again, made, texts=False, sharpen=POSTER_EDGE), size, where, players,
                                                   report=how)
                     else:
                         arr, grow = deliver.sized(full, size, where, players, report=how)

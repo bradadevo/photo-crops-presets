@@ -1088,6 +1088,9 @@ def _variant(r: Result, kind: str) -> bytes:
     thumb, full: with its text; before: the original, straightened and cropped the same;
     base: parts adjusted, not yet straightened or cropped (for cropping and brushing);
     area-N: base with part N shown in blue."""
+    if kind in ("after", "thumb", "full") and E.needs_sharp(r):  # a tight crop: the sharp one, every time
+        out = E.sharp_finished(r, texts=kind != "after")
+        return jpeg(pipeline.to_image(out), THUMB, 84) if kind == "thumb" else jpeg(pipeline.to_image(out), quality=92 if kind == "full" else 90)
     arr = E.base_after(r)
     if kind == "before":
         return jpeg(pipeline.to_image(edits.geometry(pipeline.to_array(r.before), r.edits)), quality=90)
@@ -1125,8 +1128,32 @@ async def slot_image(sid: int, ver: int, kind: str):
         if kind in ("after", "full", "base"):
             return picture(PICTURES.get(("after", sid, s.ver), lambda: jpeg(r.after, quality=90)))
     await traced(r)
+    if kind in ("after", "thumb", "full") and E.needs_sharp(r) and not E.sharp_ready(r):
+        await asyncio.wrap_future(W.submit(FIX, E.sharp_base, r))  # (made once, on the worker: it uses the AI model)
     data = await asyncio.to_thread(PICTURES.get, (kind, sid, s.ver), lambda: _variant(r, kind))
     return picture(data)
+
+
+@app.get("/api/slots/{sid}/sharp")
+async def sharp_state(sid: int):
+    """Whether this picture's crop is made sharp by the AI (needed), and whether that's done (ready):
+    the app says "Enhancing the crop…" while it works."""
+    r = S.slot(sid).result
+    need = r is not None and E.needs_sharp(r)
+    return {"on": E.sharp_on, "needed": need, "ready": bool(need and E.sharp_ready(r))}
+
+
+@app.post("/api/prefs/sharp")
+async def set_sharp(req: Request):
+    """{on}: tight crops made sharp by the AI detail enlarger (view, poster and export), or not."""
+    on = bool((await req.json()).get("on", True))
+    E.sharp_on = on
+    save_prefs({"sharp_crops": on})
+    with PICTURES.lock:
+        PICTURES.items.clear()  # (every picture shown again, as now set)
+    for s in S.slots.values():
+        s.ver += 1
+    return {"on": on, "slots": [s.public() for s in S.slots.values() if s.result is not None]}
 
 
 ZOOM_CROP = 2160  # px: a crop zoomed into is shown at least this big (twice an Instagram post's width)
@@ -2266,6 +2293,7 @@ def main() -> int:
     while not _free(port):
         port += 1
     url = f"http://127.0.0.1:{port}"
+    E.sharp_on = bool(prefs().get("sharp_crops", True))  # (tight crops made sharp by the AI: your setting)
     _classic()
     S.restore()
     K.start()

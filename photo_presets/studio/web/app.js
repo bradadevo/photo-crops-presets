@@ -548,23 +548,30 @@ function toolbar(cur) {
 }
 
 
-/* A cropped picture is shown sharp: the quick preview first, then (once you pause) the crop made again
-   from the photo's own pixels, with the AI detail enlarger when it needs it, as Zoom and the export do. */
-let sharpTimer = null;
-function sharpCrop(cur) {
-  clearTimeout(sharpTimer);
-  const c = cur.edits?.crop;
-  if (!c || st.fixing || st.compare || st.zoom.on || cur.edits?.poster || Math.min(c[2] - c[0], c[3] - c[1]) > 0.8) return;
-  const id = cur.id, ver = cur.ver;
-  sharpTimer = setTimeout(() => {
-    const big = new Image();
-    big.onload = () => {
-      const s = slotById(st.current), img = $("#frame img.after");
-      if (!s || s.id !== id || s.ver !== ver || !img || st.zoom.on || st.compare || st.tool || st.fixing) return;
-      img.src = big.src; img.dataset.sharp = "1";
-    };
-    big.src = `/img/zoom/${id}/${ver}/after.jpg`;
-  }, 900);
+/* A tight crop is made sharp once on the Mac (the photo's own pixels, then the AI detail enlarger) and
+   that sharp picture is the one shown from then on: in the view, the poster, the thumbnails and the
+   export. While it's being made, say so; when it's done, say that too (once per crop). */
+const sharpSaid = new Set();
+let sharpWatch = 0;
+async function sharpCrop(cur) {
+  const c = cur?.edits?.crop;
+  if (!c || Math.min(c[2] - c[0], c[3] - c[1]) > 0.8 || st.prefs?.sharp_crops === false) return;
+  const key = `${cur.id}:${c.join(",")}`, turn = ++sharpWatch;
+  let s;
+  try { s = await api(`/api/slots/${cur.id}/sharp`); } catch { return; }
+  if (!s.needed || s.ready || turn !== sharpWatch) return;
+  const t = toast("Enhancing the crop with AI…", { sticky: true, spin: true,
+    small: "A few seconds, only once. Nothing to do: it stays sharp in the poster and the export." });
+  for (let i = 0; i < 360 && turn === sharpWatch; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    try { s = await api(`/api/slots/${cur.id}/sharp`); } catch { break; }
+    if (!s.needed || s.ready) break;
+  }
+  t.close();
+  if (s.ready && !sharpSaid.has(key)) {
+    sharpSaid.add(key);
+    toast("Crop enhanced", { small: "It stays sharp from here on: the poster, thumbnails and export all use it." });
+  }
 }
 
 function updateViewerLive(cur) {

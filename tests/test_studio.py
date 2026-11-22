@@ -88,7 +88,9 @@ def test_editing_a_picture(client, monkeypatch):
     for kind in ("after", "thumb", "full", "before", "base"):
         r = client.get(f"/img/slot/999/{s['ver']}/{kind}.jpg")
         assert r.status_code == 200, kind
-    assert Image.open(io.BytesIO(client.get(f"/img/slot/999/{s['ver']}/after.jpg").content)).size == (160, 240)
+    shown = Image.open(io.BytesIO(client.get(f"/img/slot/999/{s['ver']}/after.jpg").content)).size
+    assert shown[0] * 240 == shown[1] * 160 and shown[0] >= 160  # a tight crop: made sharp (bigger), its shape kept
+    assert client.get("/api/slots/999/sharp").json() == {"on": True, "needed": True, "ready": True}
     assert client.post("/api/slots/rate", json={"ids": [999], "rating": 4}).status_code == 200
     assert slot.rating == 4
 
@@ -137,3 +139,22 @@ def test_page_scripts_do_not_declare_the_same_name_twice():
         for n in set(re.findall(r"^(?:const|let|var|function|async function|class) ([A-Za-z_$][\w$]*)", f.read_text(), re.M)):
             names[n] += 1
     assert [n for n, c in names.items() if c > 1] == []
+
+
+def test_a_sharp_crop_stays_sharp_when_a_poster_is_added_and_can_be_switched_off(client, monkeypatch):
+    """The enhanced crop sticks: adding a poster (or any later click) lays the poster out on the same
+    sharp picture, never back on the soft preview. AI sharpen off: the plain preview again."""
+    _made(client, monkeypatch)
+    monkeypatch.setattr(server.E, "sharp_on", True)
+    s = client.post("/api/slots/999/edit", json={"edits": {"crop": [0, 0, 0.5, 1]}}).json()
+    size = lambda ver: Image.open(io.BytesIO(client.get(f"/img/slot/999/{ver}/after.jpg").content)).size
+    sharp = size(s["ver"])
+    s = client.post("/api/slots/999/edit", json={"edits": {"crop": [0, 0, 0.5, 1],
+                                                           "poster": {"template": "card", "title": "LINCOLN"}}}).json()
+    with_poster = size(s["ver"])
+    assert with_poster[0] >= sharp[0] * 0.95 and with_poster[0] > 160  # the poster on the sharp picture
+    assert client.post("/api/prefs/sharp", json={"on": False}).json()["on"] is False
+    off = size(server.S.slot(999).ver)
+    assert off[0] < with_poster[0]  # switched off: the plain preview
+    assert client.get("/api/slots/999/sharp").json()["needed"] is False
+    client.post("/api/prefs/sharp", json={"on": True})
