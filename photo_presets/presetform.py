@@ -533,6 +533,14 @@ def components(ids: dict) -> dict:
                     slider("sm_size", 0.4, 2, "Size", info="Relative to the player's height.")
                     slider("sm_front", 0, 1, "Over the feet", info="How much floor smoke rolls in front of the feet.")
                     slider("sm_ground", 0, 1, "Shadow under feet", info="Grounds the players and goal posts so they don't float.")
+            check("nb_on", "New background", "Puts the player in front of one of the backgrounds made here "
+                  "(the same ones as the Background tool), sharp unless you add blur.")
+            with when("nb_on"):
+                from photo_presets import backgrounds
+                with gr.Row():
+                    drop("nb_bg", backgrounds.NAMES, "Background")
+                    color("nb_color", "Its color", info="The team color, for the backgrounds that use one.")
+                    slider("nb_blur", 0, 1, "Blur", info="0 = sharp. More = out of focus, like a fast lens.")
             check("ns_on", "Night sky", "Swaps everything behind the far edge of the field (cars, houses, daytime sky) "
                   "for a dark night sky with lit haze.")
             with when("ns_on"):

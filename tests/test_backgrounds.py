@@ -81,3 +81,8 @@ def test_every_background_is_also_a_sharp_look_under_other():
     matte[20:60, 30:50] = 1
     out = np.asarray(pipeline.render(img, presets.STARTERS["Studio Grey Background"], Library(Sources([], [], [], [], [], [])), Scene(matte=matte))[0])
     assert out[2, 2, 1] < 150  # the green grass replaced by the grey backdrop
+
+
+def test_the_classic_screen_builds_with_every_preset_setting():
+    from photo_presets import app
+    app.build()  # (a setting with no control on it stopped the whole app from opening)
