@@ -1031,26 +1031,38 @@ function renderLooks(full = false) {
   const shown = st.looks.filter((l) => (st.filter === "All" || l.group === st.filter)
     && (!q || (l.name + " " + l.about + " " + l.group).toLowerCase().includes(q)));
   const grid = $("#look-grid");
-  if (full) {
+  if (full) {  // a compact list: scales to hundreds of looks (each row's picture comes from the look made ahead)
     let html = "", group = null;
-    for (const l of shown) {
-      if (st.filter === "All" && l.group !== group) { group = l.group; html += `<h4 class="group-title">${esc(group)}</h4>`; }
-      html += lookCard(l);
+    const head = (g) => `<h4 class="group-title">${esc(g)}</h4>`;
+    if (!q && st.filter === "All") {  // your favorites, then what you used last, at the top
+      const fv = shown.filter((l) => favs.has(l.name) && !l.own);
+      const rc = recentLooks().map(lookByName).filter((l) => l && shown.includes(l) && !favs.has(l.name));
+      if (fv.length) html += head("Favorites") + fv.map(lookRow).join("");
+      if (rc.length) html += head("Recently used") + rc.map(lookRow).join("");
     }
+    for (const l of shown) {
+      if (st.filter === "All" && l.group !== group) { group = l.group; html += head(group); }
+      html += lookRow(l);
+    }
+    grid.classList.add("as-list");
+    grid.tabIndex = 0;
     grid.innerHTML = html || `<div class="no-looks">No looks match “${esc(st.query)}”.</div>`;
-    paintIcons(grid);
     grid.querySelectorAll(".look").forEach((b) => {
-      b.onmouseenter = () => tryOn(b.dataset.name);
+      b.onmouseenter = () => { markRow(b); tryOn(b.dataset.name); };
       b.onmouseleave = tryOff;
+      b.onclick = (e) => {
+        const n = b.dataset.name;
+        if (e.target.closest("[data-fav]")) {  // the star: a favorite (stays at the top)
+          if (favs.has(n)) favs.delete(n); else favs.add(n);
+          store.set("favs", [...favs]);
+          return renderLooks(true);
+        }
+        if (st.picked.has(n)) st.picked.delete(n); else st.picked.add(n);
+        store.set("looks", [...st.picked]);
+        renderLooks(); renderMake();
+        if (!st.current) { viewerSig = ""; renderViewer(); }
+      };
     });
-    grid.querySelectorAll(".look").forEach((b) => b.onclick = () => {
-      const n = b.dataset.name;
-      st.picked.has(n) ? st.picked.delete(n) : st.picked.add(n);
-      store.set("looks", [...st.picked]);
-      renderLooks(); renderMake();
-      if (!st.current) { viewerSig = ""; renderViewer(); }
-    });
-    watchSwatches();
   }
   if (st.activePhoto && aheadKey() !== ahead.key) aheadSync();
   const order = pickedLooks().map((l) => l.name);
@@ -1095,6 +1107,7 @@ async function aheadLoad(name) {
   if (key !== ahead.key) return;
   ahead.imgs.set(name, img);
   paintAheadStatus();
+  $$(`#look-grid .look[data-name="${CSS.escape(name)}"] .chip img`).forEach((c) => { c.hidden = false; c.src = aheadChip(name); });
   if (tryName === name) showTry(name);
 }
 function paintAheadStatus() {
@@ -1145,6 +1158,60 @@ function tryOff() {
   clearTimeout(tryTimer); tryName = null;
   $("#frame .tryon")?.remove();
 }
+
+/* The looks list: a row per look (its picture on your photo once made ahead), favorites and recently used on
+   top; up/down arrows step through it with the look shown on the photo, Return picks it, Esc stops showing. */
+const favs = new Set(store.get("favs", []));
+const aheadChip = (n) => `/img/ahead/${st.activePhoto}/${enc(n)}.jpg?e=${enc(ahead.token)}&chip=1`;
+function recentLooks() {  // the looks made most recently, newest first
+  const out = [];
+  for (const s of [...st.slots].reverse()) if (s.look && s.look !== "Original" && !out.includes(s.look)) out.push(s.look);
+  return out.slice(0, 6);
+}
+function lookRow(l) {
+  if (l.own) {
+    return `<button class="look row own" data-name="${esc(l.name)}"><span class="chip">${st.activePhoto ? `<img src="/img/photo/${st.activePhoto}/thumb.jpg" alt="" draggable="false">` : ""}</span>
+      <span class="txt"><b>Original</b><small>${esc(l.about)}</small></span><span class="meta"></span><span class="check"></span></button>`;
+  }
+  const made = !l.ai && !l.design && ahead.key === aheadKey() && ahead.ready.has(l.name);
+  const src = made ? aheadChip(l.name) : `/img/example/${enc(l.name)}.jpg?v=${pageStamp}`;
+  const fav = favs.has(l.name);
+  return `<button class="look row" data-name="${esc(l.name)}">
+    <span class="chip" style="background:${gradientFor(l.name)}"><img src="${src}" alt="" loading="lazy" draggable="false" onerror="this.hidden=true"></span>
+    <span class="txt"><b>${esc(l.name)}</b><small>${esc(l.about)}</small></span>
+    <span class="meta">${l.ai ? '<span class="ai" title="An AI drawing: made when you press Make (it takes a while)">AI</span>' : ""}</span>
+    <span class="fav${fav ? " on" : ""}" data-fav title="${fav ? "Remove from favorites" : "Add to favorites (they stay at the top)"}">★</span>
+    <span class="check"></span></button>`;
+}
+function markRow(b) {
+  $$("#look-grid .look.kb").forEach((x) => x.classList.toggle("kb", false));
+  if (b) b.classList.add("kb");
+}
+function stepLooks(by) {
+  const rows = $$("#look-grid .look");
+  if (!rows.length) return;
+  let i = rows.findIndex((r) => r.classList.contains("kb"));
+  i = i < 0 ? (by > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, i + by));
+  const r = rows[i];
+  markRow(r);
+  r.scrollIntoView({ block: "nearest" });
+  tryOn(r.dataset.name);
+}
+document.addEventListener("keydown", (e) => {  // (in the looks list, or from its search box)
+  const inList = e.target.closest?.("#look-grid"), inSearch = e.target.id === "look-search";
+  if (!inList && !inSearch) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault(); e.stopPropagation();
+    if (inSearch) $("#look-grid").focus({ preventScroll: true });
+    stepLooks(e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Enter" && inList) {
+    const r = $("#look-grid .look.kb");
+    if (r) { e.preventDefault(); r.click(); }
+  } else if (e.key === "Escape") {
+    tryOff(); markRow(null);
+    if (inList) $("#look-grid").blur();
+  }
+}, true);
 
 function lookCard(l) {
   if (l.own) {

@@ -62,6 +62,7 @@ LOOKS = (STATE / "looks") if STATE else Path("~/.cache/photo-crops-presets/sessi
 # (a test copy exports into its own folder: never into your real Pictures)
 DEFAULT_EXPORT = str(STATE / "Exports") if STATE else str(Path.home() / "Pictures" / "Photo Presets")
 THUMB, VIEW, SWATCH, TRY = 560, 1800, 420, 1400  # px: the strip and grid, a photo, a look's card, trying a look on
+CHIP = 160  # px: a look's small picture in the looks list (made with the look ahead)
 ZOOM = 3600  # px: a look made again, sharper, when you zoom in
 CROPS = ["none", "wide", "crop", "face"]
 FIX, RUN, OUTPUT, PREVIEW = 0, 1, 2, 5  # the worker's order of importance
@@ -643,20 +644,18 @@ class Ahead:
         with self.lock:
             return list(self.made.get((pid, token), {}))
 
-    def get(self, pid: int, token: str, name: str) -> bytes | None:
+    def get(self, pid: int, token: str, name: str, chip: bool = False) -> bytes | None:
+        """The look made ahead (or its small picture for the looks list), from memory or disk."""
         with self.lock:
             got = self.made.get((pid, token), {}).get(name)
-        if got is not None:
-            return got
-        recipe = self.looks().get(name)  # (made before: from disk)
-        if recipe is not None:
-            f = self.file(pid, token, name, recipe)
-            if f.exists():
-                data = f.read_bytes()
+        if got is None:
+            recipe = self.looks().get(name)  # (made before: from disk)
+            f = self.file(pid, token, name, recipe) if recipe is not None else None
+            if f is not None and f.exists() and f.with_suffix(".chip.jpg").exists():
+                got = (f.read_bytes(), f.with_suffix(".chip.jpg").read_bytes())
                 with self.lock:
-                    self.made.setdefault((pid, token), {})[name] = data
-                return data
-        return None
+                    self.made.setdefault((pid, token), {})[name] = got
+        return None if got is None else got[1 if chip else 0]
 
     def kick(self) -> None:
         with self.lock:
@@ -685,10 +684,12 @@ class Ahead:
         small = p.image.copy()
         small.thumbnail((engine.PREVIEW_EDGE, engine.PREVIEW_EDGE))
         img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
-        data = jpeg(img, quality=90)
+        data = (jpeg(img, quality=90), jpeg(img, CHIP, 82))  # (the look, and its small picture for the list)
         try:
             AHEAD_DIR.mkdir(parents=True, exist_ok=True)
-            self.file(pid, token, name, self.looks()[name]).write_bytes(data)
+            f = self.file(pid, token, name, self.looks()[name])
+            f.with_suffix(".chip.jpg").write_bytes(data[1])
+            f.write_bytes(data[0])
         except OSError:
             pass
         return data
@@ -1022,8 +1023,8 @@ async def ahead(pid: int, req: Request):
 
 
 @app.get("/img/ahead/{pid}/{name}.jpg")
-async def ahead_image(pid: int, name: str, e: str = ""):
-    data = await asyncio.to_thread(A.get, pid, e, name)
+async def ahead_image(pid: int, name: str, e: str = "", chip: int = 0):
+    data = await asyncio.to_thread(A.get, pid, e, name, bool(chip))
     if data is None:
         raise HTTPException(404, "Not made yet")
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

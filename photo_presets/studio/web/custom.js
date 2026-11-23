@@ -498,6 +498,7 @@ function nudgeChosen(cur, dx, dy) {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (e.target.closest?.("#look-grid, #look-search")) return;  // (the looks list has its own arrows)
   const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
   const typing = e.target.closest?.("input, textarea, [contenteditable], select");
   if ((typing && !(arrow && st.nudgeArmed && !e.target.matches?.("[type=range]"))) || e.metaKey || e.ctrlKey || e.altKey) return;

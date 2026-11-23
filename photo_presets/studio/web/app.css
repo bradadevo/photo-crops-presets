@@ -1564,3 +1564,25 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
 
 .ahead-status { font-size: 12px; color: var(--text-2, #9aa3b2); margin-top: 6px; }
 .ahead-status.done { color: var(--accent); }
+
+/* The looks list (Instant looks): a row per look */
+.look-grid.as-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 14px; outline: none; }
+.look-grid.as-list .group-title { margin: 12px 6px 4px; }
+.look.row { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 8px; width: 100%;
+  content-visibility: auto; contain-intrinsic-size: auto 58px; cursor: pointer; }
+.look.row:hover, .look.row.kb { background: var(--panel-2); }
+.look.row.kb { box-shadow: inset 0 0 0 1px var(--line-2); }
+.look.row.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.look.row .chip { flex: none; width: 38px; height: 48px; border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+.look.row .chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.look.row .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.look.row .txt b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.look.row .txt small { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.look.row .meta span.ai { font-size: 10px; font-weight: 650; padding: 2px 6px; border-radius: 6px; color: #fff;
+  background: linear-gradient(135deg, rgba(63, 169, 245, .9), rgba(0, 119, 192, .9)); }
+.look.row .fav { flex: none; font-size: 15px; color: var(--faint); opacity: 0; padding: 2px 4px; }
+.look.row:hover .fav, .look.row.kb .fav, .look.row .fav.on { opacity: 1; }
+.look.row .fav.on { color: #f5c443; }
+.look.row .check { position: static; flex: none; opacity: .6; border-color: var(--line-2); background: transparent; }
+.look.row:hover .check, .look.row.kb .check { opacity: 1; }
+.look.row.on .check { opacity: 1; background: var(--accent); border-color: var(--accent); }

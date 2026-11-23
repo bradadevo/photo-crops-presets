@@ -227,6 +227,7 @@ def test_every_look_is_made_ahead_so_hovering_shows_it_at_once(client, monkeypat
     assert sorted(r["ready"]) == ["Clean Pro", "Mono Editorial"]
     got = client.get(f"/img/ahead/{pid}/Mono Editorial.jpg?e={r['token']}")
     assert got.status_code == 200 and Image.open(io.BytesIO(got.content)).size[0] > 100
-    assert len(list(server.AHEAD_DIR.glob("*.jpg"))) == 2  # kept on disk
+    assert len([f for f in server.AHEAD_DIR.glob("*.jpg") if ".chip" not in f.name]) == 2  # kept on disk (with small pictures)
+    assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}&chip=1").status_code == 200
     server.A = server.Ahead()  # (as after a restart)
     assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}").status_code == 200  # from disk, not made again
