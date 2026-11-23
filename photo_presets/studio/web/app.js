@@ -1052,6 +1052,7 @@ function renderLooks(full = false) {
     });
     watchSwatches();
   }
+  if (st.activePhoto && aheadKey() !== ahead.key) aheadSync();
   const order = pickedLooks().map((l) => l.name);
   grid.querySelectorAll(".look").forEach((b) => {
     const on = st.picked.has(b.dataset.name);
@@ -1060,34 +1061,85 @@ function renderLooks(full = false) {
   });
 }
 
-/* Resting the pointer on a look's card shows it on the big photo, full size, at once. */
+/* Instant looks (docs/plans/instant-looks.md): every look is made ahead for this photo, in the background
+   (the same engine and size as Make), and kept decoded in memory, so resting the pointer on a look shows
+   the real look on the big photo at once. The look under the pointer is made first, then its neighbors. */
+const ahead = { key: "", token: "", ready: new Set(), imgs: new Map(), loading: new Set(), total: 0, timer: null, focus: null };
+const aheadKey = () => `${st.activePhoto}|${editKey()}`;
+function aheadOrder(focus) {  // the look under the pointer, then the nearest ones in the list
+  const names = [...document.querySelectorAll("#look-grid .look:not(.own)")].map((b) => b.dataset.name);
+  const i = focus ? names.indexOf(focus) : -1;
+  return i < 0 ? names : names.map((n, j) => [Math.abs(j - i), j, n]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
+}
+async function aheadSync(focus = ahead.focus) {
+  if (!st.activePhoto) return;
+  const key = aheadKey();
+  if (key !== ahead.key) { ahead.key = key; ahead.ready = new Set(); ahead.imgs = new Map(); ahead.loading = new Set(); }
+  clearTimeout(ahead.timer);
+  let r;
+  try { r = await api(`/api/ahead/${st.activePhoto}`, { order: aheadOrder(focus), edits: !!editKey() }); } catch { return; }
+  if (key !== ahead.key) return;
+  ahead.token = r.token; ahead.total = r.total;
+  r.ready.forEach((n) => { ahead.ready.add(n); aheadLoad(n); });
+  paintAheadStatus();
+  if (ahead.ready.size < ahead.total) ahead.timer = setTimeout(() => aheadSync(), 600);
+}
+async function aheadLoad(name) {
+  if (ahead.imgs.has(name) || ahead.loading.has(name)) return;
+  const key = ahead.key, img = new Image();
+  ahead.loading.add(name);
+  img.alt = ""; img.draggable = false;
+  img.src = `/img/ahead/${st.activePhoto}/${enc(name)}.jpg?e=${enc(ahead.token)}`;
+  try { await img.decode(); } catch { ahead.loading.delete(name); return; }  // (decoded now: showing it costs nothing)
+  ahead.loading.delete(name);
+  if (key !== ahead.key) return;
+  ahead.imgs.set(name, img);
+  paintAheadStatus();
+  if (tryName === name) showTry(name);
+}
+function paintAheadStatus() {
+  const el = $("#ahead-status");
+  if (!el) return;
+  const n = ahead.imgs.size, t = ahead.total;
+  el.hidden = !t;
+  el.classList.toggle("done", n >= t);
+  el.textContent = n >= t ? `⚡ All ${t} looks show instantly when you point at them` : `⚡ Getting looks ready to show instantly: ${n} of ${t}`;
+}
+function showTry(name) {
+  const f = $("#frame"), img = ahead.imgs.get(name);
+  if (!f || !img || tryName !== name) return;
+  let ov = f.querySelector(".tryon");
+  if (!ov) { ov = document.createElement("div"); ov.className = "tryon"; f.appendChild(ov); }
+  const tag = document.createElement("span");
+  tag.className = "tag l"; tag.innerHTML = `<b>${esc(name)}</b> · click to pick it for Make looks`;
+  ov.replaceChildren(img, tag);
+  ov.classList.add("ready");
+}
+
+/* Resting the pointer on a look's card shows it on the big photo at once (made ahead; see above). */
 let tryTimer = null, tryName = null;
 function tryOn(name) {
   clearTimeout(tryTimer);
   const l = lookByName(name), cur = slotById(st.current);
   if (!l || l.own || !st.activePhoto || st.mode !== "edit" || st.view === "grid" || st.fixing || st.survey.length >= 2) return;
   if (cur && cur.photo !== st.activePhoto) return;
-  tryName = name;
-  tryTimer = setTimeout(() => {
-    const f = $("#frame");
-    if (!f || tryName !== name) return;
+  tryName = name; ahead.focus = name;
+  const f = $("#frame");
+  if (!f) return;
+  if (l.ai || l.design) {
     let ov = f.querySelector(".tryon");
     if (!ov) { ov = document.createElement("div"); ov.className = "tryon"; f.appendChild(ov); }
-    if (l.ai || l.design) {
-      ov.classList.toggle("ready", !!l.example);
-      ov.innerHTML = `${l.example ? `<img src="/img/example/${enc(name)}.jpg" alt="">` : ""}<span class="tag l">${esc(name)} · ${l.design ? "your design as saved: press Make to put this photo in it" : "an AI look: an example, press Make to see it on this photo"}</span>`;
-      return;
-    }
-    ov.innerHTML = `<span class="tag l"><span class="spin"></span> ${esc(name)}</span>`;
-    const img = new Image();
-    img.onload = () => {
-      if (tryName !== name || !ov.isConnected) return;
-      ov.innerHTML = `<span class="tag l">Trying on · <b>${esc(name)}</b></span>`;
-      ov.classList.add("ready");
-      ov.prepend(img);
-    };
-    img.src = `/img/try/${st.activePhoto}/${enc(name)}.jpg?edits=${editKey() ? 1 : 0}&v=${enc(editKey())}`;
-  }, 140);
+    ov.classList.toggle("ready", !!l.example);
+    ov.innerHTML = `${l.example ? `<img src="/img/example/${enc(name)}.jpg" alt="">` : ""}<span class="tag l">${esc(name)} · ${l.design ? "your design as saved: press Make to put this photo in it" : "an AI look: an example, press Make to see it on this photo"}</span>`;
+    return;
+  }
+  if (ahead.key === aheadKey() && ahead.imgs.has(name)) return showTry(name);
+  // not made yet: the photo stays as it is (never blurred), a note says so, and this look is made next
+  let ov = f.querySelector(".tryon");
+  if (!ov) { ov = document.createElement("div"); ov.className = "tryon"; f.appendChild(ov); }
+  ov.classList.remove("ready");
+  ov.innerHTML = `<span class="tag l"><span class="spin"></span> Making <b>${esc(name)}</b> for this photo…</span>`;
+  aheadSync(name);
 }
 function tryOff() {
   clearTimeout(tryTimer); tryName = null;

@@ -15,6 +15,7 @@ import asyncio
 import io
 import itertools
 import os
+import hashlib
 import json
 import uuid
 import re
@@ -64,6 +65,7 @@ THUMB, VIEW, SWATCH, TRY = 560, 1800, 420, 1400  # px: the strip and grid, a pho
 ZOOM = 3600  # px: a look made again, sharper, when you zoom in
 CROPS = ["none", "wide", "crop", "face"]
 FIX, RUN, OUTPUT, PREVIEW = 0, 1, 2, 5  # the worker's order of importance
+AHEAD = 9  # looks made ahead for hovering: after everything else
 
 # the look groups, short, for the picker's filters
 SHORT_GROUPS = {
@@ -593,6 +595,120 @@ def try_future(pid: int, name: str, token: str = "") -> Future:
         return fut
 
 
+# Instant looks: every look made ahead for the photo, so hovering one shows it at once ----------
+
+class Ahead:
+    """The looks made ahead of time for the photo you're on (the same engine and size as Make, so a
+    hovered look is the real one), one at a time at the lowest priority: the look under the mouse
+    first, then its neighbors, then the rest. Kept in memory (the last few photos) and on disk."""
+
+    KEEP = 4  # photos kept in memory (about 50 looks x 300 KB each)
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.key: tuple[int, str] | None = None  # (photo, edits token) being made
+        self.order: list[str] = []
+        self.made: OrderedDict = OrderedDict()  # (photo, token) -> {name: jpeg bytes}
+        self.failed: set = set()
+        self.busy = False
+        self.last_edit = 0.0
+
+    def looks(self) -> dict[str, dict]:
+        return {n: r for n, r in presets.load_all().items() if not timing.uses_ai(r) and not r.get("design")}
+
+    def file(self, pid: int, token: str, name: str, recipe: dict) -> Path:
+        src = _start_from(pid, token) if token else S.photo(pid).path
+        try:
+            stamp = src.stat().st_mtime
+        except OSError:
+            stamp = 0
+        digest = hashlib.sha1(json.dumps([str(src), stamp, name, recipe, engine.PREVIEW_EDGE], sort_keys=True,
+                                         default=str).encode()).hexdigest()
+        return AHEAD_DIR / f"{digest}.jpg"
+
+    def want(self, pid: int, token: str, order: list[str]) -> None:
+        """Make these looks for this photo, in this order (the page sends it again as the mouse moves)."""
+        allowed = self.looks()
+        with self.lock:
+            self.key = (pid, token)
+            self.made.setdefault(self.key, {})
+            self.made.move_to_end(self.key)
+            while len(self.made) > self.KEEP:
+                self.made.popitem(last=False)
+            rest = [n for n in allowed if n not in order]
+            self.order = [n for n in order if n in allowed] + rest
+        self.kick()
+
+    def ready(self, pid: int, token: str) -> list[str]:
+        with self.lock:
+            return list(self.made.get((pid, token), {}))
+
+    def get(self, pid: int, token: str, name: str) -> bytes | None:
+        with self.lock:
+            got = self.made.get((pid, token), {}).get(name)
+        if got is not None:
+            return got
+        recipe = self.looks().get(name)  # (made before: from disk)
+        if recipe is not None:
+            f = self.file(pid, token, name, recipe)
+            if f.exists():
+                data = f.read_bytes()
+                with self.lock:
+                    self.made.setdefault((pid, token), {})[name] = data
+                return data
+        return None
+
+    def kick(self) -> None:
+        with self.lock:
+            if self.busy or self.key is None:
+                return
+            if time.time() - self.last_edit < 1.0:  # (you're editing: wait, so nothing slows you)
+                threading.Timer(1.0, self.kick).start()
+                return
+            key, todo = self.key, [n for n in self.order if n not in self.made.get(self.key, {}) and (self.key, n) not in self.failed]
+            if not todo:
+                return
+            self.busy = True
+        name = todo[0]
+        if self.get(*key, name) is not None:  # (on disk already)
+            with self.lock:
+                self.busy = False
+            return self.kick()
+        fut = W.submit(AHEAD, self._make, key, name)
+        fut.add_done_callback(lambda f: self._done(key, name, f))
+
+    def _make(self, key: tuple[int, str], name: str) -> bytes | None:
+        pid, token = key
+        recipe = dict(self.looks()[name], name=name)
+        path = _start_from(pid, token)
+        p = E.ready(path, "none", recipe)
+        small = p.image.copy()
+        small.thumbnail((engine.PREVIEW_EDGE, engine.PREVIEW_EDGE))
+        img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
+        data = jpeg(img, quality=90)
+        try:
+            AHEAD_DIR.mkdir(parents=True, exist_ok=True)
+            self.file(pid, token, name, self.looks()[name]).write_bytes(data)
+        except OSError:
+            pass
+        return data
+
+    def _done(self, key, name, fut) -> None:
+        with self.lock:
+            self.busy = False
+            try:
+                data = fut.result()
+                if data is not None:
+                    self.made.setdefault(key, {})[name] = data
+            except Exception:
+                self.failed.add((key, name))
+        self.kick()
+
+
+AHEAD_DIR = (STATE or Path("~/.cache/photo-crops-presets").expanduser()) / "ahead"
+A = Ahead()
+
+
 # Making looks ------------------------------------------------------------------------------
 
 def _make(slot: Slot, job: Job, crop: str) -> None:
@@ -891,6 +1007,26 @@ async def swatches(pid: int, req: Request):
         if fut.done():
             (failed if fut.cancelled() or fut.exception() or fut.result() is None else ready).append(name)
     return {"ready": ready, "failed": failed, "token": token}
+
+
+@app.post("/api/ahead/{pid}")
+async def ahead(pid: int, req: Request):
+    """{order: [names], edits: bool}: make every look ahead for this photo, these first (the look under
+    the mouse, then its neighbors). Says which are ready, so hovering shows them at once."""
+    S.photo(pid)
+    body = await req.json()
+    token = edit_token(pid, bool(body.get("edits")))
+    A.want(pid, token, [str(n) for n in body.get("order", [])][:400])
+    total = len(A.looks())
+    return {"token": token, "ready": A.ready(pid, token), "total": total}
+
+
+@app.get("/img/ahead/{pid}/{name}.jpg")
+async def ahead_image(pid: int, name: str, e: str = ""):
+    data = await asyncio.to_thread(A.get, pid, e, name)
+    if data is None:
+        raise HTTPException(404, "Not made yet")
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/img/swatch/{pid}/{name}.jpg")
@@ -1268,6 +1404,7 @@ async def adjust(sid: int, req: Request):
 @app.post("/api/slots/{sid}/edit")
 async def edit(sid: int, req: Request):
     """{adjust: {...}, edits: {...}}: the picture's sliders and its edits (each one given is replaced whole)."""
+    A.last_edit = time.time()  # (looks made ahead wait while you edit)
     s = S.slot(sid)
     body = await req.json()
     new = edits.clean(body["edits"]) if "edits" in body else None

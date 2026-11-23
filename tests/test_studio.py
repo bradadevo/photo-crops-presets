@@ -22,6 +22,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server.E, "sharp_dir", tmp_path / "sharp")
     monkeypatch.setattr(server.E, "_sharp", __import__("collections").OrderedDict())
     server.PICTURES.items.clear()  # (pictures made by another test for the same slot number)
+    monkeypatch.setattr(server, "AHEAD_DIR", tmp_path / "ahead")
+    monkeypatch.setattr(server, "A", server.Ahead())
     return TestClient(server.app)
 
 
@@ -207,3 +209,24 @@ def test_a_sharp_crop_is_kept_on_disk_so_a_restart_never_runs_the_ai_again(clien
     assert client.get("/api/slots/999/sharp").json()["ready"] is True
     again = Image.open(io.BytesIO(client.get(f"/img/slot/999/{ver}/after.jpg").content)).size
     assert again == first and len(runs) == 1  # loaded from disk, the AI not run again
+
+
+def test_every_look_is_made_ahead_so_hovering_shows_it_at_once(client, monkeypatch):
+    """Instant looks: the look under the pointer first, then the rest; each made once (kept on disk)."""
+    import time
+    pid = client.post("/api/photos/upload", files=[("files", ("h.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    looks = {"Clean Pro": presets.load_all()["Clean Pro"], "Mono Editorial": presets.load_all()["Mono Editorial"]}
+    monkeypatch.setattr(server.Ahead, "looks", lambda self: looks)
+    r = client.post(f"/api/ahead/{pid}", json={"order": ["Mono Editorial"]}).json()
+    assert r["total"] == 2
+    for _ in range(100):
+        r = client.post(f"/api/ahead/{pid}", json={"order": ["Mono Editorial"]}).json()
+        if len(r["ready"]) == 2:
+            break
+        time.sleep(0.1)
+    assert sorted(r["ready"]) == ["Clean Pro", "Mono Editorial"]
+    got = client.get(f"/img/ahead/{pid}/Mono Editorial.jpg?e={r['token']}")
+    assert got.status_code == 200 and Image.open(io.BytesIO(got.content)).size[0] > 100
+    assert len(list(server.AHEAD_DIR.glob("*.jpg"))) == 2  # kept on disk
+    server.A = server.Ahead()  # (as after a restart)
+    assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}").status_code == 200  # from disk, not made again
