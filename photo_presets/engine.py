@@ -76,8 +76,8 @@ class Job:
 
 
 SHARP_SHARE = 0.8  # a crop this tight (or tighter) is made sharp from the photo's own pixels
-SHARP_EDGE = 1800  # px: the sharp crop's long edge on screen (the size of the previews)
-SHARP_KEEP = 60  # sharp crops kept on disk (the most recently used), about 10 MB each
+SHARP_EDGE = 2400  # px: the sharp crop's long edge: export quality, so the view, poster and export share one
+SHARP_KEEP = 40  # sharp crops kept on disk (the most recently used), about 19 MB each
 POSTER_EDGE = 2400  # px: an export's poster laid out on a crop at least this big (enlarged by the AI when smaller)
 
 
@@ -306,7 +306,7 @@ class Engine:
         never runs the AI again."""
         e = {k: v for k, v in (r.edits or {}).items() if k in self.CROP_KEYS}
         look = {k: v for k, v in r.recipe.items() if k != "adjust"}
-        return hashlib.sha1(json.dumps([str(r.source), r.crop, look, e, r.seed, self.removals.get(str(r.source))],
+        return hashlib.sha1(json.dumps([str(r.source), r.crop, look, e, r.seed, self.removals.get(str(r.source)), SHARP_EDGE],
                                        sort_keys=True, default=str).encode()).hexdigest()
 
     def sharp_ready(self, r: "Result") -> bool:
@@ -315,14 +315,14 @@ class Engine:
         return key in self._sharp or (self.sharp_dir / key / "look.png").exists()
 
     def _sharp_save(self, key: str, got: dict) -> None:
-        """The sharp crop saved (16-bit PNGs: no banding, about 10 MB), the oldest removed past SHARP_KEEP."""
+        """The sharp crop saved (the look as a 16-bit PNG: no banding; about 19 MB in all), the oldest removed past SHARP_KEEP."""
         folder = self.sharp_dir / key
         try:
             tmp = folder.with_name(key + ".part")
             tmp.mkdir(parents=True, exist_ok=True)
-            for name in ("look", "before"):
-                a = np.clip(got[name], 0, 1)
-                cv2.imwrite(str(tmp / f"{name}.png"), cv2.cvtColor((a * 65535).round().astype(np.uint16), cv2.COLOR_RGB2BGR))
+            for name, depth in (("look", 65535), ("before", 255)):  # (the photo under the look: only for Look strength)
+                a = np.clip(got[name].astype(np.float32), 0, 1)
+                cv2.imwrite(str(tmp / f"{name}.png"), cv2.cvtColor((a * depth).round().astype(np.uint16 if depth > 255 else np.uint8), cv2.COLOR_RGB2BGR))
             if got["matte"] is not None:
                 cv2.imwrite(str(tmp / "matte.png"), (np.clip(got["matte"], 0, 1) * 255).round().astype(np.uint8))
             (tmp / "size0.json").write_text(json.dumps(list(got["size0"])))
@@ -343,9 +343,11 @@ class Engine:
         try:
             if not (folder / "look.png").exists():
                 return None
-            read = lambda n: cv2.cvtColor(cv2.imread(str(folder / f"{n}.png"), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB).astype(np.float32) / 65535
+            def read(n):
+                a = cv2.cvtColor(cv2.imread(str(folder / f"{n}.png"), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                return a.astype(np.float32) / (65535 if a.dtype == np.uint16 else 255)
             m = cv2.imread(str(folder / "matte.png"), cv2.IMREAD_GRAYSCALE) if (folder / "matte.png").exists() else None
-            got = {"look": read("look"), "before": read("before"), "matte": None if m is None else m.astype(np.float32) / 255,
+            got = {"look": read("look").astype(np.float16), "before": read("before").astype(np.float16), "matte": None if m is None else m.astype(np.float32) / 255,
                    "size0": tuple(json.loads((folder / "size0.json").read_text()))}
             os.utime(folder, None)  # (recently used: kept longest)
             return got
@@ -365,7 +367,7 @@ class Engine:
         got = self._sharp_load(key)  # (made before this restart: loaded, no AI)
         if got is not None:
             self._sharp[key] = got
-            while len(self._sharp) > 6:
+            while len(self._sharp) > 4:
                 self._sharp.popitem(last=False)
             return got
         from photo_presets import enlarge
@@ -393,8 +395,8 @@ class Engine:
             before = np.clip(cv2.resize(before, size, interpolation=cv2.INTER_LANCZOS4), 0, 1).astype(np.float32)
             if m is not None:
                 m = cv2.resize(m, size, interpolation=cv2.INTER_LINEAR)
-        self._sharp[key] = got = {"look": arr, "before": before, "matte": m, "size0": (w0, h0)}
-        while len(self._sharp) > 6:
+        self._sharp[key] = got = {"look": arr.astype(np.float16), "before": before.astype(np.float16), "matte": m, "size0": (w0, h0)}
+        while len(self._sharp) > 4:  # (kept small: half-size numbers, the last few looks; the rest on disk)
             self._sharp.popitem(last=False)
         self._sharp_save(key, got)
         return got
@@ -417,8 +419,8 @@ class Engine:
         under = json.dumps([self.sharp_key(r), r.recipe.get("adjust"), e.get("background"), e.get("areas")],
                            sort_keys=True, default=str)
         if b.get("under_key") != under:  # (the photo as edited, under the poster: kept, so moving a word is quick)
-            b["under"], b["under_key"] = self._sharp_under(r, b), under
-        out = b["under"]
+            b["under"], b["under_key"] = self._sharp_under(r, b).astype(np.float16), under
+        out = b["under"].astype(np.float32)
         if e.get("poster"):
             out = self._with_poster(e, out, m)
         if texts:
@@ -429,9 +431,9 @@ class Engine:
     def _sharp_under(self, r: "Result", b: dict) -> np.ndarray:
         """The sharp crop with its sliders, new background and parts (what the poster goes on)."""
         e = r.edits or {}
-        out, m = b["look"], b["matte"]
+        out, m = b["look"].astype(np.float32), b["matte"]
         if pipeline.adjusted(r.recipe):
-            out, _ = pipeline.finish(b["before"], out, r.recipe, m, self._crop_faces(r) if pipeline.adjustments(r.recipe)["face_light"] else None)
+            out, _ = pipeline.finish(b["before"].astype(np.float32), out, r.recipe, m, self._crop_faces(r) if pipeline.adjustments(r.recipe)["face_light"] else None)
         if e.get("background") and m is not None:
             out = self.with_background(out, m, e["background"])
         if e.get("areas"):
@@ -441,6 +443,27 @@ class Engine:
                 pm = cv2.resize(pm.astype(np.float32), out.shape[1::-1], interpolation=cv2.INTER_LINEAR)
                 out = edits.adjust_part(out, pm, a)
         return out
+
+    def _sharp_export(self, r: "Result", size) -> np.ndarray | None:
+        """A web size (Instagram, story…) of a tight crop: its sharp picture (export quality, made once while
+        editing and saved, so usually no AI at all), the poster laid out for this size's shape, when it has
+        the pixels the size needs."""
+        b = self.sharp_base(r)
+        h, w = b["look"].shape[:2]
+        e = r.edits or {}
+        if e.get("poster"):
+            pw, ph = poster.size_for(w, h, e["poster"])
+            tw, th = size.target(pw, ph)
+            p = e["poster"]
+            if abs(tw / th - pw / ph) > 0.02:  # (laid out again for this shape: never cropped, no words cut off)
+                p = {**p, "aspect": tw / th}
+            r = dataclasses.replace(r, edits={**e, "poster": p})
+        else:
+            tw, th = size.target(w, h)
+        out = self.sharp_finished(r, texts=False)
+        oh, ow = out.shape[:2]
+        need = max(tw / ow, th / oh) if not e.get("poster") else max(tw, th) / max(ow, oh)
+        return out if need <= 1.02 else None
 
     def _with_poster(self, e: dict, out: np.ndarray, m: np.ndarray | None) -> np.ndarray:
         logo = brand.load(self.brand_dir, e["poster"].get("logo") or "") if e["poster"].get("logo") else None
@@ -802,23 +825,44 @@ class Engine:
         enlarged, how = [], []  # every size made bigger than its crop, and how (the AI detail enlarger or plain)
         for i, r in enumerate(results):
             p = self.ready(r.source, r.crop, r.recipe)
-            full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
-                                               self.library, p.scene, r.seed, self.drawings,
-                                               self.memo_key(r.source, r.crop, r.recipe, p.frame))
-            fh, fw = full.shape[:2]
-            where, players = focus(p.scene), players_box(p.scene)
-            made = full  # (the look before its edits: a poster is laid out again for each size's shape)
-            if edits.edited(r.edits):
+            served = {}  # a tight crop's web sizes: from its sharp picture (made once, shared with the view)
+            if kind == JPEG and self.needs_sharp(r) and deliver.FULL not in sizes:
+                for key in sizes:
+                    got = self._sharp_export(r, deliver.SIZES[key])
+                    if got is None:
+                        served = {}
+                        break
+                    served[key] = got
+            notes: list[str] = []
+            if served:
+                full = made = None
+                fw, fh = p.image.size
+                where, players = focus(p.scene), players_box(p.scene)
                 where = edits.map_point(*where, fw, fh, r.edits)
                 players = edits.map_box(players, fw, fh, r.edits)
-                full = self.finalize(r, full, texts=False, sharpen=POSTER_EDGE)  # text is drawn on each size
+            else:
+                full, notes = pipeline.render_fine(p.fine if p.fine is not None else p.image, r.recipe,
+                                                   self.library, p.scene, r.seed, self.drawings,
+                                                   self.memo_key(r.source, r.crop, r.recipe, p.frame))
+                fh, fw = full.shape[:2]
+                where, players = focus(p.scene), players_box(p.scene)
+                made = full  # (the look before its edits: a poster is laid out again for each size's shape)
+                if edits.edited(r.edits):
+                    where = edits.map_point(*where, fw, fh, r.edits)
+                    players = edits.map_box(players, fw, fh, r.edits)
+                    full = self.finalize(r, full, texts=False, sharpen=POSTER_EDGE)  # text is drawn on each size
             taken = images.taken_at(p.exif)
             exif = deliver.credited_exif(p.exif, credit, taken.year if taken else None)
             xmp = deliver.xmp(credit, taken.year if taken else None)
             stem = f"{r.source.stem}_{slug(r.recipe.get('name', 'look'))}" + (f"_{r.crop}" if r.crop != "none" else "")
             for key in sizes:
                 arr, name = full, stem
-                if key != deliver.FULL:
+                if key in served:  # (a tight crop: the sharp picture made while editing, no AI again)
+                    size = deliver.SIZES[key]
+                    arr, grow = deliver.sized(served[key], size, where, players, report=how)
+                    name = f"{stem}_{deliver.SHORT[key]}"
+                    how.clear()
+                elif key != deliver.FULL:
                     size = deliver.SIZES[key]
                     tw, th = size.target(*full.shape[1::-1])
                     poster_here = (r.edits or {}).get("poster")
