@@ -16,7 +16,9 @@ import io
 import itertools
 import os
 import hashlib
+import random
 import json
+import logging
 import uuid
 import re
 import shutil
@@ -44,6 +46,8 @@ from photo_crops.ui import choose_folder
 from photo_presets import brand, deliver, edits, engine, enlarge, pipeline, players, presets, reel, retouch, timing, poster
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
+
+log = logging.getLogger("vsdigitalpro")
 
 WEB = Path(__file__).parent / "web"
 CONFIG = Path("~/.config/photo-crops-presets").expanduser()
@@ -227,7 +231,9 @@ class Session:
                 added.append(pid)
             if added:
                 self.save()
-            return added
+        if added:
+            _thumbs_ahead(added)
+        return added
 
     def remove_photo(self, pid: int) -> None:
         with self.lock:
@@ -336,6 +342,7 @@ E = Engine()
 E.brand_dir = STATE or CONFIG
 E.bg_dir = ADDED.parent / "backgrounds"  # your own background pictures (a test copy: its own)
 E.sharp_dir = ADDED.parent / "sharp"  # tight crops made sharp by the AI, kept across restarts
+E.cutout_dir = ADDED.parent / "cutouts"  # each look's players' cut-out, kept across restarts
 S = Session()
 W = Worker()
 
@@ -611,7 +618,9 @@ class Ahead:
         self.order: list[str] = []
         self.made: OrderedDict = OrderedDict()  # (photo, token) -> {name: jpeg bytes}
         self.failed: set = set()
+        self.recipes: dict[str, dict] = {}
         self.busy = False
+        self.waiting = False
         self.last_edit = 0.0
 
     def looks(self) -> dict[str, dict]:
@@ -623,7 +632,7 @@ class Ahead:
             stamp = src.stat().st_mtime
         except OSError:
             stamp = 0
-        digest = hashlib.sha1(json.dumps([str(src), stamp, name, recipe, engine.PREVIEW_EDGE], sort_keys=True,
+        digest = hashlib.sha1(json.dumps([str(src), stamp, name, recipe, engine.PREVIEW_EDGE, RENDER_CODE], sort_keys=True,
                                          default=str).encode()).hexdigest()
         return AHEAD_DIR / f"{digest}.jpg"
 
@@ -631,13 +640,14 @@ class Ahead:
         """Make these looks for this photo, in this order (the page sends it again as the mouse moves)."""
         allowed = self.looks()
         with self.lock:
+            self.recipes = allowed  # (read once per ask, not once per look)
             self.key = (pid, token)
             self.made.setdefault(self.key, {})
             self.made.move_to_end(self.key)
             while len(self.made) > self.KEEP:
                 self.made.popitem(last=False)
             rest = [n for n in allowed if n not in order]
-            self.order = [n for n in order if n in allowed] + rest
+            self.order = list(dict.fromkeys([n for n in order if n in allowed] + rest))  # (each look once)
         self.kick()
 
     def ready(self, pid: int, token: str) -> list[str]:
@@ -649,7 +659,7 @@ class Ahead:
         with self.lock:
             got = self.made.get((pid, token), {}).get(name)
         if got is None:
-            recipe = self.looks().get(name)  # (made before: from disk)
+            recipe = (self.recipes or self.looks()).get(name)  # (made before: from disk)
             f = self.file(pid, token, name, recipe) if recipe is not None else None
             if f is not None and f.exists() and f.with_suffix(".chip.jpg").exists():
                 got = (f.read_bytes(), f.with_suffix(".chip.jpg").read_bytes())
@@ -658,25 +668,28 @@ class Ahead:
         return None if got is None else got[1 if chip else 0]
 
     def kick(self) -> None:
-        with self.lock:
-            if self.busy or self.key is None:
-                return
-            if time.time() - self.last_edit < 1.0:  # (you're editing: wait, so nothing slows you)
-                threading.Timer(1.0, self.kick).start()
-                return
-            key, todo = self.key, [n for n in self.order if n not in self.made.get(self.key, {}) and (self.key, n) not in self.failed]
-            if not todo:
-                return
-            self.busy = True
-        name = todo[0]
-        if self.get(*key, name) is not None:  # (on disk already)
+        while True:  # (a loop, not a call per look: after a restart they all come straight from disk)
             with self.lock:
+                if self.busy or self.key is None:
+                    return
+                if time.time() - self.last_edit < 1.0:  # (you're editing: wait, so nothing slows you)
+                    if not self.waiting:
+                        self.waiting = True
+                        threading.Timer(1.0, self._resume).start()
+                    return
+                key, todo = self.key, [n for n in self.order if n not in self.made.get(self.key, {}) and (self.key, n) not in self.failed]
+                if not todo:
+                    return
+                self.busy = True
+            name = todo[0]
+            if self.get(*key, name) is None:
+                break
+            with self.lock:  # (on disk already)
                 self.busy = False
-            return self.kick()
         fut = W.submit(AHEAD, self._make, key, name)
         fut.add_done_callback(lambda f: self._done(key, name, f))
 
-    def _make(self, key: tuple[int, str], name: str) -> bytes | None:
+    def _make(self, key: tuple[int, str], name: str) -> tuple[bytes, bytes]:
         pid, token = key
         recipe = dict(self.looks()[name], name=name)
         path = _start_from(pid, token)
@@ -690,24 +703,191 @@ class Ahead:
             f = self.file(pid, token, name, self.looks()[name])
             f.with_suffix(".chip.jpg").write_bytes(data[1])
             f.write_bytes(data[0])
+            _trim(AHEAD_DIR, AHEAD_KEPT)
         except OSError:
             pass
         return data
+
+    def _resume(self) -> None:
+        with self.lock:
+            self.waiting = False
+        self.kick()
 
     def _done(self, key, name, fut) -> None:
         with self.lock:
             self.busy = False
             try:
-                data = fut.result()
-                if data is not None:
-                    self.made.setdefault(key, {})[name] = data
+                self.made.setdefault(key, {})[name] = fut.result()
             except Exception:
+                log.exception("Making %s ahead failed", name)
                 self.failed.add((key, name))
         self.kick()
 
 
 AHEAD_DIR = (STATE or Path("~/.cache/photo-crops-presets").expanduser()) / "ahead"
 A = Ahead()
+
+
+EVENT_EDGE = 320  # px: a photo in the whole-event preview grid
+RENDER_CODE = engine.RENDER_CODE
+AHEAD_KEPT = 3000  # previews of single photos kept on disk (about 300 KB each: 900 MB), the oldest let go
+EVENT_KEPT = 15000  # event previews kept on disk (about 20 KB each: 300 MB), the oldest let go
+
+
+class EventAhead:
+    """Every look made ahead for every photo of the event, small, for the whole-event preview: point at a
+    look and every photo shows it. Each photo is prepared once as a small picture with its players'
+    cut-out (the full-size photo isn't kept), then each look takes about 0.02 s. The look under the
+    pointer first (on every photo), then its neighbors; kept in memory and on disk."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.minis: dict[int, tuple] = {}  # photo -> (small picture, its scene at that size)
+        self.made: dict[tuple[int, str], bytes] = {}
+        self.failed: set = set()
+        self.pids: list[int] = []
+        self.order: list[str] = []
+        self.recipes: dict[str, dict] = {}
+        self.busy = False
+        self.waiting = False
+
+    def file(self, pid: int, name: str, recipe: dict) -> Path:
+        src = S.photo(pid).path
+        try:
+            stamp = src.stat().st_mtime
+        except OSError:
+            stamp = 0
+        digest = hashlib.sha1(json.dumps([str(src), stamp, name, recipe, EVENT_EDGE, RENDER_CODE], sort_keys=True,
+                                         default=str).encode()).hexdigest()
+        return AHEAD_DIR / "event" / f"{digest}.jpg"
+
+    def want(self, pids: list[int], order: list[str]) -> None:
+        allowed = A.looks()
+        with self.lock:
+            self.recipes = allowed  # (read once per ask, not once per picture)
+            self.pids = [i for i in pids if i in S.photos]
+            self.order = list(dict.fromkeys([n for n in order if n in allowed] + list(allowed)))  # (each look once)
+        self.kick()
+
+    def _kept(self, pid: int, name: str) -> Path | None:
+        recipe = self.recipes.get(name)
+        if recipe is None or pid not in S.photos:
+            return None
+        f = self.file(pid, name, recipe)
+        return f if f.exists() else None
+
+    def has(self, pid: int, name: str) -> bool:
+        """Made (in memory or kept on disk), without reading the picture."""
+        with self.lock:
+            if (pid, name) in self.made:
+                return True
+        if self._kept(pid, name) is None:
+            return False
+        with self.lock:
+            self.made.setdefault((pid, name), None)  # (None: kept on disk, read when asked for)
+        return True
+
+    def get(self, pid: int, name: str) -> bytes | None:
+        with self.lock:
+            got = self.made.get((pid, name))
+        if got is not None:
+            return got
+        f = self._kept(pid, name)
+        if f is None:
+            with self.lock:  # (let go from disk since: made again)
+                self.made.pop((pid, name), None)
+            return None
+        try:
+            data = f.read_bytes()
+        except OSError:
+            return None
+        with self.lock:
+            self.made.setdefault((pid, name), None)
+        return data
+
+    def status(self, focus: str | None) -> dict:
+        """Which looks are ready on every photo, and which photos have the look under the pointer."""
+        with self.lock:
+            pids, order = list(self.pids), list(self.order)
+            made, failed = set(self.made), set(self.failed)
+        # (a look that couldn't be made on a photo counts as done: that photo shows as it is, and the rest go on)
+        complete = [n for n in order if all((i, n) in made or (i, n) in failed for i in pids)]
+        return {"complete": complete, "total": len(order), "photos": len(pids),
+                "focus": [i for i in pids if (i, focus) in made] if focus else []}
+
+    def kick(self) -> None:
+        while True:  # (a loop, not a call per look: after a restart thousands come straight from disk)
+            with self.lock:
+                if self.busy:
+                    return
+                if time.time() - A.last_edit < 1.0:  # (you're editing: wait)
+                    if not self.waiting:
+                        self.waiting = True
+                        threading.Timer(1.0, self._resume).start()
+                    return
+                job = next(((i, n) for n in self.order for i in self.pids
+                            if (i, n) not in self.made and (i, n) not in self.failed), None)
+                if job is None:
+                    self.minis.clear()  # (all made: the small photos and the cut-out model's memory go)
+                    from photo_presets.scene import release_small_cutout
+                    release_small_cutout()
+                    return
+                self.busy = True
+            if not self.has(*job):
+                break
+            with self.lock:  # (on disk already)
+                self.busy = False
+        fut = W.submit(AHEAD, self._make, *job)
+        fut.add_done_callback(lambda f: self._done(job, f))
+
+    def _resume(self) -> None:
+        with self.lock:
+            self.waiting = False
+        self.kick()
+
+    def _mini(self, pid: int) -> tuple:
+        if pid not in self.minis:
+            from photo_presets.scene import prepare_small, resized
+            p = prepare_small(S.photo(pid).path)
+            small = p.image.copy()
+            small.thumbnail((EVENT_EDGE, EVENT_EDGE))
+            sc = p.scene
+            h, w = small.height, small.width
+            for k in ("people_mask", "subject_mask", "matte"):
+                if getattr(sc, k) is not None:
+                    setattr(sc, k, resized(getattr(sc, k), h, w))
+            self.minis[pid] = (small, sc)
+        return self.minis[pid]
+
+    def _make(self, pid: int, name: str) -> bytes | None:
+        """The look on this photo, small; kept on disk (None then: read when asked for), else in memory."""
+        small, sc = self._mini(pid)
+        recipe = dict(self.recipes[name], name=name)
+        img, _ = pipeline.render(small.copy(), recipe, E.library, sc, 0)
+        data = jpeg(img, quality=86)
+        try:
+            f = self.file(pid, name, self.recipes[name])
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".part")
+            tmp.write_bytes(data)
+            tmp.replace(f)
+            _trim(f.parent, EVENT_KEPT)
+            return None
+        except OSError:
+            return data
+
+    def _done(self, job, fut) -> None:
+        with self.lock:
+            self.busy = False
+            try:
+                self.made[job] = fut.result()
+            except Exception:
+                log.exception("Making %s ahead for photo %s failed", job[1], job[0])
+                self.failed.add(job)
+        self.kick()
+
+
+EV = EventAhead()
 
 
 # Making looks ------------------------------------------------------------------------------
@@ -984,15 +1164,63 @@ def clear_photos():
 
 @app.get("/img/photo/{pid}/{size}.jpg")
 def photo_image(pid: int, size: str):
+    return picture(_photo_picture(pid, size))
+
+
+def _thumbs_ahead(pids: list[int]) -> None:
+    """Each added photo's small picture made in the background now (kept on disk), so the strip and the
+    whole-event preview never show an empty tile waiting for it."""
+    for pid in pids:
+        W.submit(PREVIEW, _photo_picture, pid, "thumb", False)
+
+
+def _photo_picture(pid: int, size: str, remember: bool = True) -> bytes:
+    """remember=False: only kept on disk (made ahead), not held in memory where it would push out
+    the pictures you're working on."""
     path = S.photo(pid).path
     edge = THUMB if size == "thumb" else VIEW
 
     def make():
+        kept = _kept_thumb(path, edge) if size == "thumb" else None  # (kept on disk: no camera file read after a restart)
+        if kept is not None and kept.exists():
+            return kept.read_bytes()
         try:
-            return jpeg(images.preview_image(path, edge), quality=86)
+            data = jpeg(images.preview_image(path, edge), quality=86)
         except Exception:
-            return jpeg(images.load(path).image, edge, 86)
-    return picture(PICTURES.get(("photo", pid, size), make))
+            data = jpeg(images.load(path).image, edge, 86)
+        if kept is not None:
+            try:
+                kept.parent.mkdir(parents=True, exist_ok=True)
+                tmp = kept.with_suffix(".part")
+                tmp.write_bytes(data)
+                tmp.replace(kept)
+                _trim(kept.parent, THUMBS_KEPT)
+            except OSError:
+                pass
+        return data
+    return PICTURES.get(("photo", pid, size), make) if remember else make()
+
+
+THUMBS_KEPT = 3000  # photos' small pictures kept on disk (about 60 KB each), the oldest let go
+
+
+def _kept_thumb(path: Path, edge: int) -> Path | None:
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return None
+    digest = hashlib.sha1(json.dumps([str(path), stamp, edge]).encode()).hexdigest()
+    return AHEAD_DIR.parent / "thumbs" / f"{digest}.jpg"
+
+
+def _trim(folder: Path, keep: int) -> None:
+    """At most `keep` files in the folder: the oldest go (checked now and then, not on every file)."""
+    if random.random() > 0.02:
+        return
+    files = sorted((q for q in folder.glob("*.jpg") if not q.name.endswith(".chip.jpg")), key=lambda q: q.stat().st_mtime)
+    for old in files[:-keep]:
+        old.unlink(missing_ok=True)
+        old.with_suffix(".chip.jpg").unlink(missing_ok=True)  # (a preview's small copy goes with it)
 
 
 @app.post("/api/swatches/{pid}")
@@ -1017,9 +1245,30 @@ async def ahead(pid: int, req: Request):
     S.photo(pid)
     body = await req.json()
     token = edit_token(pid, bool(body.get("edits")))
-    A.want(pid, token, [str(n) for n in body.get("order", [])][:400])
-    total = len(A.looks())
-    return {"token": token, "ready": A.ready(pid, token), "total": total}
+    await asyncio.to_thread(A.want, pid, token, [str(n) for n in body.get("order", [])][:400])
+    with A.lock:  # (a look that couldn't be made is left out of the count: the rest still reach "all ready")
+        failed = [n for (k, n) in A.failed if k == (pid, token)]
+    total = len(A.looks()) - len(failed)
+    return {"token": token, "ready": A.ready(pid, token), "total": total, "failed": failed}
+
+
+@app.post("/api/event-ahead")
+async def event_ahead(req: Request):
+    """{order: [names], focus: name}: every look made ahead for every photo of the event (small), the
+    look under the pointer first. Says which looks are ready on every photo."""
+    body = await req.json()
+    order = [str(n) for n in body.get("order", [])][:400]
+    focus = body.get("focus")
+    await asyncio.to_thread(EV.want, list(S.photos), ([focus] if focus else []) + order)
+    return EV.status(focus)
+
+
+@app.get("/img/event/{pid}/{name}.jpg")
+async def event_image(pid: int, name: str):
+    data = await asyncio.to_thread(EV.get, pid, name)
+    if data is None:
+        raise HTTPException(404, "Not made yet")
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/img/ahead/{pid}/{name}.jpg")
@@ -1261,6 +1510,8 @@ async def slot_image(sid: int, ver: int, kind: str, quick: int = 0):
         return picture(jpeg(await asyncio.to_thread(E.fix_view, r, view), quality=88))
     if kind not in ("after", "thumb", "full", "before", "base") and not re.fullmatch(r"area-\d+", kind):
         raise HTTPException(404)
+    if kind == "after":
+        _warm_cutout(r)
     if not edits.edited(r.edits):  # nothing to work out
         if kind == "before":
             return picture(PICTURES.get(("before", sid), lambda: jpeg(r.before, quality=90)))
@@ -1298,6 +1549,23 @@ def _warm_up() -> None:
             pass  # (only a head start: the picture is made when it's shown)
     for sid in list(S.slots):
         W.submit(PREVIEW, one, sid)
+
+
+WARMING: set = set()
+
+
+def _warm_cutout(r: Result) -> None:
+    """Opening a photo whose players' cut-out it already uses (a player or background slider, or a look
+    built on it): the cut-out is loaded in the background now, so the first slider after a restart is as
+    quick as the rest. Only these (their cut-out is kept on disk: quick to load); browsing new photos
+    never starts the cut-out model."""
+    if not (pipeline.needs_cutout(r.recipe) or pipeline.needs_cutout({"adjust": r.recipe.get("adjust")})):
+        return
+    key = (str(r.source), r.crop, r.frame)
+    if key in E._cutouts or key in WARMING:
+        return
+    WARMING.add(key)
+    W.submit(RUN, E.cutout, r).add_done_callback(lambda f: WARMING.discard(key))  # (the photo you have open: before background work)
 
 
 def _start_sharpening(r: Result):
@@ -2479,6 +2747,7 @@ def main() -> int:
     E.sharp_on = bool(prefs().get("sharp_crops", True))  # (tight crops made sharp by the AI: your setting)
     _classic()
     S.restore()
+    _thumbs_ahead(list(S.photos))  # (from disk: a moment)
     _warm_up()
     K.start()
     import signal

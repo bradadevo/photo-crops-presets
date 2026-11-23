@@ -20,10 +20,13 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "LOOKS", tmp_path / "looks")
     monkeypatch.setattr(server, "S", server.Session())
     monkeypatch.setattr(server.E, "sharp_dir", tmp_path / "sharp")
+    monkeypatch.setattr(server.E, "cutout_dir", tmp_path / "cutouts")
+    monkeypatch.setattr(server.E, "_cutouts", {})
     monkeypatch.setattr(server.E, "_sharp", __import__("collections").OrderedDict())
     server.PICTURES.items.clear()  # (pictures made by another test for the same slot number)
     monkeypatch.setattr(server, "AHEAD_DIR", tmp_path / "ahead")
     monkeypatch.setattr(server, "A", server.Ahead())
+    monkeypatch.setattr(server, "EV", server.EventAhead())
     return TestClient(server.app)
 
 
@@ -231,3 +234,136 @@ def test_every_look_is_made_ahead_so_hovering_shows_it_at_once(client, monkeypat
     assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}&chip=1").status_code == 200
     server.A = server.Ahead()  # (as after a restart)
     assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}").status_code == 200  # from disk, not made again
+
+
+def _wait(fn, tries=200):
+    import time
+    for _ in range(tries):
+        got = fn()
+        if got:
+            return got
+        time.sleep(0.05)
+    return fn()
+
+
+def test_every_look_is_made_ahead_for_the_whole_event(client, monkeypatch):
+    """Whole-event preview: each look once (even if the page names it twice), on every photo, kept on disk,
+    and the small photos and cut-out model let go once all are made."""
+    pids = [client.post("/api/photos/upload", files=[("files", (f"e{i}.jpg", _jpeg((40 + 60 * i, 90, 160)), "image/jpeg"))]).json()["added"][0]
+            for i in range(2)]
+    looks = {"Clean Pro": presets.load_all()["Clean Pro"], "Mono Editorial": presets.load_all()["Mono Editorial"]}
+    monkeypatch.setattr(server.Ahead, "looks", lambda self: looks)
+    ask = lambda: client.post("/api/event-ahead", json={"order": ["Mono Editorial", "Mono Editorial", "Clean Pro"], "focus": "Mono Editorial"}).json()
+    assert ask()["total"] == 2 and ask()["photos"] == 2  # (each look once)
+    r = _wait(lambda: (lambda r: r if len(r["complete"]) == 2 else None)(ask()))
+    assert r and sorted(r["complete"]) == ["Clean Pro", "Mono Editorial"] and sorted(r["focus"]) == sorted(pids)
+    got = client.get(f"/img/event/{pids[0]}/Mono Editorial.jpg")
+    assert got.status_code == 200 and max(Image.open(io.BytesIO(got.content)).size) <= server.EVENT_EDGE
+    assert _wait(lambda: not server.EV.minis)  # (all made: the small photos let go)
+    assert all(v is None for v in server.EV.made.values())  # (kept on disk, not held in memory)
+    server.EV = server.EventAhead()  # (as after a restart)
+    monkeypatch.setattr(server.EventAhead, "_make", lambda *a: (_ for _ in ()).throw(AssertionError("made again")))
+    r = _wait(lambda: (lambda r: r if len(r["complete"]) == 2 else None)(ask()))
+    assert r and client.get(f"/img/event/{pids[1]}/Clean Pro.jpg").status_code == 200  # from disk, not made again
+
+
+def test_a_look_that_fails_never_stops_all_ready(client, monkeypatch):
+    """One look failing on one photo: the rest are still made and "all ready" is still reached
+    (the page would otherwise say "116 of 117" and keep asking for ever)."""
+    pids = [client.post("/api/photos/upload", files=[("files", (f"f{i}.jpg", _jpeg((90, 40 + 50 * i, 60)), "image/jpeg"))]).json()["added"][0]
+            for i in range(2)]
+    looks = {"Clean Pro": presets.load_all()["Clean Pro"], "Mono Editorial": presets.load_all()["Mono Editorial"]}
+    monkeypatch.setattr(server.Ahead, "looks", lambda self: looks)
+    make_event, make_one = server.EventAhead._make, server.Ahead._make
+
+    def broken_event(self, pid, name):
+        if name == "Clean Pro" and pid == pids[0]:
+            raise RuntimeError("broken look")
+        return make_event(self, pid, name)
+
+    def broken_one(self, key, name):
+        if name == "Clean Pro":
+            raise RuntimeError("broken look")
+        return make_one(self, key, name)
+    monkeypatch.setattr(server.EventAhead, "_make", broken_event)
+    monkeypatch.setattr(server.Ahead, "_make", broken_one)
+    ask = lambda: client.post("/api/event-ahead", json={"order": [], "focus": None}).json()
+    r = _wait(lambda: (lambda r: r if len(r["complete"]) == r["total"] else None)(ask()))
+    assert r and r["total"] == 2
+    one = lambda: client.post(f"/api/ahead/{pids[0]}", json={"order": []}).json()
+    r = _wait(lambda: (lambda r: r if len(r["ready"]) >= r["total"] else None)(one()))
+    assert r and r["ready"] == ["Mono Editorial"] and r["failed"] == ["Clean Pro"] and r["total"] == 1
+
+
+def test_thousands_of_kept_previews_come_back_without_a_crash(client, monkeypatch):
+    """After a restart every preview comes straight from disk: the queue steps through them in a loop
+    (a call per look would overflow Python's limit of about 1000)."""
+    pid = client.post("/api/photos/upload", files=[("files", ("k.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    looks = {f"Look {i}": {"steps": []} for i in range(3000)}
+    monkeypatch.setattr(server.Ahead, "looks", lambda self: looks)
+    monkeypatch.setattr(server.EventAhead, "has", lambda self, p, n: self.made.setdefault((p, n), None) is None)
+    monkeypatch.setattr(server.Ahead, "get", lambda self, p, t, n, chip=False: self.made.setdefault((p, t), {}).setdefault(n, (b"k", b"k"))[0])
+    server.EV.want([pid], [])
+    assert server.EV.status(None)["complete"].__len__() == 3000 and not server.EV.busy
+    server.A.want(pid, "", [])
+    assert len(server.A.ready(pid, "")) == 3000 and not server.A.busy
+
+
+def test_kept_previews_are_bounded_and_go_with_their_small_copy(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr(server.random, "random", lambda: 0.0)  # (check now)
+    for i in range(10):
+        (tmp_path / f"{i}.jpg").write_bytes(b"x")
+        (tmp_path / f"{i}.chip.jpg").write_bytes(b"x")
+        os.utime(tmp_path / f"{i}.jpg", (i, i))
+    server._trim(tmp_path, 4)
+    left = sorted(f.name for f in tmp_path.iterdir())
+    assert left == sorted([f"{i}.jpg" for i in range(6, 10)] + [f"{i}.chip.jpg" for i in range(6, 10)])
+
+
+def test_photo_thumbnails_are_kept_across_restarts(client, monkeypatch):
+    pid = client.post("/api/photos/upload", files=[("files", ("t.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    first = client.get(f"/img/photo/{pid}/thumb.jpg").content
+    server.PICTURES.items.clear()  # (as after a restart)
+    monkeypatch.setattr(server.images, "preview_image", lambda *a: (_ for _ in ()).throw(AssertionError("read the camera file again")))
+    monkeypatch.setattr(server.images, "load", lambda *a: (_ for _ in ()).throw(AssertionError("read the camera file again")))
+    assert client.get(f"/img/photo/{pid}/thumb.jpg").content == first
+
+
+def test_kept_previews_from_older_drawing_code_are_not_shown(client, monkeypatch):
+    """A new version that draws looks differently never shows a preview the old one made (nor an old sharp crop)."""
+    pid = client.post("/api/photos/upload", files=[("files", ("v.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    recipe = presets.load_all()["Clean Pro"]
+    before = (server.A.file(pid, "", "Clean Pro", recipe), server.EV.file(pid, "Clean Pro", recipe))
+    monkeypatch.setattr(server, "RENDER_CODE", "a-newer-version")
+    after = (server.A.file(pid, "", "Clean Pro", recipe), server.EV.file(pid, "Clean Pro", recipe))
+    assert before[0] != after[0] and before[1] != after[1]
+
+
+def test_added_photos_get_their_small_picture_ahead(client, monkeypatch):
+    """Added photos: their small pictures made in the background and kept on disk (not in memory)."""
+    monkeypatch.setattr(server.W, "submit", lambda prio, fn, *a: fn(*a))  # (at once, in the test)
+    pid = client.post("/api/photos/upload", files=[("files", ("n.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    kept = server._kept_thumb(server.S.photo(pid).path, server.THUMB)
+    assert kept.exists() and ("photo", pid, "thumb") not in server.PICTURES.items
+
+
+def test_a_looks_cut_out_comes_back_from_disk_after_a_restart(client, monkeypatch):
+    """Sliders after a restart: the look's cut-out is loaded from disk (milliseconds), the photo isn't
+    loaded and its players found again (seconds)."""
+    import numpy as np
+    pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    path = server.S.photo(pid).path
+    r = server.E._one(path, "none", {"steps": []}, 0)
+    fake = np.zeros((r.before.height, r.before.width), np.float32)
+    fake[10:40, 20:60] = 1.0
+
+    class P:  # (a prepared photo with a known cut-out: no AI in the test)
+        scene = type("Sc", (), {"matte": fake})()
+    monkeypatch.setattr(server.E, "ready", lambda *a, **k: P())
+    first = server.E.cutout(r)
+    assert first is not None and first[20, 30] > 0.9
+    monkeypatch.setattr(server.E, "_cutouts", {})  # (as after a restart)
+    monkeypatch.setattr(server.E, "ready", lambda *a, **k: (_ for _ in ()).throw(AssertionError("traced again")))
+    again = server.E.cutout(r)
+    assert np.array_equal(again, first)

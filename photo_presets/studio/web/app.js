@@ -89,7 +89,7 @@ async function api(path, body, opts = {}) {
   try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
     const msg = data.error || data.detail || `Something went wrong (${res.status})`;
-    toast(typeof msg === "string" ? msg : "Something went wrong", { bad: true });
+    if (!opts.quiet) toast(typeof msg === "string" ? msg : "Something went wrong", { bad: true });
     throw Object.assign(new Error(msg), { shown: true });
   }
   return data;
@@ -1065,6 +1065,7 @@ function renderLooks(full = false) {
     });
   }
   if (st.activePhoto && aheadKey() !== ahead.key) aheadSync();
+  if (st.aheadScope === "event" && st.photos.length > 1 && (!evAhead.total || evAhead.photos !== st.photos.length)) eventSync();
   const order = pickedLooks().map((l) => l.name);
   grid.querySelectorAll(".look").forEach((b) => {
     const on = st.picked.has(b.dataset.name);
@@ -1083,18 +1084,26 @@ function aheadOrder(focus) {  // the look under the pointer, then the nearest on
   const i = focus ? names.indexOf(focus) : -1;
   return i < 0 ? names : names.map((n, j) => [Math.abs(j - i), j, n]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
 }
+/* Asking the server how far the looks made ahead are: always asks again until all are (a failed ask, or
+   a slip in painting, waits a little longer and asks again; it never stops quietly). */
 async function aheadSync(focus = ahead.focus) {
   if (!st.activePhoto) return;
   const key = aheadKey();
   if (key !== ahead.key) { ahead.key = key; ahead.ready = new Set(); ahead.imgs = new Map(); ahead.loading = new Set(); }
   clearTimeout(ahead.timer);
-  let r;
-  try { r = await api(`/api/ahead/${st.activePhoto}`, { order: aheadOrder(focus), edits: !!editKey() }); } catch { return; }
-  if (key !== ahead.key) return;
-  ahead.token = r.token; ahead.total = r.total;
-  r.ready.forEach((n) => { ahead.ready.add(n); aheadLoad(n); });
-  paintAheadStatus();
-  if (ahead.ready.size < ahead.total) ahead.timer = setTimeout(() => aheadSync(), 600);
+  let again = 600;
+  try {
+    const r = await api(`/api/ahead/${st.activePhoto}`, { order: aheadOrder(focus), edits: !!editKey() }, { quiet: true });
+    if (key !== ahead.key) return;
+    ahead.token = r.token; ahead.total = r.total; ahead.fails = 0;
+    r.ready.forEach((n) => { ahead.ready.add(n); aheadLoad(n); });
+    paintAheadStatus();
+    if (ahead.ready.size >= ahead.total) again = 0;
+  } catch (e) {
+    ahead.fails = (ahead.fails || 0) + 1; again = Math.min(10000, 600 * 2 ** ahead.fails);
+    console.warn("looks ahead: asking again", e);
+  }
+  if (again && key === ahead.key) { clearTimeout(ahead.timer); ahead.timer = setTimeout(() => aheadSync(), again); }
 }
 async function aheadLoad(name) {
   if (ahead.imgs.has(name) || ahead.loading.has(name)) return;
@@ -1113,10 +1122,94 @@ async function aheadLoad(name) {
 function paintAheadStatus() {
   const el = $("#ahead-status");
   if (!el) return;
+  const scope = $("#ahead-scope");
+  if (scope) {  // (one photo: nothing to choose)
+    scope.hidden = st.photos.length < 2;
+    scope.querySelector(".seg").innerHTML = `<button data-v="photo" class="${st.aheadScope !== "event" ? "on" : ""}">This photo</button>`
+      + `<button data-v="event" class="${st.aheadScope === "event" ? "on" : ""}">All ${st.photos.length} photos</button>`;
+    scope.querySelectorAll("button").forEach((b) => b.onclick = () => {
+      st.aheadScope = b.dataset.v; store.set("aheadScope", st.aheadScope); tryOff();
+      if (st.aheadScope === "event") eventSync(); else aheadSync();
+      paintAheadStatus();
+    });
+  }
+  if (st.aheadScope === "event" && st.photos.length > 1) {
+    const n = evAhead.complete.size, t = evAhead.total;
+    el.hidden = false; el.classList.toggle("empty", !t);  // (its room always kept: the list never moves under the pointer)
+    el.classList.toggle("done", n >= t);
+    el.textContent = n >= t ? `⚡ All ${t} looks show on all ${evAhead.photos} photos at once`
+      : `⚡ Getting looks ready on all ${evAhead.photos} photos: ${n} of ${t}`;
+    return;
+  }
   const n = ahead.imgs.size, t = ahead.total;
-  el.hidden = !t;
+  el.hidden = false; el.classList.toggle("empty", !t);
   el.classList.toggle("done", n >= t);
   el.textContent = n >= t ? `⚡ All ${t} looks show instantly when you point at them` : `⚡ Getting looks ready to show instantly: ${n} of ${t}`;
+}
+
+/* The whole event: point at a look and every photo shows it (each made ahead, small). */
+st.aheadScope = store.get("aheadScope", "photo");
+const evAhead = { complete: new Set(), total: 0, photos: 0, focusMade: new Set(), timer: null, warm: new Map() };
+const evSrc = (pid, name) => `/img/event/${pid}/${enc(name)}.jpg`;
+async function eventSync(focus = ahead.focus) {  // (as aheadSync: asks again until all are made, never stops quietly)
+  clearTimeout(evAhead.timer);
+  if (st.aheadScope !== "event" || st.photos.length < 2) return;
+  let again = 700;
+  try {
+    const r = await api("/api/event-ahead", { order: aheadOrder(focus), focus }, { quiet: true });
+    evAhead.complete = new Set(r.complete); evAhead.total = r.total; evAhead.photos = r.photos;
+    evAhead.focusMade = new Set(r.focus); evAhead.fails = 0;
+    if (evAhead.complete.size >= evAhead.total) again = 0;
+    paintAheadStatus();
+    if (tryName && tryName === focus) paintEvent(focus);
+    warmNeighbors(focus);
+  } catch (e) {
+    evAhead.fails = (evAhead.fails || 0) + 1; again = Math.min(10000, 700 * 2 ** evAhead.fails);
+    console.warn("event looks ahead: asking again", e);
+  }
+  if (again && st.aheadScope === "event") { clearTimeout(evAhead.timer); evAhead.timer = setTimeout(() => eventSync(), again); }
+}
+function warmNeighbors(focus) {  // (the looks next to the one under the pointer: decoded ahead, so they swap at once)
+  const near = aheadOrder(focus).slice(0, 4).filter((n) => evAhead.complete.has(n));
+  for (const n of near) {
+    if (evAhead.warm.has(n)) continue;
+    const imgs = st.photos.map((ph) => { const i = new Image(); i.src = evSrc(ph.id, n); i.decode().catch(() => {}); return i; });
+    evAhead.warm.set(n, imgs);
+  }
+  while (evAhead.warm.size > 8) evAhead.warm.delete(evAhead.warm.keys().next().value);
+}
+function paintEvent(name) {
+  const v = $("#viewer");
+  if (!v || tryName !== name) return;
+  let ov = v.querySelector(".event-try");
+  if (!ov) { ov = document.createElement("div"); ov.className = "event-try"; v.appendChild(ov); }
+  const done = evAhead.photos === st.photos.length && evAhead.complete.has(name);  // (photos added since: not for them yet)
+  if (ov.dataset.name !== name || ov.querySelectorAll("figure").length !== st.photos.length) {
+    ov.dataset.name = name;
+    ov.innerHTML = `<div class="event-head"><b>${esc(name)}</b> · on all ${st.photos.length} photos</div><div class="event-grid">`
+      + st.photos.map((ph) => `<figure data-pid="${ph.id}"><img alt="" draggable="false"><span class="tag making" hidden>making…</span></figure>`).join("") + `</div>`;
+  }
+  ov.querySelectorAll("figure").forEach((fg) => {
+    const pid = +fg.dataset.pid, made = done || evAhead.focusMade.has(pid), img = fg.querySelector("img");
+    const want = made ? evSrc(pid, name) : `/img/photo/${pid}/thumb.jpg`;  // (not made yet: the photo as it is, never blurred)
+    if (img.dataset.src !== want) { img.dataset.src = want; img.src = want; }
+    fg.querySelector(".making").hidden = made;
+  });
+}
+function eventTry(name) {
+  const l = lookByName(name);
+  if (!l) return;
+  if (l.ai || l.design) {
+    const v = $("#viewer");
+    let ov = v.querySelector(".event-try");
+    if (!ov) { ov = document.createElement("div"); ov.className = "event-try"; v.appendChild(ov); }
+    ov.dataset.name = "";
+    ov.innerHTML = `<div class="event-head"><b>${esc(name)}</b> · ${l.design ? "a saved design: press Make to put photos in it" : "an AI drawing: it takes a while per photo, so it's made with Make"}</div>`;
+    return;
+  }
+  paintEvent(name);
+  if (!evAhead.complete.has(name) || evAhead.photos !== st.photos.length) eventSync(name);
+  else warmNeighbors(name);
 }
 function showTry(name) {
   const f = $("#frame"), img = ahead.imgs.get(name);
@@ -1134,9 +1227,11 @@ let tryTimer = null, tryName = null;
 function tryOn(name) {
   clearTimeout(tryTimer);
   const l = lookByName(name), cur = slotById(st.current);
-  if (!l || l.own || !st.activePhoto || st.mode !== "edit" || st.view === "grid" || st.fixing || st.survey.length >= 2) return;
-  if (cur && cur.photo !== st.activePhoto) return;
+  if (!l || l.own || !st.activePhoto || st.mode !== "edit" || st.fixing || st.survey.length >= 2) return;
+  const whole = st.aheadScope === "event" && st.photos.length > 1;
+  if (!whole && (st.view === "grid" || (cur && cur.photo !== st.activePhoto))) return;
   tryName = name; ahead.focus = name;
+  if (st.aheadScope === "event" && st.photos.length > 1) return eventTry(name);
   const f = $("#frame");
   if (!f) return;
   if (l.ai || l.design) {
@@ -1157,6 +1252,7 @@ function tryOn(name) {
 function tryOff() {
   clearTimeout(tryTimer); tryName = null;
   $("#frame .tryon")?.remove();
+  $("#viewer .event-try")?.remove();
 }
 
 /* The looks list: a row per look (its picture on your photo once made ahead), favorites and recently used on

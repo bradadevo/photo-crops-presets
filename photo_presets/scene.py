@@ -544,6 +544,48 @@ def cutout(img: Image.Image, subject_mask: np.ndarray) -> np.ndarray | None:
     return full
 
 
+_small_session = None
+SMALL_MODEL = "u2net_human_seg"  # a people cut-out made for small pictures (320 px): 0.3 s and under 2 GB
+
+
+def small_cutout(img: Image.Image, scene: "Scene") -> np.ndarray | None:
+    """The players' cut-out for a small preview (the whole-event grid): the same steps as the full one
+    (only pieces touching the players in the play, the ball, a team as one group) with a model made for
+    small pictures, on 2 processor cores. Edges are only right at small sizes: never used for Make."""
+    from rembg import remove
+    global _small_session
+    if scene.subject_mask is None:
+        return None
+    if _small_session is None:
+        import onnxruntime as ort
+        from rembg import new_session
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads, opts.inter_op_num_threads = 2, 1  # (the other cores stay free for you)
+        opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False
+        _small_session = new_session(SMALL_MODEL, sess_opts=opts)
+    w, h = img.size
+    yolo = resized(scene.subject_mask, h, w) > 0.5
+    if not yolo.any():
+        return None
+    alpha = np.asarray(remove(img, session=_small_session, only_mask=True), np.float32) / 255
+    count, labels = cv2.connectedComponents((alpha > 0.05).astype(np.uint8))
+    attached = np.unique(labels[yolo & (alpha > ATTACHED)])
+    keep = np.zeros(count, bool)
+    keep[attached[attached > 0]] = True
+    alpha = np.where(keep[labels], alpha, 0).astype(np.float32)
+    alpha = with_balls(alpha, scene.balls)
+    if scene.team:
+        alpha = fill_group(alpha, img, scene.subject_mask)
+    return alpha
+
+
+def release_small_cutout() -> None:
+    """Hands the small cut-out model's memory back (the event's previews are all made)."""
+    global _small_session
+    _small_session = None
+
+
 MATTE_VERSION = 6  # (raised when the cut-out is made differently: the kept ones are made again)
 MATTES_KEPT = 400  # cut-outs kept on disk, the oldest let go
 
@@ -738,6 +780,29 @@ def frame_boxes(path: Path, colors: dict[str, str] | None = None, goalie_first: 
         face = framing.face_box(plan.face_person, img.size, "sharp", framing.crop_box(plan, img.size, shape))
     return {"wide": shares(framing.wide_box(plan, img.size)), "crop": shares(framing.crop_box(plan, img.size, shape)),
             "face": shares(face)}
+
+
+SMALL_EDGE = 1024  # px: a photo prepared for a small preview is looked at this size
+
+
+def prepare_small(path: Path, edge: int = SMALL_EDGE) -> Prepared:
+    """A photo prepared for a small preview (the whole-event grid): loaded, made small at once (the
+    camera-size picture isn't kept), its players found and cut out at that size. Quick and light: about
+    half a second and a few MB kept, so a whole event fits on any Mac."""
+    photo = images.load(path)
+    img = photo.image.copy()
+    del photo
+    img.thumbnail((edge, edge))
+    colors = {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}  # (as prepare)
+    people, balls = detector().find(img, focus.focus_point(path, img.size), colors)
+    scene = find(img, people, balls, framing.choose(people, balls, img.size, True))
+    p = Prepared(path, img, scene, None, None)
+    matte = small_cutout(img, scene)
+    if matte is not None:
+        scene.take_in(matte)
+    p._auto = (matte, scene.subject_mask)
+    scene.matte = matte
+    return p
 
 
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,

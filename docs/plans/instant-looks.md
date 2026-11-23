@@ -37,6 +37,66 @@ example picture.
   made (no endless work, the fan stays quiet).
 - **Kept on disk** per photo and look, so after a restart nothing is made twice.
 
+## Who it must run on (updated 2026-11-23)
+
+**Any Apple Silicon Mac, M2 or newer; 8 GB supported, 16 GB recommended** (like Lightroom Classic).
+Every bar below is budgeted for the base M2 with 8 GB:
+
+- **Time:** background work runs on 2 cores, so per-core speed is what counts; an M5 core is about
+  1.7x an M2 core. M5 timings are multiplied by 2 for the M2 estimate, and a bar only passes if that
+  estimate passes too.
+- **Memory:** background work must never raise the app's peak above what normal editing already
+  needs, and it hands its memory back when done.
+- **Background work:** at most 2 processor cores, lowest priority, paused while you edit, stopped
+  when everything is made.
+- A real M2 test before release is still needed: that's a known gap, not a pass.
+
+**Using newer Macs fully (machine levels).** The app is not held back to the oldest Mac it supports.
+At start it reads the Mac's chip, memory and core count and picks a level:
+- *Base (M2, 8 GB):* everything works, kept light. This level must pass every bar.
+- *High (newer chips, 16 GB or more):* heavier versions switch on by themselves (for example the
+  full-quality cut-out in places where the base level uses a lighter one, more cores for background
+  work).
+- A feature that needs something only newer chips have is checked for at start and switched off
+  where it can't run, with a plain note saying so: it never crashes or quietly runs slowly.
+- Built when the first feature needs it (the cut-out below is the likely first), not before.
+
+## How it's tested (no spot checks)
+
+- The browser click tests (Playwright, real Chrome, a separate test copy, real event photos)
+  live in the repo under `tests/ui/` and run with one command, each with its time and memory
+  budget written in as a pass/fail line. They run before every change reaches the app:
+  `uv run --with playwright --with psutil --with requests python tests/ui/run.py --photos "<folder>"`
+  (about 10 minutes for 40 photos: cold, then quit and reopen, then warm).
+- Every number in this plan comes from those runs. If a bar fails, the phase isn't done.
+
+## Findings that changed the plan
+
+- **Whole-event preview, first try:** each photo was prepared with the full camera file and the
+  full cut-out model (3 runs): 15 to 24 s per photo and 6.8 GB of memory. Fails the M2 budget.
+- **Cut-out options measured (8 real photos, 2 cores):** CoreML (graphics chip / Neural Engine):
+  the model conversion hung, so not usable. BiRefNet Lite: 4.2 s a photo and 11 GB peak: out.
+  u2net_human_seg: 0.32 s a photo, 1.9 GB, cut-outs matching BiRefNet at grid size (it leaves out
+  corner flags; the ball is added back as everywhere else). isnet left a see-through ghost player;
+  silueta and u2netp picked up corner flags. **Chosen: u2net_human_seg, only for the small event
+  previews**, with the app's own steps (only pieces touching the players, the ball, team grouping),
+  from a 1024 px copy. Make and the big hover preview keep the full cut-out.
+- **Result (41 real photos, 117 looks):** the look under the pointer on every photo in 30 s; every
+  look on every photo in about 2 minutes; about 1 core used; peak 4.4 GB; models let go after.
+  After a restart: everything back from disk in 2 s, nothing made again.
+- **Bigger finding, outside Instant Looks:** the app's normal editing already peaks at 9.5 GB the
+  first time it cuts out a photo (BiRefNet on the main processor). An 8 GB Mac would swap heavily
+  on every new photo. That is the real blocker for "M2 with 8 GB", and the first job for machine
+  levels (a lighter cut-out on 8 GB Macs). Needs a decision: it changes cut-out quality there.
+- **Bugs found by the click tests and fixed:** the page counted looks named twice, so "all ready"
+  never came; one failed look stopped "all ready" for ever; a failed status check stopped checking
+  silently; thousands of kept previews would overflow the queue (it called itself per preview);
+  the queue re-read the looks list per preview (6 s after a restart) and did it on the web
+  server's own thread; every kept preview was loaded into memory; kept previews and sharp crops
+  weren't tied to the drawing code (an update could show an old version's look); thumbnails were
+  re-made from the camera file after every restart (black tiles); the first slider after a restart
+  waited for the cut-out (0.85 s); the "making this look" overlay still blurred the photo.
+
 ## Bars (measured, all must pass)
 
 | Phase | What | Bar |
@@ -44,8 +104,8 @@ example picture.
 | 0 | Spike: make every non-AI look at screen and grid size | screen ≤ 1.5 s/look, grid ≤ 0.35 s/look on average; all 50 looks of one photo in ≤ 75 s |
 | 1 | Hover on the current photo | hover → picture ≤ 50 ms once made; identical to Make (pixel check); no blur; editing never slowed (slider ≤ 0.15 s during warm-up) |
 | 2 | Compact look list | 100+ looks: scroll at 60 fps, search ≤ 30 ms, ↑/↓ steps with live preview, Return makes it, Esc reverts |
-| 3 | Whole-event hover | grid of 40 photos swaps ≤ 300 ms once made; event warm-up runs in the background without slowing editing |
-| 4 | Restart | after quit and reopen, previews come back from disk (no remaking) |
+| 3 | Whole-event hover | grid of 40 photos swaps ≤ 300 ms once made; event warm-up runs in the background without slowing editing (slider ≤ 0.15 s); the first time, photos fill in one by one, each showing the photo as it is meanwhile (never blank, never blurred) |
+| 4 | Restart | after quit and reopen, previews come back from disk (no remaking); first slider as quick as the rest; disk use bounded |
 
 Every phase is click-tested in a real browser (Playwright with Chrome) on a separate test copy,
 with real photos, before it reaches the app.

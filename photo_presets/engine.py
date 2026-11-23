@@ -81,6 +81,24 @@ SHARP_KEEP = 40  # sharp crops kept on disk (the most recently used), about 19 M
 POSTER_EDGE = 2400  # px: an export's poster laid out on a crop at least this big (enlarged by the AI when smaller)
 
 
+def _render_code() -> str:
+    """A fingerprint of the code that draws looks (not the screens): kept previews made by other code are
+    made again, so pointing at a look never shows how an older version drew it."""
+    import photo_crops
+    pkg = Path(__file__).resolve().parent
+    screens = {"app.py", "cli.py", "presetform.py", "explore.py", "reel.py", "deliver.py"}
+    files = [f for f in sorted(pkg.glob("*.py")) if f.name not in screens]
+    files += sorted(Path(photo_crops.__file__).resolve().parent.glob("*.py"))
+    h = hashlib.sha1()
+    for f in files:
+        h.update(f.name.encode() + f.read_bytes())
+    return h.hexdigest()[:12]
+
+
+RENDER_CODE = _render_code()
+CUTOUTS_KEPT = 2000  # looks' cut-outs kept on disk (about 100 KB each), the oldest let go
+
+
 class Engine:
     def __init__(self, library: Library | None = None):
         self.library = library or Library()
@@ -104,6 +122,7 @@ class Engine:
         self.sharp_on = True
         self._sharp: OrderedDict = OrderedDict()
         self.sharp_dir = Path("~/.cache/photo-crops-presets/sharp").expanduser()  # (kept on disk: a restart reuses them)
+        self.cutout_dir: Path | None = None  # each look's players' cut-out kept here: after a restart, sliders at once
 
     def prepared(self, path: Path, crop: str) -> Prepared:
         key = (str(path), crop)
@@ -306,8 +325,12 @@ class Engine:
         never runs the AI again."""
         e = {k: v for k, v in (r.edits or {}).items() if k in self.CROP_KEYS}
         look = {k: v for k, v in r.recipe.items() if k != "adjust"}
-        return hashlib.sha1(json.dumps([str(r.source), r.crop, look, e, r.seed, self.removals.get(str(r.source)), SHARP_EDGE],
-                                       sort_keys=True, default=str).encode()).hexdigest()
+        try:
+            stamp = Path(r.source).stat().st_mtime  # (the photo replaced under the same name: made again)
+        except OSError:
+            stamp = 0
+        return hashlib.sha1(json.dumps([str(r.source), stamp, r.crop, look, e, r.seed, self.removals.get(str(r.source)), SHARP_EDGE,
+                                        RENDER_CODE], sort_keys=True, default=str).encode()).hexdigest()
 
     def sharp_ready(self, r: "Result") -> bool:
         """Made already: in memory, or saved on disk from before (a restart loads it, no AI)."""
@@ -587,12 +610,45 @@ class Engine:
         m = resized(p.scene.matte, size[1], size[0])
         self._cutouts[key] = None if m is None else (np.clip(m, 0, 1) * 255).astype(np.uint8)
 
+    def _cutout_file(self, r: Result) -> Path | None:
+        """Where the result's cut-out is kept: the photo (and its date), the crop and framing, the clicks
+        fixing the cut-out, the removals, the size and the drawing code (any change: traced again)."""
+        if self.cutout_dir is None:
+            return None
+        try:
+            stamp = Path(r.source).stat().st_mtime
+        except OSError:
+            return None
+        fixes = [(f.x, f.y, f.add) for f in self.fixes.get((str(r.source), r.crop), [])]
+        digest = hashlib.sha1(json.dumps([str(r.source), stamp, r.crop, r.frame, fixes, self.removals.get(str(r.source)),
+                                          list(r.before.size), RENDER_CODE], sort_keys=True, default=str).encode()).hexdigest()
+        return self.cutout_dir / f"{digest}.png"
+
     def cutout(self, r: Result) -> np.ndarray | None:
-        """The result's player cut-out (0-1) at its size, traced if needed."""
+        """The result's player cut-out (0-1) at its size, traced if needed (or loaded: kept on disk)."""
         key = (str(r.source), r.crop, r.frame)
+        if key not in self._cutouts:
+            f = self._cutout_file(r)
+            if f is not None and f.exists():
+                try:
+                    self._cutouts[key] = np.asarray(Image.open(f).convert("L"), np.uint8)
+                except OSError:
+                    pass
         if key not in self._cutouts:
             p = self.ready(r.source, r.crop, dict(r.recipe, adjust={"subject": 1}))  # (so it is traced)
             self._keep_cutout(key, p, r.before.size)
+            f = self._cutout_file(r)
+            if f is not None and self._cutouts[key] is not None:
+                try:
+                    f.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = f.with_suffix(".part.png")
+                    Image.fromarray(self._cutouts[key], "L").save(tmp)
+                    tmp.replace(f)
+                    kept = sorted(f.parent.glob("*.png"), key=lambda q: q.stat().st_mtime)
+                    for old in kept[:-CUTOUTS_KEPT]:
+                        old.unlink(missing_ok=True)
+                except OSError:
+                    pass
         m = self._cutouts[key]
         return None if m is None else m.astype(np.float32) / 255
 
