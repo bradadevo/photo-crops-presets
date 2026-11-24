@@ -84,6 +84,28 @@ def test_trash_undo_puts_files_back(tmp_path):
     assert files.from_trash([(str(a), str(moved_to))]) == 1 and a.exists() and not moved_to.exists()
 
 
+def test_originals_told_apart_from_copies(tmp_path):
+    ev = tmp_path / "Event"; ev.mkdir()
+    Image.new("RGB", (20, 20)).save(ev / "DSC1.JPG")
+    (ev / "DSC1.ARW").write_bytes(b"raw")
+    assert files.origin([str(ev / "DSC1.JPG"), str(ev / "DSC1.ARW")]) == (True, "camera file (with its RAW)")
+    Image.new("RGB", (20, 20)).save(ev / "DSC2.JPG")
+    assert files.origin([str(ev / "DSC2.JPG")])[0]
+    crops = ev / "Best Crops"; crops.mkdir()
+    Image.new("RGB", (20, 20)).save(crops / "DSC1.JPG")
+    assert files.origin([str(crops / "DSC1.JPG")]) == (False, 'in "Best Crops", a folder of copies')
+    Image.new("RGB", (20, 20)).save(ev / "DSC3_crop.jpg")
+    assert not files.origin([str(ev / "DSC3_crop.jpg")])[0]
+    Image.new("RGB", (20, 20)).save(ev / "DSC3-Edit (2).jpg")
+    assert not files.origin([str(ev / "DSC3-Edit (2).jpg")])[0]
+    ex = Image.Exif(); ex[0x0131] = "Adobe Photoshop Lightroom Classic 13.0"
+    Image.new("RGB", (20, 20)).save(ev / "DSC4.jpg", exif=ex)
+    assert files.origin([str(ev / "DSC4.jpg")]) == (False, "saved by Adobe Photoshop Lightroom Classic 13.0")
+    mine = tmp_path / "My exports"; mine.mkdir()
+    Image.new("RGB", (20, 20)).save(mine / "DSC5.jpg")
+    assert not files.origin([str(mine / "DSC5.jpg")], (str(mine),))[0]  # (a folder the app saved keepers to)
+
+
 def test_export_crops_on_the_action_and_edits(tmp_path):
     img = Image.new("RGB", (3000, 2000), (90, 140, 70))
     src = tmp_path / "shot.jpg"
@@ -143,8 +165,12 @@ def test_api_marks_win_and_trash_round_trip(tmp_path, monkeypatch):
     p1 = {p["name"]: p for p in c.get(f"/api/cull/shoots/{sid}/photos").json()["photos"]}["IMG1.jpg"]
     assert p1["flag"] == "keep" and p1["stars"] == 4 and p1["auto"][0] == "reject"
     # the Trash and back
+    # before deleting, the app says exactly which folder and that these are the originals
+    w = c.post(f"/api/cull/shoots/{sid}/trash-preview", json={"ids": [photos["IMG3.jpg"]["id"]]}).json()
+    assert w["folders"][0]["path"] == str(shoot) and w["folders"][0]["jpeg"] == 1 and w["originals"] == 1 and not w["copies"]
+    assert w["names"] == ["IMG3.jpg"] and (shoot / "IMG3.jpg").exists()  # (only a look: nothing moved)
     gone = c.post(f"/api/cull/shoots/{sid}/trash", json={"ids": [photos["IMG3.jpg"]["id"]]}).json()
-    assert gone["moved"] == 1 and not (shoot / "IMG3.jpg").exists()
+    assert gone["moved"] == 1 and not (shoot / "IMG3.jpg").exists() and gone["from"] == [files.shown(str(shoot))]
     c.post(f"/api/cull/shoots/{sid}/untrash", json={"token": gone["token"]})
     assert (shoot / "IMG3.jpg").exists()
 

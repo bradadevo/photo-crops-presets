@@ -1681,3 +1681,19 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
   background: var(--panel-3); color: var(--muted); }
 .curve-sit .curve-sug { background: #2e9e5b; color: #fff; }
 .curve-sit .curve-where + .curve-sug:not([hidden]) { right: auto; left: auto; top: 6px; right: 80px; }
+
+/* "Delete rejects": where the files are, and whether they are the originals, said plainly */
+.del-box { border: 1px solid var(--line, #2a2f3a); border-left: 4px solid var(--bad); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.del-box.copy { border-left-color: #f5a623; }
+.del-what { font-weight: 800; font-size: 16px; color: var(--text); }
+.del-sub { margin: 0; color: var(--muted, #9aa3b2); font-size: 13px; }
+.del-lbl { margin-top: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted, #9aa3b2); }
+.del-lbl:empty { display: none; }
+.del-from { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.del-from > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.del-from code { font-size: 13px; color: var(--text); word-break: break-all; }
+.del-from small { color: var(--muted, #9aa3b2); }
+.del-from .btn { flex: none; }
+.del-copies { margin: 0; padding-left: 18px; font-size: 13px; }
+.del-names summary { cursor: pointer; font-size: 13px; color: var(--muted, #9aa3b2); }
+.del-names div { margin-top: 6px; font-size: 12px; max-height: 120px; overflow-y: auto; word-break: break-word; }

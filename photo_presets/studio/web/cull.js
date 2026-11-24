@@ -283,7 +283,7 @@ function cuPaintBar() {
     <button class="icon-btn cu-tog${cu.group ? " on" : ""}" id="cu-group" title="${cu.group ? "Bursts are stacked: each shows as its best frame (click to show every frame)" : "Every frame shows (click to stack each burst as its best frame)"}">${icon("stack")}</button>
     <span class="grow"></span>
     ${n > 1 ? `<span class="cu-selinfo">${n} selected</span>` : ""}
-    <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo to the Trash (you can undo, or put them back from the Trash)">${icon("trash")}<span class="lbl"> Delete rejects</span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
+    <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo (the original files in the event folder, with their RAW) to the Trash. You see the folder and files first, and can undo">${icon("trash")}<span class="lbl"> Delete rejects</span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
     <button class="btn ${cu.finish ? "ghost on" : "primary"}" id="cu-fin" ${off(!c.keep, "No keepers yet")} title="Step 3: delete the rejects, then crop, copy or use the keepers">Finish${c.keep ? ` · ${c.keep.toLocaleString()} keepers` : ""} ${icon("right")}</button>`;
   paintIcons(bar);
   $("#cu-pass1").onclick = cuPass1;
@@ -503,7 +503,7 @@ function cuPaintFinish(one) {
       <button class="btn ghost" id="fin-back">${icon("left")} Back to the photos</button></header>
 
     <section class="cu-sec"><h2><span class="n">1</span> Clear out the rejects</h2>
-      ${c.reject ? `<p>${plural(c.reject, "photo")} marked reject (by you or the app). Deleting moves ${c.reject === 1 ? "it" : "them"} to the Trash, with their RAW files: you can undo, or take ${c.reject === 1 ? "it" : "them"} back out of the Trash.</p>
+      ${c.reject ? `<p>${plural(c.reject, "photo")} marked reject (by you or the app). Deleting moves the original ${c.reject === 1 ? "file" : "files"} (and RAW) from <code>${esc(cuShoot().folders.map((f) => f.replace(/^\/Users\/[^/]+/, "~")).join(", "))}</code> to the Trash: you can undo, or take ${c.reject === 1 ? "it" : "them"} back out of the Trash. You see exactly which files first.</p>
         <div class="cu-row"><button class="btn" id="fin-look">${icon("eye")} Look at them first</button><button class="btn danger" id="fin-del">${icon("trash")} Delete ${plural(c.reject, "reject")}</button></div>`
       : `<p class="cu-done-t">${icon("check")} No rejects left. Nice.</p>`}</section>
 
@@ -1198,15 +1198,32 @@ function cuPass1() {
     else { await cuPhotos(); cuSort(); cuPaintAll(); toast("Pass 1 is done", { small: "Your own marks are as they were" }); }
   };
 }
-function cuDeleteRejects() {
+async function cuDeleteRejects() {
   const sh = cuShoot();
   const rej = [...cu.photos.values()].filter((p) => alive(p) && flagOf(p) === "reject");
-  const filesN = rej.reduce((a, p) => a + (p.n || 1), 0);
   const notMine = rej.filter((p) => !yours(p)).length;
-  const m = modal(`<header><h2>Delete ${plural(rej.length, "reject")}?</h2></header><div class="body">
-      <p style="margin-top:0">${plural(rej.length, "photo")} (${plural(filesN, "file")}${filesN > rej.length ? ": JPEG and RAW" : ""}) move to the Trash. You can undo here (⌘Z), or put them back from the Trash.</p>
-      ${notMine ? `<p class="warn-t">${plural(notMine, "of them was", "of them were")} rejected by pass 1 and not checked by you.</p>` : ""}
-    </div><footer><button class="btn ghost" data-close>Cancel</button>${notMine ? `<button class="btn" id="dr-look">Take a second look first</button>` : ""}<button class="btn danger" id="dr-go">${icon("trash")} Move to Trash</button></footer>`);
+  // exactly what moves, from where, and whether these are the camera's originals: asked before the box opens
+  const w = await api(`/api/cull/shoots/${sh.id}/trash-preview`, { ids: rej.map((p) => p.id) });
+  const n = w.photos, all = w.originals === n, none = !w.originals;
+  const kinds = (f) => [f.jpeg && `${f.jpeg} JPEG`, f.raw && `${f.raw} RAW`, f.other && `${f.other} other`].filter(Boolean).join(" + ");
+  const what = all ? (n === 1 ? "This is your ORIGINAL photo" : `These are your ${n} ORIGINAL photos`)
+    : none ? (n === 1 ? "This is a copy, not your original" : `These ${n} are copies, not your originals`)
+    : `${w.originals} ORIGINAL ${w.originals === 1 ? "photo" : "photos"} and ${plural(w.copies.length, "copy", "copies")}`;
+  const m = modal(`<header><h2>Delete ${plural(n, "reject")}?</h2></header><div class="body">
+      <div class="del-box ${all ? "orig" : none ? "copy" : "orig"}">
+        <div class="del-what">${what}</div>
+        <p class="del-sub">${all ? "The camera's own files, from the event folder: not copies or edits." : none ? "Your originals are not touched." : "The camera's own files and some copies, listed below."}</p>
+        <div class="del-lbl">Deleted from</div>
+        ${w.folders.map((f) => `<div class="del-from"><div><code>${esc(f.shown)}</code><small>${plural(f.photos, "photo")} · ${kinds(f)} ${f.jpeg + f.raw + f.other === 1 ? "file" : "files"}</small></div>
+          <button class="btn ghost sm" data-reveal="${esc(f.path)}">${icon("folder")} Show in Finder</button></div>`).join("")}
+        ${w.copies.length ? `<div class="del-lbl">${all ? "" : "Copies (not originals)"}</div><ul class="del-copies">${w.copies.slice(0, 8).map((c) => `<li><b>${esc(c.name)}</b>: ${esc(c.why)}</li>`).join("")}${w.copies.length > 8 ? `<li>and ${w.copies.length - 8} more</li>` : ""}</ul>` : ""}
+        <details class="del-names"><summary>See all ${w.names.length} file names</summary><div>${w.names.map(esc).join(", ")}</div></details>
+      </div>
+      <p style="margin:0">They move to your Mac's Trash. Undo here (⌘Z), or open the Trash and choose Put Back. They are only gone for good when you empty the Trash.</p>
+      <p class="muted" style="margin:0">Not touched: copies you exported (Picks, Culled folders), and your looks.</p>
+      ${notMine ? `<p class="warn-t" style="margin:0">${plural(notMine, "of them was", "of them were")} rejected by pass 1 and not checked by you.</p>` : ""}
+    </div><footer><button class="btn ghost" data-close>Cancel</button>${notMine ? `<button class="btn" id="dr-look">Take a second look first</button>` : ""}<button class="btn danger" id="dr-go">${icon("trash")} Move ${all ? (n === 1 ? "the original" : `${n} originals`) : plural(n, "photo")} to Trash</button></footer>`);
+  m.querySelectorAll("[data-reveal]").forEach((b) => b.onclick = () => api("/api/reveal", { path: b.dataset.reveal }));
   paintIcons(m);
   $("#dr-look", m)?.addEventListener("click", () => {
     closeModal(); cu.show = "reject"; cu.sort = "score"; cu.issues.clear(); cuRefilter();
@@ -1219,7 +1236,7 @@ function cuDeleteRejects() {
     ids.forEach((id) => cuP(id).state = "gone");
     cu.hist.push({ label: "Delete rejects", trash: true, token: r.token, ids }); cu.future = [];
     cuSort(); cuAfterMark(); if (cu.finish) cuPaintFinish($("#cu-one"));
-    toast(`Moved ${plural(r.moved, "photo")} to the Trash`, { small: `${plural(r.files, "file")}`, action: { label: "Undo", run: (ev) => { ev.target.closest(".toast")?.remove(); cuUndo(); } } });
+    toast(`Moved ${plural(r.moved, all ? "original" : "photo")} to the Trash`, { small: `${plural(r.files, "file")} from ${(r.from || []).join(", ")}`, action: { label: "Undo", run: (ev) => { ev.target.closest(".toast")?.remove(); cuUndo(); } } });
   };
 }
 function cuKeepers() {

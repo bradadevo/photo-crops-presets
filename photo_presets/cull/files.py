@@ -31,6 +31,46 @@ def shots_in(folders: list[Path]) -> list[dict]:
     return out
 
 
+# folders this app (or Photo Crops) makes copies in, and the name endings its copies get
+COPY_FOLDERS = ("Picks", "Culled - ", "Best Crops", "Best crop", "Instagram 4x5", "Story 9x16", "YouTube 16x9",
+                "Original size", "VS Digital Pro")
+COPY_ENDINGS = ("_O", "_crop", "_face", "_crop-only", "_natural", "_softer", "_punchy", "_ai-touch-up", "_look",
+                "-Edit", "_edit", "-edit", " copy", "-copy")
+EDITORS = ("lightroom", "photoshop", "capture one", "snapseed", "gimp", "luminar", "darktable", "affinity",
+           "pixelmator", "vsco", "photo crops", "vs digital pro")
+
+
+def origin(files: list[str], copy_folders: tuple[str, ...] = ()) -> tuple[bool, str]:
+    """Whether a shot's files are the camera's own (the originals), and if not, why it looks like a copy:
+    it sits in a folder copies are made in, its name ends like a copy, or an editing app saved it."""
+    first = Path(files[0])
+    for d in [first.parent, *first.parent.parents]:
+        if str(d) in copy_folders or any(d.name == n or (n.endswith(" ") and d.name.startswith(n)) for n in COPY_FOLDERS):
+            return False, f'in "{d.name}", a folder of copies'
+    stem = first.stem
+    stem = stem[:stem.rfind(" (")] if stem.endswith(")") and " (" in stem else stem
+    end = next((e for e in COPY_ENDINGS if stem.endswith(e)), None)
+    if end:
+        return False, f'the name ends in "{end}", like a copy'
+    if any(images.is_raw(Path(f)) for f in files):
+        return True, "camera file (with its RAW)"
+    try:
+        from PIL import Image
+        with Image.open(first) as im:
+            soft = str(im.getexif().get(0x0131) or "")
+    except Exception:
+        soft = ""
+    if any(e in soft.lower() for e in EDITORS):
+        return False, f"saved by {soft.strip()}"
+    return True, "camera file"
+
+
+def shown(path: str) -> str:
+    """A path the way you'd say it: your home folder as ~."""
+    home = str(Path.home())
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+
+
 def to_trash(paths: list[str]) -> list[tuple[str, str]]:
     """Moves files to the Trash; returns (where it was, where it is in the Trash) for undo."""
     from Foundation import NSURL, NSFileManager

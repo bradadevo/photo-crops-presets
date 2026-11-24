@@ -436,6 +436,36 @@ def _to_trash(paths: list[str]) -> list[tuple[str, str]]:
     return moved
 
 
+def _where(sh: Shoot, chosen: list[dict]) -> dict:
+    """Exactly what deleting these would move: from which folder(s), how many JPEG / RAW files, and
+    whether they are the camera originals (with each one that looks like a copy, and why)."""
+    made = tuple(sh.settings.get("saved") or [])
+    folders: dict[str, dict] = {}
+    copies, names = [], []
+    for p in chosen:
+        for f in p["files"]:
+            d = folders.setdefault(str(Path(f).parent), {"path": str(Path(f).parent), "shown": files.shown(str(Path(f).parent)),
+                                                         "photos": 0, "jpeg": 0, "raw": 0, "other": 0})
+            kind = "raw" if images.is_raw(Path(f)) else "jpeg" if Path(f).suffix.lower() in (".jpg", ".jpeg") else "other"
+            d[kind] += 1
+            names.append(Path(f).name)
+        folders[str(Path(p["files"][0]).parent)]["photos"] += 1
+        real, why = files.origin(p["files"], made)
+        if not real:
+            copies.append({"name": p["name"], "why": why})
+    return {"folders": list(folders.values()), "photos": len(chosen), "originals": len(chosen) - len(copies),
+            "copies": copies, "names": names}
+
+
+@router.post("/api/cull/shoots/{sid}/trash-preview")
+async def trash_preview(sid: int, req: Request):
+    """What "Delete rejects" would move to the Trash, shown before you say yes."""
+    sh = C.shoot(sid)
+    ids = [int(i) for i in (await req.json()).get("ids", [])]
+    chosen = [sh.photos[i] for i in ids if 0 <= i < len(sh.photos) and sh.photos[i].get("state") != "gone"]
+    return await _thread(_where, sh, chosen)
+
+
 @router.post("/api/cull/shoots/{sid}/trash")
 async def trash(sid: int, req: Request):
     """Moves these photos (every file of each shot: JPEG and RAW) to the Trash."""
@@ -451,7 +481,8 @@ async def trash(sid: int, req: Request):
                 sh.bump(p)
     token = f"{sid}-{time.time():.3f}"
     C.trashed[token] = moved
-    return {"moved": len(chosen), "files": len(moved), "token": token}
+    return {"moved": len(chosen), "files": len(moved), "token": token,
+            "from": sorted({files.shown(str(Path(was).parent)) for was, _ in moved})}
 
 
 @router.post("/api/cull/shoots/{sid}/untrash")
