@@ -146,3 +146,18 @@ with real photos, before it reaches the app.
   estimate). Open: (1) a background slider in the first ~20 s on a brand-new photo waits for its
   cut-out (17 s; the page says so); (2) a look on a photo opened later shows in 0.95 s here, 1.9 s M2
   estimate, bar 1.5 s. Editing memory peak 13.1 GB (the cut-out model itself reaches 12.8 GB).
+
+## Hair: trimmed to Apple's outline (2026-11-23)
+
+- Compared on 10 PSG photos: the current cut-out (A), Apple's subject and person cut-outs (B, C) and
+  Apple person + our hair pass (D). Apple alone was 10-40x faster but missed players, made one
+  see-through and pulled in the referee: rejected (quality first). D had the most natural hair with
+  no halo, explained by Apple's tighter outline trimming the hair pass.
+- F, chosen by the user on 20 photos (10 PSG, 10 Lake Nona): the current cut-out, with only the hair
+  pass trimmed to Apple's person outline (macOS 14+, checked at start; it only takes away; a head
+  Apple doesn't hold soundly stays as before). Measured: identical to A outside the heads on all 20.
+- Memory, same pictures: the hair model's memory pattern off (15.3 to 11.3 GB at its peak, quicker);
+  the cut-out models let go a minute after the last cut-out (about 10 GB back; 1.5 s to load again).
+- Browser run: 45 of 47, editing peak 13.3 GB (was 15.3 with F before the memory fixes). Still open:
+  a background slider in the first ~20 s on a brand-new photo (waits for its cut-out, says so), and a
+  look on a photo opened later (0.95 s here, 1.9 s M2 estimate, bar 1.5 s).

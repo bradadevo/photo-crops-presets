@@ -137,9 +137,10 @@ def transparent(img: Image.Image) -> Image.Image:
         out = np.dstack([fg, alpha])
         return _trim(Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA"))
     from rembg import remove  # a busy background: cut the logo out
-    from photo_presets.scene import MODEL_LOCK, _session
+    from photo_presets.scene import MODEL_LOCK, _let_go_later, _session
     with MODEL_LOCK:  # (the players' cut-out model: one at a time)
         mask = np.asarray(remove(img.convert("RGB"), session=_session(), only_mask=True), np.float32) / 255
+    _let_go_later()  # (its 10 GB back to the Mac a minute later)
     out = np.dstack([rgb, mask])
     return _trim(Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA"))
 

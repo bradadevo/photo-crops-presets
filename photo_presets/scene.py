@@ -198,6 +198,7 @@ class Prepared:
                                 matte = _made_matte(self.image, self.scene)
                                 if matte is not None:
                                     _keep_matte(key, matte)
+                        _let_go_later()
                     if matte is not None:
                         self.scene.take_in(matte)
                     self.matte_key = key
@@ -266,15 +267,20 @@ class Prepared:
         return self._pieces[key]
 
 
-def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, float, float]]) -> np.ndarray:
+def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, float, float]],
+                 hug: np.ndarray | None = None) -> np.ndarray:
     """Each head traced again on its own, close up, so curly hair and afros keep
     their detail against the background (the gaps between curls open up). The
     new edge is used only around the head, and may not grow past the first
-    cut-out, so no background object joins the player."""
+    cut-out, so no background object joins the player. hug: a second, tighter outline of the people
+    (0-1, any size): the hair is trimmed to it too (no halo of background around it), on a head it
+    covers soundly; it only ever takes away."""
     from rembg import remove
     W, H = img.size
     mh, mw = matte.shape
     out = matte.copy()
+    if hug is not None and hug.shape != (mh, mw):
+        hug = cv2.resize(hug.astype(np.float32), (mw, mh), interpolation=cv2.INTER_LINEAR)
     # the two biggest faces (the main players): each tracing is a full run of the model
     for fx, fy, fr in sorted(faces, key=lambda f: -f[2])[:HEADS]:
         r = fr * W
@@ -302,6 +308,12 @@ def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, f
         grow = max(3, int((X1 - X0) * 0.02)) | 1
         allowed = cv2.dilate((old > 0.05).astype(np.uint8), np.ones((grow, grow), np.uint8)).astype(np.float32)
         fine = fine * piece * allowed
+        if hug is not None:  # (trimmed to the tighter outline, where it has this head soundly)
+            h = hug[Y0:Y1, X0:X1]
+            core = cv2.erode((lab == here).astype(np.uint8), np.ones((grow, grow), np.uint8)) > 0
+            if core.any() and (h[core] > 0.5).mean() >= 0.85:
+                tight = max(3, int((X1 - X0) * 0.006)) | 1
+                fine = fine * np.clip(cv2.GaussianBlur(cv2.dilate(h, np.ones((tight, tight), np.uint8)), (0, 0), tight / 3) * 1.15, 0, 1)
         # used around the head, blending back to the first cut-out toward the crop's edges and below the chin
         yy, xx = np.mgrid[0:Y1 - Y0, 0:X1 - X0].astype(np.float32)
         d = np.sqrt(((xx - (X1 - X0) / 2) / ((X1 - X0) / 2)) ** 2 + ((yy - (Y1 - Y0) / 2) / ((Y1 - Y0) / 2)) ** 2)
@@ -506,6 +518,7 @@ def _heads_session():
         from rembg import new_session
         opts = ort.SessionOptions()
         opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False  # (the same picture, 4 GB less at its peak: 15 GB down to 11, and quicker)
         _head_session = new_session("birefnet-general-lite", sess_opts=opts)
     return _head_session
 
@@ -594,7 +607,7 @@ def release_small_cutout() -> None:
     _small_session = None
 
 
-MATTE_VERSION = 6  # (raised when the cut-out is made differently: the kept ones are made again)
+MATTE_VERSION = 7  # (raised when the cut-out is made differently: the kept ones are made again)
 MATTES_KEPT = 400  # cut-outs kept on disk, the oldest let go
 
 
@@ -641,6 +654,36 @@ def _keep_matte(key: str, matte: np.ndarray) -> None:
         pass
 
 
+IDLE_RELEASE = 60.0  # s after the last cut-out: its models let go (about 10 GB back to the Mac)
+_release_timer: threading.Timer | None = None
+
+
+def _let_go_later() -> None:
+    """The cut-out models are kept while cut-outs follow each other (an event being cut out), and let
+    go a minute after the last: they hold about 10 GB between runs. Loading them again costs ~1.5 s,
+    and the cut-out is the same picture."""
+    global _release_timer
+    if _release_timer is not None:
+        _release_timer.cancel()
+    _release_timer = threading.Timer(IDLE_RELEASE, release_cutout)
+    _release_timer.daemon = True
+    _release_timer.start()
+
+
+def release_cutout() -> None:
+    """Lets go of the full cut-out's models (loaded again when next needed)."""
+    global _matte_session, _head_session
+    if not MODEL_LOCK.acquire(blocking=False):  # (one is running: let go after it)
+        _let_go_later()
+        return
+    try:
+        _matte_session = _head_session = None
+        import gc
+        gc.collect()
+    finally:
+        MODEL_LOCK.release()
+
+
 def _copy_scene(src: "Scene", dst: "Scene") -> None:
     import copy
     for f in dataclasses.fields(src):
@@ -658,13 +701,16 @@ def same_players(edited: Path, image: Image.Image, exif: bytes | None, fine: np.
 
 
 def _made_matte(image: Image.Image, scene: "Scene") -> np.ndarray | None:
-    """The players' full cut-out made: the model, each head again for the hair, the ball, a team as
-    one group."""
+    """The players' full cut-out made: the model, each head again for the hair (trimmed to Apple's
+    outline of the people where the Mac has it: no halo of background around the hair), the ball, a
+    team as one group."""
+    from photo_presets import apple_person
+    hug = apple_person.outline(image) if scene.faces or scene.other_faces else None  # (first: ~1 GB, let go before the model)
     matte = cutout(image, scene.subject_mask)
     if matte is None:
         return None
     scene.take_in(matte)  # (the faces found inside the players, for the hair pass)
-    matte = refine_heads(image, matte, scene.faces)
+    matte = refine_heads(image, matte, scene.faces, hug=hug)
     matte = with_balls(matte, scene.balls)
     if scene.team:
         matte = fill_group(matte, image, scene.subject_mask)

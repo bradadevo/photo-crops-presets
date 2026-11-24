@@ -925,7 +925,8 @@ class CutAhead:
             kept = json.loads(file.read_text())
         except (OSError, ValueError):
             kept = {}
-        self.done: dict[str, list] = {k: v for k, v in kept.items() if isinstance(v, list) and len(v) == 2}
+        self.done: dict[str, list] = {k: v for k, v in kept.items() if isinstance(v, list) and len(v) == 3
+                                      and v[2] == scene.MATTE_VERSION}  # (made another way before: made again)
 
     def is_done(self, path: Path) -> bool:
         """This photo's players are cut out, on disk (the same file, unchanged since)."""
@@ -1025,7 +1026,7 @@ class CutAhead:
                 return
             key = p.matte_key
         with self.cv:
-            self.done[str(path)] = [stamp, key]
+            self.done[str(path)] = [stamp, key, scene.MATTE_VERSION]
             data = json.dumps(self.done)
         try:
             self.file.parent.mkdir(parents=True, exist_ok=True)
