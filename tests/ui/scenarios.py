@@ -96,9 +96,12 @@ def hover(c: Checks, browser, app, pid: int, sid: int) -> None:
             f"{warm:.0f} s here; {each:.2f} s a look on an M2")
     c.check("the status line says they're all ready", "All" in page.locator("#ahead-status").inner_text(),
             page.locator("#ahead-status").inner_text())
-    status = page.evaluate("[document.querySelector('#ahead-status').textContent, document.querySelector('#ahead-status').scrollWidth <= document.querySelector('#ahead-status').clientWidth + 1]")
-    c.check("the status line says how far the players' cut-outs are (or nothing once all are)",
-            "players ready in" in status[0] or page.evaluate("ahead.cut.done >= ahead.cut.total"), status[0])
+    prep = page.evaluate("""[!document.querySelector('#prep-bar').hidden, document.querySelector('#prep-bar').innerText,
+        prep.now != null || prep.waiting.length > 0,
+        [...document.querySelectorAll('#photo-list .ph')].filter((b) => b.dataset.prep === 'waiting' || b.dataset.prep === 'now').length,
+        prep.waiting.length + (prep.now != null ? 1 : 0)]""")
+    c.check("the Photos panel says how far the photos are getting ready, and each photo shows its own state (or nothing once all are)",
+            (prep[0] and "of" in prep[1] and prep[3] == prep[4]) if prep[2] else prep[3] == 0, prep[1].replace("\n", " · ") or "all ready")
     lat = []
     for n in plain:
         page.mouse.move(700, 400)
@@ -313,3 +316,42 @@ def event_photo_added(c: Checks, browser, app, sid: int, extra: Path) -> None:
     c.check("a photo added later gets the look too", n == page.evaluate("st.photos.length"), f"{n} photos shown")
     c.check("no page errors (photo added)", not page.errors, "; ".join(page.errors[:2]))
     page.close()
+
+
+# The page looks right at every common window size: no words over the photo, nothing cut off,
+# photo tiles square and apart, the looks list never squeezed away (a screenshot of each size kept).
+WINDOW_SIZES = [(1024, 640), (1280, 720), (1366, 768), (1440, 900), (1680, 1050), (1920, 1080), (2560, 1440)]
+LAYOUT_JS = """() => {
+  const f = document.querySelector('#frame'); if (!f) return {err: 'no frame'};
+  const fr = f.getBoundingClientRect(), bad = [];
+  const hit = (r) => r.width && r.height && r.left < fr.right && r.right > fr.left && r.top < fr.bottom && r.bottom > fr.top;
+  for (const sel of ['.hint-line', '.caption', '#prep-bar', '#ahead-status']) {
+    const el = document.querySelector(sel); if (!el || el.hidden || !el.offsetParent) continue;
+    const r = el.getBoundingClientRect();
+    if (sel !== '#prep-bar' && sel !== '#ahead-status' && hit(r)) bad.push(sel + ' over the photo');
+    if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow !== 'visible') bad.push(sel + ' cut off');
+  }
+  for (const el of document.querySelectorAll('#prep-bar *')) if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).textOverflow === 'ellipsis') bad.push('banner text cut off: ' + el.textContent);
+  const tiles = [...document.querySelectorAll('#photo-list .ph')].map((t) => t.getBoundingClientRect());
+  for (let i = 0; i < tiles.length; i++) for (let j = i + 1; j < tiles.length; j++) {
+    const a = tiles[i], b = tiles[j];
+    if (a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1) bad.push('photo tiles overlap');
+  }
+  for (const t of tiles) if (Math.abs(t.width - t.height) > 2) bad.push('photo tile not square ' + Math.round(t.width) + 'x' + Math.round(t.height));
+  const lg = document.querySelector('#look-grid'); if (lg && lg.getBoundingClientRect().height < 200) bad.push('looks list squeezed to ' + Math.round(lg.getBoundingClientRect().height) + ' px');
+  const h = document.querySelector('.rail-head h2'); if (h && h.getBoundingClientRect().height > 22) bad.push('Photos heading wraps');
+  return {bad: [...new Set(bad)], frame: [fr.top, fr.bottom]};
+}"""
+
+
+def layout(c: Checks, browser, app) -> None:
+    for w, h in WINDOW_SIZES:
+        page = browser.new_page(viewport={"width": w, "height": h})
+        page.goto(app.base)
+        page.wait_for_selector("#frame img.after")
+        page.wait_for_timeout(1500)
+        r = page.evaluate(LAYOUT_JS)
+        c.shot(page, f"layout-{w}x{h}")
+        c.check(f"the page looks right at {w}x{h} (no words over the photo, nothing cut off or squeezed)",
+                not r.get("bad") and not r.get("err"), "; ".join(r.get("bad") or []) or r.get("err", ""))
+        page.close()

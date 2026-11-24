@@ -552,3 +552,24 @@ def test_an_older_ask_arriving_late_never_reorders_the_looks(client, monkeypatch
     assert server.A.order[0] == names[2]
     client.post(f"/api/ahead/{pid}", json={"order": [names[3]], "page": "p2", "seq": 1})  # (another window)
     assert server.A.order[0] == names[3]
+
+
+def test_the_photos_panel_says_which_photos_are_getting_ready(client):
+    """Each photo's state, for the banner and the photo tiles: the one being got ready, the ones waiting
+    in order, and the rest ready; with about how long is left."""
+    from photo_presets.studio import server
+    ids = [client.post("/api/photos/upload", files=[("files", (f"p{i}.jpg", _jpeg((40 + i * 30, 90, 160)), "image/jpeg"))]).json()["added"][0]
+           for i in range(3)]
+    b = client.get("/api/prep").json()
+    assert b["now"] is None and b["waiting"] == ids and b["done"] == 0 and b["total"] == 3
+    assert b["left_s"] == 3 * b["each"]
+    with server.CUT.cv:  # (as when the first is being got ready)
+        server.CUT.now = server.CUT.queue.pop(0)
+        server.CUT.since = time.time()
+    b = client.get("/api/prep").json()
+    assert b["now"] == ids[0] and b["waiting"] == ids[1:] and b["done"] == 0
+    with server.CUT.cv:
+        server.CUT.now = None
+        server.CUT.queue.clear()
+    b = client.get("/api/prep").json()
+    assert b == b | {"now": None, "waiting": [], "done": 3, "total": 3, "left_s": 0}

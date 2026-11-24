@@ -1599,3 +1599,52 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
 .event-grid figure { margin: 0; position: relative; aspect-ratio: 4 / 3; background: #000; border-radius: 4px; overflow: hidden; }
 .event-grid img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .event-grid .making { position: absolute; right: 4px; bottom: 4px; font-size: 10px; padding: 1px 5px; }
+
+/* The start hint gets its own room above the picture (never written over the photo). */
+.viewer:has(> .hint-line) { padding-top: 54px; }
+.viewer > .hint-line { top: 16px; padding: 0 26px; line-height: 20px; }
+
+/* Getting the photos ready: one clear place (the top of the Photos panel), and each photo's own state. */
+.prep-bar { margin: 0 10px 10px; padding: 10px 12px 11px; border-radius: 10px; background: var(--accent-soft);
+  border: 1px solid rgba(63, 169, 245, .35); color: var(--text); font-size: 13px; animation: rise .25s ease-out; }
+.prep-bar[hidden] { display: none; }
+.prep-line { display: flex; align-items: center; gap: 8px; }
+.prep-line b { font-weight: 650; line-height: 18px; }
+.prep-sub .prep-n { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 650; color: var(--accent-2); }
+.prep-track { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .12); margin: 8px 0 7px; overflow: hidden; }
+.prep-track span { display: block; height: 100%; border-radius: 2px; background: var(--accent-2); transition: width .8s ease; }
+.prep-sub { font-size: 12px; color: var(--muted); line-height: 16px; }
+.prep-bar.done { background: rgba(46, 160, 90, .16); border-color: rgba(46, 160, 90, .45); }
+.prep-bar.done .prep-line i { color: #4cc27a; width: 16px; height: 16px; }
+.prep-bar .spin { border-top-color: var(--accent-2); }
+
+.ph .prep-tag { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 5px;
+  white-space: nowrap; font-size: 10px; font-weight: 650; padding: 2px 7px; border-radius: 9px; background: rgba(0, 0, 0, .72); color: #fff;
+  pointer-events: none; }
+.ph .prep-tag .spin { width: 10px; height: 10px; border-width: 1.5px; }
+.ph .prep-tag i, .ph .prep-tag svg { width: 11px; height: 11px; }
+.ph.prep-waiting img { filter: grayscale(.85) brightness(.6); opacity: .7; }
+.ph.prep-waiting .prep-tag { color: rgba(255, 255, 255, .75); }
+.ph.prep-now img { filter: grayscale(.3) brightness(.8); opacity: .9; }
+.ph.prep-now { outline-color: rgba(63, 169, 245, .7); }
+.ph.prep-now::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent-2), transparent); background-size: 50% 100%; background-repeat: no-repeat;
+  animation: prepSweep 1.4s linear infinite; }
+@keyframes prepSweep { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+.ph.prep-fresh img { animation: prepLight .7s ease-out; }
+.ph.prep-fresh .prep-tag { background: #2e9e5b; animation: prepPop .35s ease-out; }
+@keyframes prepLight { from { filter: grayscale(.85) brightness(.6); } to { filter: none; } }
+@keyframes prepPop { 0% { transform: translateX(-50%) scale(.6); } 70% { transform: translateX(-50%) scale(1.12); } 100% { transform: translateX(-50%) scale(1); } }
+.ph.on.prep-waiting img, .ph.on.prep-now img { opacity: 1; }
+.ph:has(.prep-tag) .n { bottom: 26px; }
+
+/* Photo tiles keep their square whatever room the panel has (scroll, never squeezed on top of each other). */
+.photo-list { min-height: 0; grid-auto-rows: max-content; }
+.ph { aspect-ratio: auto; }
+.ph::before { content: ""; display: block; padding-top: 100%; }
+.ph > img { position: absolute; inset: 0; }
+.rail-head h2 { white-space: nowrap; }
+
+/* A short window: the looks list always keeps room for a few looks (the panel scrolls instead of the list vanishing). */
+.looks-pane { overflow-y: auto; }
+.looks-pane > .look-grid { min-height: 220px; }

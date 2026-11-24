@@ -223,7 +223,68 @@ async function refresh() {
   if (st.scope === "all" && st.photos.length < 2) st.scope = "one";
   render();
   if (st.activePhoto !== wasActive) renderLooks(true);  // the looks previewed on this photo
+  if (st.loadedOnce && st.photos.some((p) => !before.has(p.id))) prepSync();
+  st.loadedOnce = true;  // (photos added: say at once that they're being got ready)
   schedule();
+}
+
+/* Getting the photos ready (each photo's players cut out once, in the background), in plain view:
+   a banner at the top of the Photos panel with how many are ready and about how long is left, and on
+   each photo whether it's waiting, being got ready now, or ready (it lights up, with a tick). */
+const prep = { now: null, waiting: [], done: 0, total: 0, left_s: 0, each: 20, timer: null, wasBusy: false, fresh: new Set(), doneAt: 0 };
+const roughly = (s) => s < 50 ? "under a minute" : s < 90 ? "about a minute" : `about ${Math.round(s / 60)} minutes`;
+async function prepSync() {
+  clearTimeout(prep.timer);
+  let again = 1500;
+  try {
+    const r = await api("/api/prep", undefined, { quiet: true });
+    const before = new Set([...prep.waiting, ...(prep.now != null ? [prep.now] : [])]);
+    const still = new Set([...r.waiting, ...(r.now != null ? [r.now] : [])]);
+    for (const id of before) if (!still.has(id)) { prep.fresh.add(id); setTimeout(() => { prep.fresh.delete(id); paintPrep(); }, 2400); }
+    const busy = r.now != null || r.waiting.length > 0;
+    if (prep.wasBusy && !busy) prep.doneAt = Date.now();
+    prep.wasBusy = busy;
+    Object.assign(prep, r);
+    if (!busy) again = 0;
+  } catch (e) {
+    again = 5000;
+  }
+  paintPrep();
+  if (again) prep.timer = setTimeout(prepSync, again);
+  else if (prep.doneAt) setTimeout(paintPrep, 6200);  // (the "all ready" line for a few seconds, then quiet)
+}
+function paintPrep() {
+  const bar = $("#prep-bar");
+  if (!bar) return;
+  const busy = prep.now != null || prep.waiting.length > 0;
+  const justDone = !busy && prep.doneAt && Date.now() - prep.doneAt < 6000 && prep.total > 0;
+  bar.hidden = !(busy || justDone) || st.photos.length === 0;
+  bar.classList.toggle("done", !!justDone);
+  if (busy) {
+    const pct = prep.total ? Math.round(100 * prep.done / prep.total) : 0;
+    bar.innerHTML = `<div class="prep-line"><span class="spin"></span><b>Getting photos ready</b></div>
+      <div class="prep-track"><span style="width:${Math.max(3, pct)}%"></span></div>
+      <div class="prep-sub"><span class="prep-n">${prep.done} of ${prep.total} ready</span> · ${roughly(prep.left_s)} left.<br>You can start now: the photo you open goes first.</div>`;
+    bar.title = `Each photo's players are cut out once (about ${prep.each} s a photo), so looks that change the players or the background show at once. It runs in the background, one photo at a time, and is remembered after a restart.`;
+  } else if (justDone) {
+    bar.innerHTML = `<div class="prep-line">${icon("check")}<b>All ${plural(prep.total, "photo")} ready</b></div>`;
+    bar.title = "";
+  }
+  const waiting = new Set(prep.waiting);
+  $$("#photo-list .ph").forEach((b) => {
+    const id = +b.dataset.key;
+    const state = id === prep.now ? "now" : waiting.has(id) ? "waiting" : prep.fresh.has(id) ? "fresh" : "ready";
+    b.classList.toggle("prep-now", state === "now");
+    b.classList.toggle("prep-waiting", state === "waiting");
+    b.classList.toggle("prep-fresh", state === "fresh");
+    let tag = b.querySelector(".prep-tag");
+    if (state === "ready") { tag?.remove(); delete b.dataset.prep; return; }
+    if (!tag) { tag = document.createElement("span"); tag.className = "prep-tag"; b.append(tag); }
+    if (b.dataset.prep !== state) {
+      tag.innerHTML = state === "now" ? `<span class="spin"></span>Getting ready` : state === "waiting" ? "Waiting" : `${icon("check")}Ready`;
+      b.dataset.prep = state;
+    }
+  });
 }
 setInterval(() => { if (st.busy && st.eta) renderTop(); }, 1000);  // the countdown ticks between updates
 function schedule() {
@@ -328,6 +389,7 @@ function renderRail() {
     const h = hits.get(p.id);
     b.querySelector(".badge-best").hidden = !(h && h.best && h.status === "sure");
   });
+  paintPrep();
 }
 
 async function removePhoto(id) {
@@ -1141,27 +1203,20 @@ function paintAheadStatus() {
     const n = evAhead.complete.size, t = evAhead.total;
     el.hidden = false; el.classList.toggle("empty", !t);  // (its room always kept: the list never moves under the pointer)
     el.classList.toggle("done", n >= t);
-    el.textContent = n >= t ? `⚡ All ${t} looks show on all ${evAhead.photos} photos at once`
-      : `⚡ Getting looks ready on all ${evAhead.photos} photos: ${n} of ${t}`;
+    el.textContent = n >= t ? `⚡ All ${t} looks ready on all ${evAhead.photos} photos`
+      : `⚡ Looks ready on all photos: ${n} of ${t}`;
     cutSuffix(el);
     return;
   }
   const n = ahead.imgs.size, t = ahead.total, c = ahead.cut;
   el.hidden = false; el.classList.toggle("empty", !t);
   el.classList.toggle("done", n >= t);
-  if (c && c.this !== "ready" && n < t) el.textContent = `⏳ Finding the players in this photo… ${n} of ${t} looks ready`;
-  else el.textContent = n >= t ? `⚡ All ${t} looks show instantly when you point at them` : `⚡ Getting looks ready to show instantly: ${n} of ${t}`;
+  if (c && c.this !== "ready" && n < t) el.textContent = `⏳ Finding the players… ${n} of ${t} looks ready`;
+  else el.textContent = n >= t ? `⚡ All ${t} looks ready: point at one to see it` : `⚡ Looks ready to show: ${n} of ${t}`;
   cutSuffix(el);
 }
-/* The players' cut-out made ahead for the rest of the event, said quietly after the looks' line (its full
-   wording on hover); nothing at all once every photo is ready. */
 function cutSuffix(el) {
-  const c = ahead.cut;
-  el.title = el.textContent;
-  if (!c || c.total < 2 || c.done >= c.total) return;
-  const more = ` · players ready in ${c.done} of ${c.total} photos`;
-  el.textContent += more;
-  el.title = el.textContent + ` (each photo's players are cut out once, about ${c.each} s each, the photo you open first)`;
+  el.title = el.textContent;  // (the event's photos getting ready: said in the Photos panel, one place)
 }
 /* Pointing at a look before it's made: what it's waiting for, in words (the players first, if it needs them). */
 function tryWaitNote(name) {
@@ -1908,7 +1963,7 @@ function init() {
     };
   };
   st.crop = store.get("crop", "none");
-  loadLooks().then(refresh);
+  loadLooks().then(refresh).then(() => prepSync());
   document.addEventListener("DOMContentLoaded", () => loadKit());
 }
 init();

@@ -919,6 +919,7 @@ class CutAhead:
         self.cv = threading.Condition()
         self.queue: list[int] = []
         self.now: int | None = None
+        self.since = 0.0  # (when the photo being got ready now was started)
         self.failed: set[str] = set()
         self.thread: threading.Thread | None = None
         try:
@@ -979,12 +980,26 @@ class CutAhead:
         total = len(S.photos)
         return {"this": this, "ahead": ahead, "done": max(0, total - left), "total": total, "each": CUT_SECONDS}
 
+    def board(self) -> dict:
+        """For the Photos panel: each photo getting ready, in plain view. `now`: the photo being got
+        ready, `waiting`: the ones after it, in order (every other photo is ready), and about how
+        many seconds are left in all."""
+        with self.cv:
+            now, waiting = self.now, [p for p in self.queue if p in S.photos]
+            since = self.since
+        total = len(S.photos)
+        left = len(waiting) + (now is not None)
+        secs = len(waiting) * CUT_SECONDS + (max(3, CUT_SECONDS - (time.time() - since)) if now is not None else 0)
+        return {"now": now, "waiting": waiting, "done": max(0, total - left), "total": total,
+                "left_s": round(secs), "each": CUT_SECONDS}
+
     def _loop(self) -> None:
         while True:
             with self.cv:
                 while not self.queue:
                     self.cv.wait()
                 pid = self.now = self.queue.pop(0)
+                self.since = time.time()
             try:
                 self.one(pid)
             except Exception:
@@ -1240,6 +1255,12 @@ def state():
             "update": update_ready(), "player": FIND.public(),
             "models_loaded": timing.models_loaded(), "credit": credit.__dict__,
             "prefs": {"folder": DEFAULT_EXPORT} | prefs()}
+
+
+@app.get("/api/prep")
+def prep():
+    """Each photo getting ready (its players cut out once), for the Photos panel."""
+    return CUT.board()
 
 
 @app.get("/api/looks")

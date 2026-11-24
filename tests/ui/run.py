@@ -66,6 +66,8 @@ def main() -> int:
             print("== A photo opened a while after it was added")
             later = pids[3]
             sc.opened_later(c, browser, app, later, app.make(later, "Original")["id"])
+            print("== The page at every common window size")
+            sc.layout(c, browser, app)
             browser.close()
 
         print("== Quit and reopen the app")

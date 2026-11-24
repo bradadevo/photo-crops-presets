@@ -104,8 +104,12 @@ it, or ⌘-click.
 players are cut out from the background once, in the background, one photo
 at a time (about 20 s a photo on an M2; the photo you open goes first, and it
 steps aside while you move a slider). They're kept on disk, so a restart does
-none again. The line under the looks says how far it has got (**players ready
-in 12 of 38 photos**). Looks that change only the players or only the
+none again. The top of the Photos panel says so in plain view: **Getting
+photos ready**, with a progress bar, how many are ready and about how long is
+left. Each photo shows its own state: **Waiting** (dimmed), **Getting ready**
+(a moving line under it) or, when it's done, it lights up with **✓ Ready**.
+When every photo is ready the panel says **All 38 photos ready** for a few
+seconds, then goes quiet. Looks that change only the players or only the
 background wait for that photo's cut-out and say so (**Finding the players in
 this photo…**); every other look is ready at once. An edited copy that only
 changes light or color reuses the original's players.
