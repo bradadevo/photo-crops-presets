@@ -575,8 +575,10 @@ tournaments (1,500+ photos stay quick: thumbnails come from the camera's own pre
 minute, and only what is on screen is drawn).
 
 1. **Pass 1, the app.** Add an event's folder (or **Import from the camera card**: new photos only,
-   into a dated folder, culled while they copy; nothing on the card is changed, and a different photo
-   with a name already used, from a second camera, gets a new name with its RAW, never written over). On this Mac and free, the app looks at every photo:
+   into a dated folder, culled while they copy). Nothing on the card is changed. A photo already
+   copied (the same bytes) is skipped; a different photo with a name already used (a second camera,
+   or a camera's numbers starting again) gets a new name together with its RAW (`DSC00001-2.JPG`),
+   never written over. On this Mac and free, the app looks at every photo:
    is the main player sharp (judged against the rest of the shoot, so a dull day doesn't mark
    everything soft), are the eyes open (Apple's face quality on each player's face), did the camera's
    focus point land on a player, is the ball in the play, the light, and which frames are one burst.
@@ -586,8 +588,8 @@ minute, and only what is on screen is drawn).
    stars, `←` `→` next, `Space` one big photo, `Z` 100% (on the face), `C` compare a burst or your
    selection side by side, `G` gallery, `⌘Z` undo (`?` lists every key). **Pass 1 unsure** shows every
    close call, none hidden in a burst stack. Marks are saved in order, and a note says so if the app
-   isn't answering. Your marks always win over pass 1's (dashed marks are
-   pass 1's, solid ones yours), and teach it your taste for the next event.
+   isn't answering. Your marks always win over pass 1's (dashed marks are pass 1's, solid ones
+   yours), and teach it your taste for the next event.
 3. **Finish** (one page, top to bottom):
    1. **Clear out the rejects**: look at them first, or delete them (JPEG and RAW together go to the
       Trash, with undo). The box names the folder they leave and says whether they are your ORIGINAL
@@ -601,7 +603,9 @@ minute, and only what is on screen is drawn).
       on it and a plain label: cropped on the action, your crop, widened to stay sharp, whole photo
       and why, no players found; click one to change it, × to leave it out), the sharpness choice when
       a crop is zoomed in too far, the folder, and one **Make** button with its progress and an
-      **Open the folder** when done. Files end in the look's name (`DSC01234_natural.jpg`).
+      **Open the folder** when done. Files end in the look's name (`DSC01234_natural.jpg`); two
+      keepers with one file name (two camera folders) each get their own (`DSC01234-2_natural.jpg`).
+      The folder box is only a name: the new folder always goes next to the event's photos.
 
 You can also move a crop from the big photo (`R` shows it: drag to move it, scroll to resize; its
 pixels show on it, amber when it would be enlarged). Gemini is used only when you ask (rating keepers
@@ -1039,6 +1043,12 @@ uv run --with playwright --with psutil --with requests python tests/ui/run.py --
 
 The bars and every measured number are in
 [docs/plans/instant-looks.md](docs/plans/instant-looks.md).
+
+The Culling tab has two more, on a scratch folder of photo copies (never your own folders):
+`tests/ui/delete_click.py <out folder>` checks the **Delete rejects** box (the folder, ORIGINAL or
+copy, undo), with a Trash of its own; `tests/ui/cull_walk.py <event copy> <out folder>` walks the
+whole tab at 1440 × 900 and 1280 × 800 and writes its timings. The findings and fixes are in
+[CULLING_AUDIT.md](CULLING_AUDIT.md).
 
 ```text
 photo_crops/          photo-crops (see its README): pose and outline models (YOLO), crops

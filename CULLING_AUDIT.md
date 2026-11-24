@@ -13,6 +13,10 @@ The Culling tab of VS Digital Pro, audited on 2026-11-24 from the source (`cull.
 - No real photo was touched, and the camera card (kingston256, 9 photos) was only listed.
 - Gemini was never called.
 
+**Commits:**
+- `db7f4e2`: the delete box (folder, ORIGINAL or copy);
+- `cf6881f`: the audit fixes.
+
 **Two passes:**
 - **Pass 1 – Designer:** a ruthless product-design read.
 - **Pass 2 – Shooter:** an 11 pm shooter after a tournament weekend, and a first-time parent or
@@ -139,7 +143,8 @@ The Culling tab of VS Digital Pro, audited on 2026-11-24 from the source (`cull.
     - the counts;
     - step 3, which the Finish button repeats;
     - the keeper count on Finish;
-    - the Spray can and Delete labels, which keep their tooltips.
+    - the Spray can label, which keeps its tooltip;
+    - the word "rejects" on Delete, so it reads "Delete (326)". It never shrinks to a bare red count.
 
     The step names only hide below 600 px.
 - [x] **Notes pile up over the photo's buttons and over dialogs** `[Pass 2 - Shooter]`
