@@ -73,13 +73,22 @@ def hover(c: Checks, browser, app, pid: int, sid: int) -> None:
     note = page.locator("#frame .tryon .tag").inner_text() if page.locator("#frame .tryon .tag").count() else ""
     blur = page.evaluate(BLURRED)
     c.check("hover before it's made: the photo stays, a note says so in words, nothing blurred",
-            "Making" in note and not blur, f"note: {note!r}; blurred: {blur or 'none'}")
+            ("Making" in note or "Finding the players" in note) and not blur, f"note: {note!r}; blurred: {blur or 'none'}")
     page.wait_for_function("!!document.querySelector('#frame .tryon.ready img')", timeout=60000, polling=50)
     c.check("that look appears as soon as it's made (the one under the pointer first)", True, f"{time.time() - t0:.1f} s")
     page.mouse.move(700, 400)
     page.wait_for_timeout(200)
+    players = page.evaluate("ahead.cut && ahead.cut.this")
+    watch = page.evaluate_handle("""(() => { const seen = []; const o = new MutationObserver(() => {
+      document.querySelectorAll('.toast').forEach(t => { if (!seen.includes(t.textContent)) seen.push(t.textContent) }) });
+      o.observe(document.body, {childList: true, subtree: true}); return seen })()""")
     times = sliders(page, sid)
-    c.check("sliders stay quick while looks are made ahead (≤ 0.15 s; 0.3 s on an M2)", max(times) <= 0.15, f"{times} s")
+    said = watch.json_value()
+    c.check("sliders stay quick while looks are made ahead (≤ 0.15 s; 0.3 s on an M2)", max(times) <= 0.15,
+            f"{times} s; this photo's players: {players}")
+    if max(times) > 0.5:
+        c.check("a slider waiting for the players says so in words", any("Finding the players" in x for x in said),
+                f"said: {said[:2]}")
     page.wait_for_function("ahead.total > 0 && ahead.imgs.size >= ahead.total", timeout=900000, polling=250)
     warm = time.time() - t0
     each = warm * 2 / len(plain)  # (M2 estimate)
@@ -87,6 +96,9 @@ def hover(c: Checks, browser, app, pid: int, sid: int) -> None:
             f"{warm:.0f} s here; {each:.2f} s a look on an M2")
     c.check("the status line says they're all ready", "All" in page.locator("#ahead-status").inner_text(),
             page.locator("#ahead-status").inner_text())
+    status = page.evaluate("[document.querySelector('#ahead-status').textContent, document.querySelector('#ahead-status').scrollWidth <= document.querySelector('#ahead-status').clientWidth + 1]")
+    c.check("the status line says how far the players' cut-outs are (or nothing once all are)",
+            "players ready in" in status[0] or page.evaluate("ahead.cut.done >= ahead.cut.total"), status[0])
     lat = []
     for n in plain:
         page.mouse.move(700, 400)
@@ -116,6 +128,35 @@ def hover(c: Checks, browser, app, pid: int, sid: int) -> None:
     c.check("the hover preview is the very picture Make makes (mean difference < 2/255)", 0 <= diff < 2,
             f"{name}: sizes {after.shape[:2]} and {pre.shape[:2]}, difference {diff:.2f}/255")
     app.post("/api/slots/remove", {"ids": [made["id"]]})
+
+
+def opened_later(c: Checks, browser, app, pid: int, sid: int) -> None:
+    """A photo opened a while after it was added: its players were cut out in the background meanwhile,
+    so the looks built on them come at the speed of any other look."""
+    left = app.post(f"/api/ahead/{pid}", {"order": []})["cutting"]
+    page = open_photo(browser, app, sid)
+    ai = set(page.evaluate("st.looks.filter(l => l.ai || l.design).map(l => l.name)"))
+    on_players = set(page.evaluate("st.looks.filter(l => l.cutout).map(l => l.name)"))
+    names = list(dict.fromkeys(page.evaluate("[...document.querySelectorAll('#look-grid .look:not(.own)')].map(b => b.dataset.name)")))
+    plain = [n for n in names if n not in ai]
+    first = next(n for n in plain[len(plain) // 2:] if n in on_players)
+    t0 = time.time()
+    page.hover(f'#look-grid .look[data-name="{first}"]')
+    page.wait_for_function("!!document.querySelector('#frame .tryon.ready img')", timeout=60000, polling=50)
+    dt = time.time() - t0
+    c.check("a photo opened later: a look on its players shows within 1.5 s on an M2 (cut out ahead)", dt * 2 <= 1.5,
+            f"{first}: {dt:.2f} s here ({dt * 2:.2f} s M2 estimate); {left} photos still to cut out")
+    page.mouse.move(700, 400)
+    page.wait_for_timeout(200)
+    times = sliders(page, sid)
+    c.check("a photo opened later: sliders quick while its looks are made (≤ 0.15 s)", max(times) <= 0.15, f"{times} s")
+    page.wait_for_function("ahead.total > 0 && ahead.imgs.size >= ahead.total", timeout=900000, polling=250)
+    warm = time.time() - t0
+    each = warm * 2 / len(plain)
+    c.check(f"a photo opened later: all {len(plain)} looks made ahead, ≤ 1.5 s a look on an M2", each <= 1.5,
+            f"{warm:.0f} s here; {each:.2f} s a look on an M2")
+    c.check("no page errors (opened later)", not page.errors, "; ".join(page.errors[:2]))
+    page.close()
 
 
 # Phase 2: the looks list ---------------------------------------------------------------------------

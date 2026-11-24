@@ -18,6 +18,7 @@ Segment Anything, free, run on this Mac) and added to or taken out of the
 cut-out. A photo's fixes stay with it, for every look and the full-size export.
 """
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,6 +42,7 @@ WHOLE_FRAME_PIXELS = 4_000_000
 MATTE_EDGE = 3072  # high enough to keep the hair pass's detail (see refine_heads)
 HEAD_EDGE = 1024  # each head is traced again on its own, at this size
 HEAD_REACH = 1.8
+MODEL_LOCK = threading.Lock()  # one full cut-out at a time in the whole app: each needs several GB at once
 HEADS = 2  # heads traced again, the biggest first  # the head crop, in face radii around it
 # Pieces of the traced outline count as the players when this much of them is
 # inside YOLO's outlines of the players in the play
@@ -167,6 +169,8 @@ class Prepared:
     frame: tuple[float, float, float, float] | None = None  # framed for a look: its box in the photo (shares)
     box: tuple[float, float, float, float] | None = None  # cropped first ("crop", "wide", "face"): its box in the photo (shares)
     _auto: tuple | None = field(default=None, repr=False)  # the cut-out and players' outline before fixes
+    matte_key: str | None = field(default=None, repr=False)  # its cut-out's name on disk, once made or found
+    players_from: "Prepared | None" = field(default=None, repr=False)  # the same players, already found (see same_players)
     _pieces: dict = field(default_factory=dict, repr=False)  # each click's traced object
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -175,24 +179,28 @@ class Prepared:
             return self._ensure_matte()
 
     def _ensure_matte(self) -> np.ndarray | None:
+        if self.scene.matte is None and self._auto is None and self.players_from is not None:
+            src = self.players_from  # (the photo before its light and color were changed: the very same players)
+            src.ensure_matte()
+            _copy_scene(src.scene, self.scene)
+            self._auto = (src.scene.matte, src.scene.subject_mask)
+            self.matte_key = src.matte_key
         if self.scene.matte is None:
             if self._auto is None:
                 matte = None
                 if self.scene.subject_mask is not None:
                     key = _matte_key(self.image, self.scene.subject_mask, self.scene.team)
                     matte = _kept_matte(key)  # made before (this photo, these players): no minute's wait
+                    if matte is None:
+                        with MODEL_LOCK:  # (one at a time; made in the background meanwhile: found on disk)
+                            matte = _kept_matte(key)
+                            if matte is None:
+                                matte = _made_matte(self.image, self.scene)
+                                if matte is not None:
+                                    _keep_matte(key, matte)
                     if matte is not None:
                         self.scene.take_in(matte)
-                    else:
-                        matte = cutout(self.image, self.scene.subject_mask)
-                        if matte is not None:
-                            self.scene.take_in(matte)
-                            matte = refine_heads(self.image, matte, self.scene.faces)
-                        matte = with_balls(matte, self.scene.balls) if matte is not None else None
-                        if matte is not None and self.scene.team:
-                            matte = fill_group(matte, self.image, self.scene.subject_mask)
-                        if matte is not None:
-                            _keep_matte(key, matte)
+                    self.matte_key = key
                 self._auto = (matte, self.scene.subject_mask)
             self.scene.matte, self.scene.subject_mask = self._fixed()
         return self.scene.matte
@@ -631,6 +639,36 @@ def _keep_matte(key: str, matte: np.ndarray) -> None:
             old.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _copy_scene(src: "Scene", dst: "Scene") -> None:
+    import copy
+    for f in dataclasses.fields(src):
+        setattr(dst, f.name, copy.copy(getattr(src, f.name)))
+
+
+def same_players(edited: Path, image: Image.Image, exif: bytes | None, fine: np.ndarray | None,
+                 original: Prepared) -> Prepared:
+    """A photo with only its light and color changed (nothing moved: no crop, turn or removal), ready
+    for looks with the original's players: found once, cut out once (not 20 s again for each edit)."""
+    p = Prepared(edited, image, Scene(), exif, fine, players_from=original)
+    _copy_scene(original.scene, p.scene)
+    p.scene.matte = None  # (taken from the original when a look needs it, fixes and all)
+    return p
+
+
+def _made_matte(image: Image.Image, scene: "Scene") -> np.ndarray | None:
+    """The players' full cut-out made: the model, each head again for the hair, the ball, a team as
+    one group."""
+    matte = cutout(image, scene.subject_mask)
+    if matte is None:
+        return None
+    scene.take_in(matte)  # (the faces found inside the players, for the hair pass)
+    matte = refine_heads(image, matte, scene.faces)
+    matte = with_balls(matte, scene.balls)
+    if scene.team:
+        matte = fill_group(matte, image, scene.subject_mask)
+    return matte
 
 
 def fill_group(alpha: np.ndarray, image: Image.Image | None = None, people: np.ndarray | None = None) -> np.ndarray:

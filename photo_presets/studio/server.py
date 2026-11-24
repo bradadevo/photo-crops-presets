@@ -43,7 +43,7 @@ from PIL import Image
 
 from photo_crops import images
 from photo_crops.ui import choose_folder
-from photo_presets import brand, deliver, edits, engine, enlarge, pipeline, players, presets, reel, retouch, timing, poster
+from photo_presets import brand, deliver, edits, engine, enlarge, pipeline, players, presets, reel, retouch, scene, timing, poster
 from photo_presets.engine import Engine, Job, Result
 from photo_presets.scene import Fix, frame_boxes
 
@@ -233,6 +233,7 @@ class Session:
                 self.save()
         if added:
             _thumbs_ahead(added)
+            CUT.want(added)  # (each photo's players cut out now, in the background)
         return added
 
     def remove_photo(self, pid: int) -> None:
@@ -622,6 +623,7 @@ class Ahead:
         self.busy = False
         self.waiting = False
         self.last_edit = 0.0
+        self.asked: tuple[str, int] = ("", 0)  # (the page, its latest ask): an older ask arriving late never reorders
 
     def looks(self) -> dict[str, dict]:
         return {n: r for n, r in presets.load_all().items() if not timing.uses_ai(r) and not r.get("design")}
@@ -636,10 +638,15 @@ class Ahead:
                                          default=str).encode()).hexdigest()
         return AHEAD_DIR / f"{digest}.jpg"
 
-    def want(self, pid: int, token: str, order: list[str]) -> None:
-        """Make these looks for this photo, in this order (the page sends it again as the mouse moves)."""
+    def want(self, pid: int, token: str, order: list[str], page: str = "", seq: int = 0) -> None:
+        """Make these looks for this photo, in this order (the page sends it again as the mouse moves;
+        seq: its ask's number, so one overtaken by a later ask is not followed)."""
         allowed = self.looks()
         with self.lock:
+            if page and page == self.asked[0] and seq < self.asked[1] and self.key == (pid, token):
+                return  # (an older ask: the look under the pointer now stays first)
+            if page:
+                self.asked = (page, seq)
             self.recipes = allowed  # (read once per ask, not once per look)
             self.key = (pid, token)
             self.made.setdefault(self.key, {})
@@ -654,18 +661,18 @@ class Ahead:
         with self.lock:
             return list(self.made.get((pid, token), {}))
 
-    def get(self, pid: int, token: str, name: str, chip: bool = False) -> bytes | None:
+    def get(self, pid: int, token: str, name: str, chip: bool = False, card: bool = False) -> bytes | None:
         """The look made ahead (or its small picture for the looks list), from memory or disk."""
         with self.lock:
             got = self.made.get((pid, token), {}).get(name)
         if got is None:
             recipe = (self.recipes or self.looks()).get(name)  # (made before: from disk)
             f = self.file(pid, token, name, recipe) if recipe is not None else None
-            if f is not None and f.exists() and f.with_suffix(".chip.jpg").exists():
-                got = (f.read_bytes(), f.with_suffix(".chip.jpg").read_bytes())
+            if f is not None and all(q.exists() for q in (f, f.with_suffix(".chip.jpg"), f.with_suffix(".card.jpg"))):
+                got = (f.read_bytes(), f.with_suffix(".chip.jpg").read_bytes(), f.with_suffix(".card.jpg").read_bytes())
                 with self.lock:
                     self.made.setdefault((pid, token), {})[name] = got
-        return None if got is None else got[1 if chip else 0]
+        return None if got is None else got[2 if card else 1 if chip else 0]
 
     def kick(self) -> None:
         while True:  # (a loop, not a call per look: after a restart they all come straight from disk)
@@ -678,6 +685,8 @@ class Ahead:
                         threading.Timer(1.0, self._resume).start()
                     return
                 key, todo = self.key, [n for n in self.order if n not in self.made.get(self.key, {}) and (self.key, n) not in self.failed]
+                if not key[1] and not CUT.settled(key[0]):  # (its players are being cut out ahead: those looks after, the rest now)
+                    todo = [n for n in todo if not pipeline.needs_cutout(self.recipes.get(n) or {})]
                 if not todo:
                     return
                 self.busy = True
@@ -697,11 +706,15 @@ class Ahead:
         small = p.image.copy()
         small.thumbnail((engine.PREVIEW_EDGE, engine.PREVIEW_EDGE))
         img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
-        data = (jpeg(img, quality=90), jpeg(img, CHIP, 82))  # (the look, and its small picture for the list)
+        # (the look; its small picture for the list; its card for the grid: the look is drawn once for all three)
+        data = (jpeg(img, quality=90), jpeg(img, CHIP, 82), jpeg(img, SWATCH, 84))
+        if not token and camera_photo(path):
+            keep_example(name, img)
         try:
             AHEAD_DIR.mkdir(parents=True, exist_ok=True)
             f = self.file(pid, token, name, self.looks()[name])
             f.with_suffix(".chip.jpg").write_bytes(data[1])
+            f.with_suffix(".card.jpg").write_bytes(data[2])
             f.write_bytes(data[0])
             _trim(AHEAD_DIR, AHEAD_KEPT)
         except OSError:
@@ -888,6 +901,143 @@ class EventAhead:
 
 
 EV = EventAhead()
+
+
+CUT_SECONDS = 20  # about how long one photo's players take to cut out (said on the page, so a wait is never a mystery)
+
+
+class CutAhead:
+    """Every photo's players cut out in the background as soon as it's added: the full cut-out, the
+    very one Make uses (about 20 s a photo), so opening a photo, pointing at a look built on its
+    players, or making it never waits for it. The photo you have open goes first, then the rest of
+    the event in order. One at a time (each needs several GB, the same as when you edit); it waits
+    while you move a slider; each is kept on disk and remembered, so a restart does none again."""
+
+    def __init__(self, file: Path, run: bool = True):
+        self.file = file
+        self.run = run  # (off in tests: each step is run by hand)
+        self.cv = threading.Condition()
+        self.queue: list[int] = []
+        self.now: int | None = None
+        self.failed: set[str] = set()
+        self.thread: threading.Thread | None = None
+        try:
+            kept = json.loads(file.read_text())
+        except (OSError, ValueError):
+            kept = {}
+        self.done: dict[str, list] = {k: v for k, v in kept.items() if isinstance(v, list) and len(v) == 2}
+
+    def is_done(self, path: Path) -> bool:
+        """This photo's players are cut out, on disk (the same file, unchanged since)."""
+        with self.cv:
+            v = self.done.get(str(path))
+        if v is None:
+            return False
+        try:  # ("": nobody in it to cut out)
+            return v[0] == path.stat().st_mtime and (not v[1] or (scene._mattes_dir() / f"{v[1]}.png").exists())
+        except OSError:
+            return False
+
+    def settled(self, pid: int) -> bool:
+        """Nothing to wait for on this photo: not waiting to be cut out, nor being cut out now."""
+        with self.cv:
+            return pid != self.now and pid not in self.queue
+
+    def want(self, pids: list[int], first: bool = False) -> None:
+        """These photos cut out ahead (first: before the rest, the one you have open)."""
+        todo = []
+        for pid in pids:
+            try:
+                path = S.photo(pid).path
+            except HTTPException:
+                continue
+            if not self.is_done(path) and str(path) not in self.failed:
+                todo.append(pid)
+        with self.cv:
+            if first:
+                self.queue = [q for q in todo if q != self.now] + [q for q in self.queue if q not in todo]
+            else:
+                self.queue += [q for q in todo if q != self.now and q not in self.queue]
+            self.cv.notify()
+            if self.run and self.thread is None and self.queue:
+                self.thread = threading.Thread(target=self._loop, daemon=True, name="vsdigitalpro-cut-ahead")
+                self.thread.start()
+
+    def status(self) -> dict:
+        with self.cv:
+            left = len(self.queue) + (self.now is not None)
+        return {"left": left}
+
+    def about(self, pid: int) -> dict:
+        """For the page: this photo's players ("ready", "now": being cut out, "next": waiting for
+        `ahead` others first), and how many of the event's photos are ready."""
+        with self.cv:
+            left = len(self.queue) + (self.now is not None)
+            this = "now" if pid == self.now else "next" if pid in self.queue else "ready"
+            ahead = self.queue.index(pid) + (self.now is not None) if this == "next" else 0
+        total = len(S.photos)
+        return {"this": this, "ahead": ahead, "done": max(0, total - left), "total": total, "each": CUT_SECONDS}
+
+    def _loop(self) -> None:
+        while True:
+            with self.cv:
+                while not self.queue:
+                    self.cv.wait()
+                pid = self.now = self.queue.pop(0)
+            try:
+                self.one(pid)
+            except Exception:
+                log.exception("Cutting out photo %s ahead failed", pid)
+                try:
+                    self.failed.add(str(S.photo(pid).path))
+                except HTTPException:
+                    pass
+            finally:
+                with self.cv:
+                    self.now = None
+                A.kick()  # (the looks built on its players, held back for it: made now)
+
+    def one(self, pid: int) -> None:
+        # (you're moving a slider, or the looks of the photo you have open are being made: after, so
+        # nothing you're looking at slows down; the photo you have open itself goes at once)
+        while time.time() - A.last_edit < 1.0 or (A.busy and (A.key or (None,))[0] != pid):
+            time.sleep(0.25)
+            with self.cv:
+                if self.queue and self.queue[0] != pid and self.queue[0] == (A.key or (None,))[0]:
+                    self.queue.insert(1, pid)  # (you opened another photo meanwhile: that one first, then this)
+                    return
+        try:
+            path = S.photo(pid).path
+        except HTTPException:
+            return  # (removed meanwhile)
+        if self.is_done(path) or E.removals.get(str(path)):
+            return  # (a photo with distractions removed is cut out from its cleaned copy, when it's used)
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            return
+        p = W.submit(PREVIEW, E.unkept, path, "none").result()  # (finding the players: on the worker, which owns that model)
+        if p.scene.subject_mask is None:
+            key = ""  # (nobody to cut out)
+        else:
+            p.ensure_matte()  # (here, on this thread: the worker stays free for you)
+            if p.matte_key is None or p._auto is None or p._auto[0] is None:
+                return
+            key = p.matte_key
+        with self.cv:
+            self.done[str(path)] = [stamp, key]
+            data = json.dumps(self.done)
+        try:
+            self.file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.file.with_suffix(".part")
+            tmp.write_text(data)
+            tmp.replace(self.file)
+        except OSError:
+            pass
+
+
+CUT = CutAhead((STATE or Path("~/.cache/photo-crops-presets").expanduser()) / "cut-ahead.json")
+E.cut_ahead = lambda path: CUT.is_done(path)
 
 
 # Making looks ------------------------------------------------------------------------------
@@ -1217,10 +1367,11 @@ def _trim(folder: Path, keep: int) -> None:
     """At most `keep` files in the folder: the oldest go (checked now and then, not on every file)."""
     if random.random() > 0.02:
         return
-    files = sorted((q for q in folder.glob("*.jpg") if not q.name.endswith(".chip.jpg")), key=lambda q: q.stat().st_mtime)
+    files = sorted((q for q in folder.glob("*.jpg") if not q.name.endswith((".chip.jpg", ".card.jpg"))), key=lambda q: q.stat().st_mtime)
     for old in files[:-keep]:
         old.unlink(missing_ok=True)
-        old.with_suffix(".chip.jpg").unlink(missing_ok=True)  # (a preview's small copy goes with it)
+        old.with_suffix(".chip.jpg").unlink(missing_ok=True)  # (a preview's small copies go with it)
+        old.with_suffix(".card.jpg").unlink(missing_ok=True)
 
 
 @app.post("/api/swatches/{pid}")
@@ -1231,7 +1382,17 @@ async def swatches(pid: int, req: Request):
     body = await req.json()
     token = edit_token(pid, bool(body.get("edits")))
     ready, failed = [], []
+    ahead = A.key == (pid, token)  # (this photo's looks being made ahead: each card comes with its look, never drawn twice)
+    made, plain = (set(A.ready(pid, token)), A.recipes or A.looks()) if ahead else (set(), {})
+    with A.lock:
+        gone = {n for (k, n) in A.failed if k == (pid, token)}
     for name in body.get("names", [])[:80]:
+        if name in plain:
+            if name in made or A.get(pid, token, name, card=True) is not None:
+                ready.append(name)
+            elif name in gone:
+                failed.append(name)
+            continue
         fut = swatch_future(pid, name, token)
         if fut.done():
             (failed if fut.cancelled() or fut.exception() or fut.result() is None else ready).append(name)
@@ -1245,11 +1406,22 @@ async def ahead(pid: int, req: Request):
     S.photo(pid)
     body = await req.json()
     token = edit_token(pid, bool(body.get("edits")))
-    await asyncio.to_thread(A.want, pid, token, [str(n) for n in body.get("order", [])][:400])
+    CUT.want([pid], first=True)  # (the photo you have open: its players cut out before the others')
+    order = [str(n) for n in body.get("order", [])][:400]
+    await asyncio.to_thread(A.want, pid, token, order, str(body.get("page", "")), int(body.get("seq", 0) or 0))
+    focus = str(body.get("focus") or "")
+    if focus and focus in (A.recipes or {}):  # (the look under the pointer, about to be made: answered once it is)
+        until = time.time() + 1.2
+        while time.time() < until and focus not in A.ready(pid, token) and (pid, token) == A.key:
+            if not token and not CUT.settled(pid) and pipeline.needs_cutout(A.recipes.get(focus) or {}):
+                break  # (it waits for this photo's players: said on the page, nothing to hold the answer for)
+            await asyncio.sleep(0.03)
     with A.lock:  # (a look that couldn't be made is left out of the count: the rest still reach "all ready")
         failed = [n for (k, n) in A.failed if k == (pid, token)]
     total = len(A.looks()) - len(failed)
-    return {"token": token, "ready": A.ready(pid, token), "total": total, "failed": failed}
+    return {"token": token, "ready": A.ready(pid, token), "total": total, "failed": failed,
+            "cutting": CUT.status()["left"],  # (photos whose players are still to be cut out ahead)
+            "cut": CUT.about(pid)}
 
 
 @app.post("/api/event-ahead")
@@ -1282,7 +1454,12 @@ async def ahead_image(pid: int, name: str, e: str = "", chip: int = 0):
 @app.get("/img/swatch/{pid}/{name}.jpg")
 def swatch(pid: int, name: str, e: str = ""):
     fut = SWATCHES.get((pid, name, e))
-    if fut is None or not fut.done() or fut.cancelled() or fut.exception() or fut.result() is None:
+    if fut is None:
+        data = A.get(pid, e, name, card=True)  # (made ahead with the look)
+        if data is not None:
+            return picture(data)
+        raise HTTPException(404, "Not made yet")
+    if not fut.done() or fut.cancelled() or fut.exception() or fut.result() is None:
         raise HTTPException(404, "Not made yet")
     return picture(fut.result())
 
@@ -2748,6 +2925,7 @@ def main() -> int:
     _classic()
     S.restore()
     _thumbs_ahead(list(S.photos))  # (from disk: a moment)
+    CUT.want(list(S.photos))  # (the ones not cut out yet: the rest are on disk)
     _warm_up()
     K.start()
     import signal

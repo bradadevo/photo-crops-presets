@@ -27,7 +27,7 @@ from PIL import Image
 from photo_crops import images
 from photo_presets import brand, deliver, edits, explore, match, pipeline, poster, presets, reel, retouch
 from photo_presets.assets import Library
-from photo_presets.scene import Fix, Prepared, prepare, resized, segment
+from photo_presets.scene import Fix, Prepared, prepare, resized, same_players, segment
 
 # Export file types: JPEG (web, Instagram, clients), 16-bit TIFF (print and further editing), or both
 JPEG, TIFF, BOTH = "jpeg", "tiff", "both"
@@ -122,6 +122,8 @@ class Engine:
         self.sharp_on = True
         self._sharp: OrderedDict = OrderedDict()
         self.sharp_dir = Path("~/.cache/photo-crops-presets/sharp").expanduser()  # (kept on disk: a restart reuses them)
+        self.same_as: dict[str, str] = {}  # an edited copy (light and color only) -> the photo it was made from
+        self.cut_ahead = lambda path: False  # the players already cut out ahead, on disk (set by the app)
         self.cutout_dir: Path | None = None  # each look's players' cut-out kept here: after a restart, sliders at once
 
     def prepared(self, path: Path, crop: str) -> Prepared:
@@ -129,13 +131,25 @@ class Engine:
         if key in self._prepared:
             self._prepared.move_to_end(key)
             return self._prepared[key]
-        p = prepare(path, crop, retouch=self._retouched) if self.removals.get(str(path)) else prepare(path, crop)
+        p = self.unkept(path, crop)
         if self.fixes.get(key):
             p.set_fixes(self.fixes[key])
         self._prepared[key] = p
         while len(self._prepared) > PREPARED_CACHE:
             self._prepared.popitem(last=False)
         return p
+
+    def unkept(self, path: Path, crop: str) -> Prepared:
+        """The photo ready for looks, without holding it in memory (for work done ahead: the photos
+        you're working on stay kept). The one in memory, if it's there."""
+        p = self._prepared.get((str(path), crop))
+        if p is not None:
+            return p
+        src = self.same_as.get(str(path))
+        if src is not None and crop == "none" and Path(src).exists():
+            photo = images.load(path)  # (the edited pixels; the players as found in the original)
+            return same_players(path, photo.image, photo.exif, photo.fine, self.prepared(Path(src), "none"))
+        return prepare(path, crop, retouch=self._retouched) if self.removals.get(str(path)) else prepare(path, crop)
 
     # Removing distractions ------------------------------------------------------------------
 
@@ -551,6 +565,10 @@ class Engine:
         key = hashlib.sha1(json.dumps([str(r.source), r.crop, r.recipe, e, r.seed], sort_keys=True,
                                       default=str).encode()).hexdigest()[:12]
         dest = folder / key / f"{r.source.stem}.tif"  # (named as the photo, so exports are too)
+        moved = r.crop != "none" or r.frame is not None or any(e.get(k) for k in ("angle", "crop", "removals", "background")) \
+            or bool(r.recipe.get("frame")) or bool(r.recipe.get("steps"))
+        if not moved and not self.removals.get(str(r.source)):  # (light and color only: the same players, where they were)
+            self.same_as[str(dest)] = str(r.source)
         if dest.exists():
             return dest
         p = self.ready(r.source, r.crop, r.recipe)
@@ -761,7 +779,11 @@ class Engine:
 
     def is_cut_out(self, path: Path, crop: str) -> bool:
         p = self._prepared.get((str(path), crop))
-        return p is not None and p._auto is not None
+        if p is not None and p._auto is not None:
+            return True
+        if crop == "none" and str(path) in self.same_as:
+            return self.is_cut_out(Path(self.same_as[str(path)]), "none")
+        return crop == "none" and not self.removals.get(str(path)) and self.cut_ahead(path)
 
     def explore(self, paths: list[Path], count: int, crop: str = "none", seed: int | None = None,
                 progress=None) -> list[Result]:

@@ -1086,6 +1086,7 @@ function aheadOrder(focus) {  // the look under the pointer, then the nearest on
 }
 /* Asking the server how far the looks made ahead are: always asks again until all are (a failed ask, or
    a slip in painting, waits a little longer and asks again; it never stops quietly). */
+const PAGE_ID = Math.random().toString(36).slice(2);
 async function aheadSync(focus = ahead.focus) {
   if (!st.activePhoto) return;
   const key = aheadKey();
@@ -1093,12 +1094,15 @@ async function aheadSync(focus = ahead.focus) {
   clearTimeout(ahead.timer);
   let again = 600;
   try {
-    const r = await api(`/api/ahead/${st.activePhoto}`, { order: aheadOrder(focus), edits: !!editKey() }, { quiet: true });
+    ahead.seq = (ahead.seq || 0) + 1;  // (numbered: an ask overtaken by a later one is not followed)
+    const r = await api(`/api/ahead/${st.activePhoto}`, { order: aheadOrder(focus), edits: !!editKey(), page: PAGE_ID, seq: ahead.seq,
+      focus: tryName && !ahead.imgs.has(tryName) ? tryName : "" }, { quiet: true });
     if (key !== ahead.key) return;
-    ahead.token = r.token; ahead.total = r.total; ahead.fails = 0;
+    ahead.token = r.token; ahead.total = r.total; ahead.fails = 0; ahead.cut = r.cut;
     r.ready.forEach((n) => { ahead.ready.add(n); aheadLoad(n); });
     paintAheadStatus();
-    if (ahead.ready.size >= ahead.total) again = 0;
+    if (tryName && !ahead.imgs.has(tryName) && $("#frame .tryon:not(.ready)")) tryWaitNote(tryName);
+    if (ahead.ready.size >= ahead.total) again = r.cut && r.cut.done < r.cut.total ? 2000 : 0;  // (the players still being cut out: said as it goes)
   } catch (e) {
     ahead.fails = (ahead.fails || 0) + 1; again = Math.min(10000, 600 * 2 ** ahead.fails);
     console.warn("looks ahead: asking again", e);
@@ -1139,12 +1143,35 @@ function paintAheadStatus() {
     el.classList.toggle("done", n >= t);
     el.textContent = n >= t ? `⚡ All ${t} looks show on all ${evAhead.photos} photos at once`
       : `⚡ Getting looks ready on all ${evAhead.photos} photos: ${n} of ${t}`;
+    cutSuffix(el);
     return;
   }
-  const n = ahead.imgs.size, t = ahead.total;
+  const n = ahead.imgs.size, t = ahead.total, c = ahead.cut;
   el.hidden = false; el.classList.toggle("empty", !t);
   el.classList.toggle("done", n >= t);
-  el.textContent = n >= t ? `⚡ All ${t} looks show instantly when you point at them` : `⚡ Getting looks ready to show instantly: ${n} of ${t}`;
+  if (c && c.this !== "ready" && n < t) el.textContent = `⏳ Finding the players in this photo… ${n} of ${t} looks ready`;
+  else el.textContent = n >= t ? `⚡ All ${t} looks show instantly when you point at them` : `⚡ Getting looks ready to show instantly: ${n} of ${t}`;
+  cutSuffix(el);
+}
+/* The players' cut-out made ahead for the rest of the event, said quietly after the looks' line (its full
+   wording on hover); nothing at all once every photo is ready. */
+function cutSuffix(el) {
+  const c = ahead.cut;
+  el.title = el.textContent;
+  if (!c || c.total < 2 || c.done >= c.total) return;
+  const more = ` · players ready in ${c.done} of ${c.total} photos`;
+  el.textContent += more;
+  el.title = el.textContent + ` (each photo's players are cut out once, about ${c.each} s each, the photo you open first)`;
+}
+/* Pointing at a look before it's made: what it's waiting for, in words (the players first, if it needs them). */
+function tryWaitNote(name) {
+  const ov = $("#frame .tryon"), l = lookByName(name), c = ahead.cut;
+  if (!ov || ov.classList.contains("ready")) return;
+  const players = l && l.cutout && c && c.this !== "ready";
+  const wait = players ? (c.this === "now" ? `about ${c.each} s` : `about ${c.each * (c.ahead + 1)} s`) : "";
+  ov.innerHTML = players
+    ? `<span class="tag l"><span class="spin"></span> Finding the players in this photo (${wait}, once)… then <b>${esc(name)}</b></span>`
+    : `<span class="tag l"><span class="spin"></span> Making <b>${esc(name)}</b> for this photo…</span>`;
 }
 
 /* The whole event: point at a look and every photo shows it (each made ahead, small). */
@@ -1246,7 +1273,7 @@ function tryOn(name) {
   let ov = f.querySelector(".tryon");
   if (!ov) { ov = document.createElement("div"); ov.className = "tryon"; f.appendChild(ov); }
   ov.classList.remove("ready");
-  ov.innerHTML = `<span class="tag l"><span class="spin"></span> Making <b>${esc(name)}</b> for this photo…</span>`;
+  tryWaitNote(name);
   aheadSync(name);
 }
 function tryOff() {

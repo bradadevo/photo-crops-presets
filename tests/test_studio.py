@@ -1,6 +1,10 @@
 """The studio server: looks listed for the picker, photos added once, pictures served."""
 
 import io
+import os
+import threading
+import time
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -27,6 +31,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "AHEAD_DIR", tmp_path / "ahead")
     monkeypatch.setattr(server, "A", server.Ahead())
     monkeypatch.setattr(server, "EV", server.EventAhead())
+    monkeypatch.setattr(server, "CUT", server.CutAhead(tmp_path / "cut-ahead.json", run=False))
     return TestClient(server.app)
 
 
@@ -230,8 +235,14 @@ def test_every_look_is_made_ahead_so_hovering_shows_it_at_once(client, monkeypat
     assert sorted(r["ready"]) == ["Clean Pro", "Mono Editorial"]
     got = client.get(f"/img/ahead/{pid}/Mono Editorial.jpg?e={r['token']}")
     assert got.status_code == 200 and Image.open(io.BytesIO(got.content)).size[0] > 100
-    assert len([f for f in server.AHEAD_DIR.glob("*.jpg") if ".chip" not in f.name]) == 2  # kept on disk (with small pictures)
+    assert len([f for f in server.AHEAD_DIR.glob("*.jpg") if ".chip" not in f.name and ".card" not in f.name]) == 2  # kept on disk (with small pictures)
     assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}&chip=1").status_code == 200
+    # the grid's card of a look made ahead: that very picture, not drawn a second time
+    monkeypatch.setattr(server, "_swatch", lambda *a: (_ for _ in ()).throw(AssertionError("drawn twice")))
+    s = client.post(f"/api/swatches/{pid}", json={"names": ["Clean Pro", "Mono Editorial"]}).json()
+    assert sorted(s["ready"]) == ["Clean Pro", "Mono Editorial"]
+    card = client.get(f"/img/swatch/{pid}/Clean Pro.jpg?e={s['token']}")
+    assert card.status_code == 200 and max(Image.open(io.BytesIO(card.content)).size) <= server.SWATCH
     server.A = server.Ahead()  # (as after a restart)
     assert client.get(f"/img/ahead/{pid}/Clean Pro.jpg?e={r['token']}").status_code == 200  # from disk, not made again
 
@@ -367,3 +378,177 @@ def test_a_looks_cut_out_comes_back_from_disk_after_a_restart(client, monkeypatc
     monkeypatch.setattr(server.E, "ready", lambda *a, **k: (_ for _ in ()).throw(AssertionError("traced again")))
     again = server.E.cutout(r)
     assert np.array_equal(again, first)
+
+
+def _players_photo(monkeypatch, tmp_path):
+    """Each photo with a player in it, and the cut-out model faked (counted, no AI in the test)."""
+    import numpy as np
+    from photo_presets import scene
+    monkeypatch.setenv("ALLPROPHOTO_STATE", str(tmp_path))  # (the kept cut-outs: in the test's folder)
+    runs = []
+
+    def unkept(path, crop):
+        img = Image.open(path).convert("RGB")
+        subject = np.zeros((img.height, img.width), bool)
+        subject[40:200, 100:220] = True
+        return scene.Prepared(path, img, scene.Scene(subject_mask=subject), None)
+
+    def made(image, sc):
+        runs.append(image.size)
+        time.sleep(0.2)  # (the model takes a while: long enough for two to meet)
+        return sc.subject_mask.astype(np.float32)
+    monkeypatch.setattr(server.E, "unkept", unkept)
+    monkeypatch.setattr(scene, "_made_matte", made)
+    return runs
+
+
+def test_each_added_photo_is_cut_out_ahead_and_remembered_after_a_restart(client, monkeypatch, tmp_path):
+    """Adding photos starts their players' cut-out at once (in the background); each is kept on disk and
+    remembered, so a restart cuts out none of them again, and the app knows they're ready."""
+    runs = _players_photo(monkeypatch, tmp_path)
+    files = [("files", (f"p{i}.jpg", _jpeg((40 + i, 90, 160)), "image/jpeg")) for i in range(3)]
+    pids = client.post("/api/photos/upload", files=files).json()["added"]
+    assert server.CUT.queue == pids  # (all of them waiting, in the event's order)
+    path = server.S.photo(pids[0]).path
+    assert not server.E.is_cut_out(path, "none")
+    for pid in list(server.CUT.queue):
+        server.CUT.queue.remove(pid)
+        server.CUT.one(pid)
+    assert len(runs) == 3
+    assert server.E.is_cut_out(path, "none")  # (ready: the page's wait estimate says so too)
+    again = server.CutAhead(server.CUT.file, run=False)  # (as after a restart)
+    monkeypatch.setattr(server, "CUT", again)
+    again.want(pids)
+    assert again.queue == [] and server.E.is_cut_out(path, "none")
+    p = server.E.prepared(path, "none")  # (a look needing the players: from disk, the model isn't run again)
+    assert p.ensure_matte() is not None and len(runs) == 3
+
+
+def test_a_changed_photo_is_cut_out_again(client, monkeypatch, tmp_path):
+    runs = _players_photo(monkeypatch, tmp_path)
+    pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    server.CUT.queue.clear()
+    server.CUT.one(pid)
+    path = server.S.photo(pid).path
+    assert server.CUT.is_done(path)
+    path.write_bytes(_jpeg((200, 30, 30)))  # (the file changed: an edited copy saved over it)
+    os.utime(path, (time.time() + 5, time.time() + 5))
+    assert not server.CUT.is_done(path)
+    server.CUT.want([pid])
+    assert server.CUT.queue == [pid]
+
+
+def test_the_photo_you_open_is_cut_out_first(client, monkeypatch, tmp_path):
+    _players_photo(monkeypatch, tmp_path)
+    files = [("files", (f"p{i}.jpg", _jpeg((40 + i, 90, 160)), "image/jpeg")) for i in range(4)]
+    pids = client.post("/api/photos/upload", files=files).json()["added"]
+    client.post(f"/api/ahead/{pids[2]}", json={"order": []})
+    assert server.CUT.queue == [pids[2], pids[0], pids[1], pids[3]]
+
+
+def test_two_asking_for_one_photos_cut_out_run_the_model_once(client, monkeypatch, tmp_path):
+    """The background and a look you make ask for the same photo's players at once: the model runs once
+    (one cut-out at a time in the whole app, never two of several GB each), the other reads it from disk."""
+    runs = _players_photo(monkeypatch, tmp_path)
+    pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    path = server.S.photo(pid).path
+    a, b = server.E.unkept(path, "none"), server.E.unkept(path, "none")  # (two separate copies of the photo)
+    t = threading.Thread(target=a.ensure_matte)
+    t.start()
+    time.sleep(0.05)
+    assert b.ensure_matte() is not None
+    t.join()
+    assert len(runs) == 1 and a.matte_key == b.matte_key
+
+
+def test_looks_on_the_players_wait_for_the_cut_out_made_ahead_the_rest_are_made_now(client, monkeypatch):
+    """While a photo's players are being cut out in the background, its looks that don't need them are
+    made ahead at once, and the ones that do wait for it (they'd hold up the app's worker for 20 s)."""
+    from photo_presets import pipeline
+    pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    looks = server.A.looks()
+    on_players = [n for n, r in looks.items() if pipeline.needs_cutout(r)]
+    plain = [n for n, r in looks.items() if not pipeline.needs_cutout(r)]
+    assert on_players and plain
+    made = []
+    monkeypatch.setattr(server.Ahead, "_make", lambda self, key, name: made.append(name) or (b"x", b"x"))
+    monkeypatch.setattr(server.Ahead, "get", lambda self, *a, **k: None)
+    client.post(f"/api/ahead/{pid}", json={"order": [on_players[0], plain[0]]})
+    for _ in range(200):
+        if len(made) >= len(plain):
+            break
+        time.sleep(0.02)
+    assert set(made) == set(plain)  # (the players' looks held back)
+    server.CUT.queue.clear()  # (its cut-out done)
+    server.A.kick()
+    for _ in range(200):
+        if len(made) == len(looks):
+            break
+        time.sleep(0.02)
+    assert set(made) == set(looks) and made[len(plain)] == on_players[0]  # (the one under the pointer first)
+
+
+def test_the_background_cut_out_steps_aside_for_the_photo_you_open(client, monkeypatch, tmp_path):
+    """Opening another photo while the background waits to cut one out: the one you opened goes first,
+    the other right after it (not to the back of the event)."""
+    _players_photo(monkeypatch, tmp_path)
+    files = [("files", (f"p{i}.jpg", _jpeg((40 + i, 90, 160)), "image/jpeg")) for i in range(3)]
+    pids = client.post("/api/photos/upload", files=files).json()["added"]
+    cut = server.CUT
+    cut.queue = [pids[2], pids[1]]  # (pids[0] taken off the queue: about to be cut out)
+    monkeypatch.setattr(server.A, "key", (pids[2], ""))
+    monkeypatch.setattr(server.A, "busy", True)  # (the opened photo's looks being made)
+    cut.one(pids[0])
+    assert cut.queue == [pids[2], pids[0], pids[1]] and not cut.is_done(server.S.photo(pids[0]).path)
+
+
+def test_an_edited_photo_light_and_color_only_keeps_the_originals_players(client, monkeypatch, tmp_path):
+    """Looks made on top of your edit (a slider moved): the players are found and cut out once, on the
+    photo; the edited copy (nothing moved) reuses them, never 20 s more on the worker. A crop moves
+    them: that copy finds its own."""
+    import numpy as np
+    from photo_presets import engine, scene
+    monkeypatch.setenv("ALLPROPHOTO_STATE", str(tmp_path))
+    runs, found = [], []
+
+    def fake_prepare(path, crop="none", retouch=None, **k):
+        found.append(Path(path).name)
+        img = Image.open(path).convert("RGB")
+        subject = np.zeros((img.height, img.width), bool)
+        subject[40:200, 100:220] = True
+        return scene.Prepared(Path(path), img, scene.Scene(subject_mask=subject, faces=[(0.5, 0.3, 0.05)]), None)
+
+    def made(image, sc):
+        runs.append(image.size)
+        return sc.subject_mask.astype(np.float32)
+    monkeypatch.setattr(engine, "prepare", fake_prepare)
+    monkeypatch.setattr(scene, "_made_matte", made)
+    monkeypatch.setattr(server.E, "_prepared", __import__("collections").OrderedDict())
+    pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    path = server.S.photo(pid).path
+    r = server.E._one(path, "none", {"steps": []}, 0)
+    lit = server.E.adjust(r, dict(server.pipeline.ADJUST, background=-0.5))  # (a slider: light only)
+    baked = server.E.bake(lit, tmp_path / "edited")
+    p = server.E.prepared(baked, "none")
+    assert p.players_from is not None and p.ensure_matte() is not None
+    assert len(runs) == 1 and found.count(baked.name) == 0  # (cut out once; the copy's players never looked for)
+    assert server.E.is_cut_out(baked, "none")
+    import dataclasses as dc
+    cropped = dc.replace(lit, edits={"crop": [0.1, 0.1, 0.9, 0.9]})  # (a crop: the players moved)
+    again = server.E.bake(cropped, tmp_path / "edited")
+    assert str(again) not in server.E.same_as
+
+
+def test_an_older_ask_arriving_late_never_reorders_the_looks(client, monkeypatch):
+    """The page asks every moment; one sent just before you pointed at a look can arrive just after: the
+    look under the pointer stays first."""
+    pid = client.post("/api/photos/upload", files=[("files", ("c.jpg", _jpeg(), "image/jpeg"))]).json()["added"][0]
+    names = list(server.A.looks())
+    monkeypatch.setattr(server.Ahead, "kick", lambda self: None)  # (only the order, here)
+    client.post(f"/api/ahead/{pid}", json={"order": [names[5]], "page": "p1", "seq": 7})
+    client.post(f"/api/ahead/{pid}", json={"order": [names[0]], "page": "p1", "seq": 6})  # (sent before, came after)
+    assert server.A.order[0] == names[5]
+    client.post(f"/api/ahead/{pid}", json={"order": [names[2]], "page": "p1", "seq": 8})
+    assert server.A.order[0] == names[2]
+    client.post(f"/api/ahead/{pid}", json={"order": [names[3]], "page": "p2", "seq": 1})  # (another window)
+    assert server.A.order[0] == names[3]

@@ -63,6 +63,9 @@ def main() -> int:
             sc.event(c, browser, app, pid, sid)
             c.check("the whole-event work never needs more memory than normal editing (+0.3 GB)",
                     app.peak <= editing_peak + 0.3, f"peak {app.peak:.1f} GB vs editing {editing_peak:.1f} GB")
+            print("== A photo opened a while after it was added")
+            later = pids[3]
+            sc.opened_later(c, browser, app, later, app.make(later, "Original")["id"])
             browser.close()
 
         print("== Quit and reopen the app")

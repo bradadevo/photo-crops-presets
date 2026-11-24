@@ -131,3 +131,18 @@ with real photos, before it reaches the app.
 
 - GPU or LUT "approximations" of looks: they wouldn't match the real look exactly.
 - Instant AI drawings.
+
+## Players cut out ahead (2026-11-23)
+
+- Each photo's players are cut out in the background as soon as it's added (the full cut-out Make uses,
+  about 20 s a photo, one at a time so memory stays at the editing peak). The photo you open goes first;
+  it steps aside between photos while the open photo's looks are being made or you move a slider. Kept on
+  disk and remembered: a restart does none again.
+- Looks on the players wait for that cut-out; the other looks are made at once. An edit that moves
+  nothing (light, color) reuses the original's players: no second 16 s cut-out.
+- The page says what's loading: "Finding the players in this photo…", "players ready in 12 of 38
+  photos", and a note when a slider waits for the players.
+- Browser run (38 PSG photos): 45 of 47. All 116 looks made ahead pass (1.43 and 1.36 s a look, M2
+  estimate). Open: (1) a background slider in the first ~20 s on a brand-new photo waits for its
+  cut-out (17 s; the page says so); (2) a look on a photo opened later shows in 0.95 s here, 1.9 s M2
+  estimate, bar 1.5 s. Editing memory peak 13.1 GB (the cut-out model itself reaches 12.8 GB).

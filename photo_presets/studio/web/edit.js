@@ -577,10 +577,20 @@ async function sendAdjust(id, vals) {
   adjustNext = { id, vals: { ...vals } };
   if (adjustBusy) return;
   adjustBusy = true;
+  // (a slider that needs the players, before they're found: after half a second, said what it waits for)
+  let note = null;
+  const slow = setTimeout(() => {
+    const c = ahead.cut;
+    if (!adjustBusy || !c || c.this === "ready") return;
+    note = toast("Finding the players in this photo…", { sticky: true, spin: true,
+      small: `Once per photo, about ${c.each} s. Your slider change shows as soon as they're found; keep working.` });
+  }, 500);
   while (adjustNext) {
     const job = adjustNext; adjustNext = null;
     try { updateSlot(await api(`/api/slots/${job.id}/edit`, { adjust: job.vals }), { keepPane: true }); } catch { break; }
   }
+  clearTimeout(slow);
+  note?.close();
   adjustBusy = false;
   const q = afterQueue; afterQueue = [];
   q.forEach((fn) => fn());
