@@ -34,14 +34,22 @@ built** is under [Architecture](#architecture) below.
 
 ## Setup
 
+**Needs:** an Apple Silicon Mac, M2 or newer, with **16 GB of memory or more**
+(8 GB Macs are not supported for now: cutting out a new photo's players needs
+about 13 GB at its peak). macOS 14 or later gives the cleaner hair in the
+cut-out (Apple's person outline, below); on older macOS the cut-out is made
+as before. The app checks this once when it starts and never fails later.
+
 ```bash
 uv sync
 ```
 
 The first run downloads two free models (about 250 MB, once) to
-`~/.cache/photo-crops`, and the player cut-out model BiRefNet (about 970 MB,
-once) to `~/.rembg` the first time a look separates player and background
-(already there if you use ai-versions). The illustration looks download
+`~/.cache/photo-crops`, and the player cut-out models to `~/.rembg` (once):
+BiRefNet (about 930 MB) and its lighter version for the hair (about 210 MB)
+when the first photo is added, and a small people cut-out for the event
+previews (u2net_human_seg, about 170 MB) the first time you point at a look
+with all photos showing (already there if you use ai-versions). The illustration looks download
 their drawing models (about 5 GB, once) to `~/.cache/huggingface` the first
 time one is used. The detail enlarger for tight crops (Real-ESRGAN, 67 MB)
 downloads once to `~/.cache/photo-crops` the first time an export enlarges a
@@ -92,14 +100,40 @@ ball); **Choose the best N** chooses them, so the looks are made on just those
 `~/.cache/photo-crops/players`). Any photo can be chosen by hand too: the ✓ on
 it, or ⌘-click.
 
-**2. Pick looks**: every look is a card showing **your own photo in that
-look** (the quick looks are made on it in the background, a fraction of a
-second each, once the players are cut out). Rest the pointer on a card to
-**try the look on** the big picture, full size. The AI illustration looks take
-about 20 s each, so their cards show their most recent picture instead (kept
-in `~/.cache/photo-crops-presets/examples`). Search, or filter by group (Bold,
-Editorial, Studio, Watercolor, Anime, Oil painting, Comic book, Pencil and
-ink, Mine). Each card says about how long it takes (**instant**, or seconds;
+**The players are cut out as soon as photos are added.** Every photo's
+players are cut out from the background once, in the background, one photo
+at a time (about 20 s a photo on an M2; the photo you open goes first, and it
+steps aside while you move a slider). They're kept on disk, so a restart does
+none again. The line under the looks says how far it has got (**players ready
+in 12 of 38 photos**). Looks that change only the players or only the
+background wait for that photo's cut-out and say so (**Finding the players in
+this photo…**); every other look is ready at once. An edited copy that only
+changes light or color reuses the original's players.
+
+**2. Pick looks**: the looks are a compact list that scales to hundreds:
+**Favorites** (the star on a row) and **Recently used** on top, then each
+group (Bold, Editorial, Studio, Watercolor, Anime, Oil painting, Comic book,
+Pencil and ink, Mine). Each row has a small picture of **your own photo in
+that look**. Search, or filter by group.
+
+**Every look is made ahead.** Each non-AI look is made for the photo you're on
+in the background (the look under the pointer first, then its neighbours),
+with the same engine and size as Make, and kept. Rest the pointer on a row, or
+step with **↑ ↓**, and the big picture shows that look at once (about 30 ms):
+the real look, not a color-only stand-in, so smoke, lights, fog and new
+backgrounds show too. **Return** picks it, **Esc** puts the photo back. A look
+not made yet says so in words and is made next; the photo is never blurred.
+The line under the looks says how many are ready. Editing never waits for
+this work. With **All photos** chosen, pointing at a look shows it on **every
+photo of the event** at once, so you can see whether it holds up across day,
+night and indoor shots (these small previews use a lighter people cut-out;
+Make and the big picture always use the full one). Looks made ahead are kept
+on disk (the most recent ones, in `~/.cache/photo-crops-presets/ahead`), so
+after a restart nothing is made twice.
+
+The AI illustration looks take about 20 s each, so they are never made ahead:
+they show their most recent picture instead (kept in
+`~/.cache/photo-crops-presets/examples`). Each card says about how long it takes (**instant**, or seconds;
 learned from your own runs, in `~/.config/photo-crops-presets/timings.json`).
 Tap cards to pick them (numbered in order), then choose:
 - **Photos**: **This photo**, or **All N**.
@@ -270,7 +304,8 @@ exports just that one. The export window:
   teammate keeps them in too), then resized; Instagram sizes get a light
   output sharpening. A size bigger than the crop's own pixels (a tight crop
   posted to Instagram, a big print) is enlarged with the **AI detail
-  enlarger** (Real-ESRGAN, on this Mac, about 7 s a photo): crisp hair, skin,
+  enlarger** (Real-ESRGAN, on this Mac's graphics chip in half precision,
+  about 4-5 s a photo): crisp hair, skin,
   numbers and kit instead of a soft blow-up, with a little of the plain
   enlargement mixed back so skin keeps its real texture; it sharpens faces
   with the rest of the picture but never invents features. Crops over 4 megapixels, or a Mac without the model, use plain
@@ -812,8 +847,14 @@ outlines decide which traced pieces are the players in the play, so
 background people, poles and signs stay in the background; the ball in the
 play joins the players (only a ball near them and about as big as a ball at
 their distance: one far behind them, in another game, is left out). Steps on the `subject` layer change only the players, steps on
-the `background` layer only what is behind them. The cut-out is made only
-when a look needs it.
+the `background` layer only what is behind them. Each head is then traced
+again close up (BiRefNet's lighter version), so hair keeps its detail, and on
+macOS 14 or later that hair is trimmed to Apple's own outline of the person
+(macOS Vision): no halo of background around the hair. The trim only ever
+takes away, and a head Apple's outline doesn't fit well stays as before. The
+cut-out is made in the background as soon as a photo is added (one at a
+time), kept on disk, and the models are let go a minute after the last one
+(about 10 GB back to the Mac).
 
 **Depth (Z-sandwiching)**: fog, stadium smoke, rain and impact overlays go on
 the background layer by default, so they sit behind the players but in front
@@ -902,7 +943,12 @@ How the parts fit, in plain terms.
   export, so what you see is what you get.
 - **The server** runs on your Mac only (nothing goes to the internet). It
   saves the session as you go, so quitting loses nothing, and runs slow work
-  (looks, AI drawings, exports) in the background with progress.
+  (looks, AI drawings, exports) in the background with progress. One worker
+  does the work in order of urgency: your edits first, then Make and
+  exports, then the looks made ahead. Beside it, the players of every photo
+  are cut out ahead (one at a time, so memory stays at the editing peak), and
+  every non-AI look is made ahead for the open photo and for the event, so
+  pointing at a look only shows a picture already made.
 - **A look is a recipe**: plain JSON, a list of steps plus slider values. The
   same recipe makes the preview, the zoom (3600 px) and the full-size export,
   which is how they match. Recipes are saved as presets and written next to
@@ -934,6 +980,18 @@ uv run pytest
 The tests never load the large models (and never touch your real settings:
 they use a folder of their own).
 
+The browser tests click the real app through in Chrome, on a separate test
+copy with real event photos (cold, then quit and reopen, then warm), with
+every speed and memory bar written in as a pass or fail line (about 10
+minutes for 40 photos):
+
+```bash
+uv run --with playwright --with psutil --with requests python tests/ui/run.py --photos "<folder>" --count 38 --out <results folder>
+```
+
+The bars and every measured number are in
+[docs/plans/instant-looks.md](docs/plans/instant-looks.md).
+
 ```text
 photo_crops/          photo-crops (see its README): pose and outline models (YOLO), crops
 photo_presets/
@@ -946,6 +1004,7 @@ photo_presets/
     share.py          AirDrop, Messages and Mail, the Mac's own share windows
   engine.py           Random and preset modes, previews, full-size export
   scene.py            Faces, ball, feet, outlines and the player cut-out (BiRefNet, SAM 2.1); crop first
+  apple_person.py     Apple's person outline (macOS Vision) that trims the cut-out's hair
   pipeline.py         Running recipes, the step registry, plugins, keeping faces clean, the adjustments
   effects.py          The built-in steps
   blend.py            Blend modes

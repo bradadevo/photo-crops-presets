@@ -1,6 +1,6 @@
 # Instant Looks: hover a look, see it now, on one photo or the whole event
 
-Status: in progress (started 2026-11-23). Each phase must pass its bar, measured on the
+Status: phases 0-4 built and in the app (2026-11-23); two bars still open (see the last two sections). Each phase must pass its bar, measured on the
 MacBook Pro M5 with real event photos, before the next starts. If a bar can't be met, the
 feature is dropped, not shipped "almost".
 

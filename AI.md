@@ -43,7 +43,9 @@ gives advice; it never draws on your photos.
 | What you see in the app | The model | What it does |
 |---|---|---|
 | Looks know where the players, heads, feet and ball are | **YOLO** (pose and outline versions) | Finds every person and their body points (head, shoulders, feet) and outlines them. Used for framing, keeping effects off faces, and putting smoke at a player's feet. |
-| Player-only and background-only settings, Color Pop, background blur, posters with the player in front of the title | **BiRefNet** | Makes the precise cut-out of the players, down to hair and fingers. It separates "the player" from "everything behind them". |
+| Player-only and background-only settings, Color Pop, background blur, posters with the player in front of the title | **BiRefNet** | Makes the precise cut-out of the players, down to hair and fingers. It separates "the player" from "everything behind them". A lighter version traces each head again close up, for the hair. Runs in the background as soon as a photo is added. |
+| No halo around the players' hair | **Apple Vision person outline** (built into your Mac, macOS 14 or later) | Apple's own outline of the people, tighter around the head. It only trims the hair from the cut-out above; it never decides who is in the picture. Chosen over Apple's cut-out alone, which was 10-40 times faster but missed players and pulled in the referee. |
+| Pointing at a look with all photos showing | **u2net_human_seg** | A small, quick people cut-out (0.3 s a photo) used only for those small event previews. Make and the big picture always use BiRefNet. |
 | Fix the cut-out, Adjust a part, Remove (click) | **SAM 2.1** (Meta's "Segment Anything") | You click something and it traces exactly that thing: a teammate, the sky, a cone, a face. |
 | Find a player | **YuNet** and **SFace** | YuNet finds faces; SFace turns each face into a kind of fingerprint, so the same child's face can be matched across hundreds of photos. Close calls are asked, never guessed. |
 | Jersey numbers read off shirts; no made-up text in drawings | **Apple Vision** (built into your Mac) | Reads text in photos. Also judges face quality (eyes open, in focus) for Culling. |
@@ -120,7 +122,7 @@ settings, they always give exactly the same result.
 | Folder | What's in it |
 |---|---|
 | `~/.cache/photo-crops` | YOLO, SAM 2.1, YuNet, SFace, LaMa (or reused from `~/.cache/ai-versions`), both Real-ESRGAN models |
-| `~/.rembg` | BiRefNet (the cut-out) |
+| `~/.rembg` | BiRefNet and its lighter version (the cut-out), u2net_human_seg (event previews) |
 | `~/.cache/huggingface` | Stable Diffusion and ControlNet (about 5 GB, only if you use the illustration looks) |
 
 Each downloads the first time it's needed. Deleting one is safe: the app
