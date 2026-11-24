@@ -39,8 +39,9 @@ example picture.
 
 ## Who it must run on (updated 2026-11-23)
 
-**Any Apple Silicon Mac, M2 or newer; 8 GB supported, 16 GB recommended** (like Lightroom Classic).
-Every bar below is budgeted for the base M2 with 8 GB:
+**Any Apple Silicon Mac, M2 or newer, with 16 GB or more.** 8 GB Macs are not supported for now
+(decided 2026-11-23): normal editing peaks at 9.5–11 GB when it cuts out a new photo.
+Every bar below is budgeted for the base M2 with 16 GB:
 
 - **Time:** background work runs on 2 cores, so per-core speed is what counts; an M5 core is about
   1.7x an M2 core. M5 timings are multiplied by 2 for the M2 estimate, and a bar only passes if that
@@ -53,8 +54,8 @@ Every bar below is budgeted for the base M2 with 8 GB:
 
 **Using newer Macs fully (machine levels).** The app is not held back to the oldest Mac it supports.
 At start it reads the Mac's chip, memory and core count and picks a level:
-- *Base (M2, 8 GB):* everything works, kept light. This level must pass every bar.
-- *High (newer chips, 16 GB or more):* heavier versions switch on by themselves (for example the
+- *Base (M2, 16 GB):* everything works, kept light. This level must pass every bar.
+- *High (newer chips, more memory):* heavier versions switch on by themselves (for example the
   full-quality cut-out in places where the base level uses a lighter one, more cores for background
   work).
 - A feature that needs something only newer chips have is checked for at start and switched off
@@ -86,8 +87,7 @@ At start it reads the Mac's chip, memory and core count and picks a level:
   After a restart: everything back from disk in 2 s, nothing made again.
 - **Bigger finding, outside Instant Looks:** the app's normal editing already peaks at 9.5 GB the
   first time it cuts out a photo (BiRefNet on the main processor). An 8 GB Mac would swap heavily
-  on every new photo. That is the real blocker for "M2 with 8 GB", and the first job for machine
-  levels (a lighter cut-out on 8 GB Macs). Needs a decision: it changes cut-out quality there.
+  on every new photo, so 8 GB Macs are not supported for now (decided 2026-11-23); 16 GB fits.
 - **Bugs found by the click tests and fixed:** the page counted looks named twice, so "all ready"
   never came; one failed look stopped "all ready" for ever; a failed status check stopped checking
   silently; thousands of kept previews would overflow the queue (it called itself per preview);
