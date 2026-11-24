@@ -19,3 +19,12 @@ def test_a_ball_far_off_to_the_side_is_not():
 
 def test_with_no_players_found_every_ball_counts():
     assert ball_in_play((0, 0, 10, 10), [])
+
+
+def test_a_ball_beside_a_player_far_behind_is_not_in_the_play():
+    # (DSC03406: the ball is at a background player's feet, the right size for them, 50 feet back)
+    from types import SimpleNamespace
+    near = SimpleNamespace(box=(385, 256, 920, 1868), height=1612)
+    far = SimpleNamespace(box=(989, 369, 1240, 1097), height=728)
+    assert not ball_in_play((1207, 872, 1308, 967), [near, far])
+    assert ball_in_play((1000, 1700, 1230, 1930), [near, far])  # the main player's own ball still is

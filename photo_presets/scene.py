@@ -189,7 +189,7 @@ class Prepared:
             if self._auto is None:
                 matte = None
                 if self.scene.subject_mask is not None:
-                    key = _matte_key(self.image, self.scene.subject_mask, self.scene.team)
+                    key = _matte_key(self.image, self.scene.subject_mask, self.scene.team, self.scene.balls)
                     matte = _kept_matte(key)  # made before (this photo, these players): no minute's wait
                     if matte is None:
                         with MODEL_LOCK:  # (one at a time; made in the background meanwhile: found on disk)
@@ -618,13 +618,15 @@ def _mattes_dir() -> Path:
     return base / "mattes"
 
 
-def _matte_key(image: Image.Image, subject: np.ndarray, team: bool) -> str:
-    """The same picture with the same players: a small copy of it, its size and the players' outline."""
+def _matte_key(image: Image.Image, subject: np.ndarray, team: bool, balls=()) -> str:
+    """The same picture with the same players: a small copy of it, its size, the players' outline and
+    the balls taken in with them (a ball left out later is a different cut-out)."""
     import hashlib
     small = np.asarray(image.convert("RGB").resize((96, 96)), np.uint8)
     outline = np.packbits(cv2.resize(subject.astype(np.uint8), (128, 128), interpolation=cv2.INTER_NEAREST) > 0)
     h = hashlib.sha1()
-    for part in (small.tobytes(), outline.tobytes(), repr((image.size, team, MATTE_VERSION)).encode()):
+    ball = tuple(tuple(round(v, 3) for v in b) for b in balls)
+    for part in (small.tobytes(), outline.tobytes(), repr((image.size, team, MATTE_VERSION) + ((ball,) if ball else ())).encode()):
         h.update(part)
     return h.hexdigest()[:20]
 
@@ -793,6 +795,7 @@ def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
 
 
 BALL_IN_PLAY = 0.08  # a ball's size as a share of the nearest player's height, at least
+BALL_DEPTH = 0.7  # players this share of the tallest player in the play's height or more are at their distance
 BALL_REACH = 1.5  # how far a ball in the play can be from the nearest player, in their heights
 
 
@@ -804,6 +807,10 @@ def ball_in_play(ball: Box, in_play: list[Person]) -> bool:
     are left out of the cut-out, the framing and the effects placed at the ball."""
     if not in_play:
         return True
+    # only the players at the main players' distance count: a ball beside a player far behind them is
+    # the right size for that player, but it is 50 feet back, not in this play
+    tallest = max(p.height for p in in_play)
+    in_play = [p for p in in_play if p.height >= BALL_DEPTH * tallest]
     bx, by = (ball[0] + ball[2]) / 2, (ball[1] + ball[3]) / 2
     def gap(p):
         return (max(p.box[0] - bx, 0, bx - p.box[2]) ** 2 + max(p.box[1] - by, 0, by - p.box[3]) ** 2) ** 0.5
