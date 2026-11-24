@@ -425,6 +425,22 @@ def new_background(a, p, ctx):
                                float(p.get("match", 0.35)), float(p.get("wrap", 0.5)))
 
 
+@op("field_set", cutout=True, label="Field set", look="Kneel Line")
+def field_set(a, p, ctx):
+    """The player on a field set (fields.py): the photo's own grass under their feet, relit as a pool
+    of light, field lines in the photo's perspective, everyone else taken off the field, and a dark
+    stadium or sky behind it."""
+    from photo_presets import fields
+    if ctx.alpha is None:
+        ctx.notes.append("Field set skipped: no player cut-out here")
+        return a
+    h, w = a.shape[:2]
+    style = fields.LOOKS.get(p.get("look"), fields.LOOKS["Kneel Line"])[1]
+    hz = _horizon(ctx, h, w)
+    clean = fields.cleaned_kept(a, ctx.alpha, ctx.scene, hz)  # (made once a photo and size: shared by every field look)
+    return fields.place(a, ctx.alpha, ctx.scene, style, ctx.seed, hz, clean)
+
+
 # Studio smoke and light ---------------------------------------------------------
 
 # Grounding: where the field ends, and the players' shadows on it -----------------

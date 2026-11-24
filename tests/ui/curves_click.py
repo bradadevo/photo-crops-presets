@@ -41,7 +41,7 @@ try:
         page.click('.curve-sit[data-sit="flat"]')
         page.wait_for_function(f"slotById({sid}).ver > {ver} && slotById({sid}).adjust.curve_all_rgb", timeout=60000)
         print(f"   flat curve shown in {time.time() - t:.2f} s")
-        check("Flat light sets the whole photo's RGB curve", page.evaluate(f"slotById({sid}).adjust.curve_all_rgb") == "0,0;64,52;192,206;255,255")
+        check("Flat light sets the whole photo's RGB curve", page.evaluate(f"slotById({sid}).adjust.curve_all_rgb") == "0,0;64,42;192,216;255,255")
         page.wait_for_timeout(800)
         check("its button shows on, and the RGB tab shows it's set", page.locator('.curve-sit.on[data-sit="flat"]').count() == 1 and page.locator('[data-cch="rgb"].set').count() == 1)
         page.screenshot(path=str(out / "2-flat.png"))

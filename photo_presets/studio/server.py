@@ -74,7 +74,7 @@ AHEAD = 9  # looks made ahead for hovering: after everything else
 
 # the look groups, short, for the picker's filters
 SHORT_GROUPS = {
-    presets.GRADES: "Pro grades", presets.BOLD: "Bold", presets.EDITORIAL: "Editorial", presets.STUDIO: "Studio", presets.OTHER: "Other", presets.MINE: "Mine",
+    presets.GRADES: "Pro grades", presets.BOLD: "Bold", presets.EDITORIAL: "Editorial", presets.STUDIO: "Studio", presets.FIELD: "Field", presets.OTHER: "Other", presets.MINE: "Mine",
 }
 
 

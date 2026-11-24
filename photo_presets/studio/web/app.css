@@ -162,8 +162,9 @@ h2 { margin: 0; font-size: 12px; font-weight: 650; text-transform: uppercase; le
 .tryon { position: absolute; inset: 0; z-index: 3; }
 .tryon.ready { background: #000; }
 .tryon img { transform: none; }
-.tryon .tag { top: 10px; left: 10px; display: flex; align-items: center; gap: 7px; z-index: 1; }
-.tryon .tag .spin { width: 11px; height: 11px; }
+/* one line of text that wraps as text (not the name and the rest side by side in two columns) */
+.tryon .tag { top: 10px; left: 10px; display: block; max-width: calc(100% - 20px); line-height: 1.35; z-index: 1; }
+.tryon .tag .spin { display: inline-block; vertical-align: -1px; margin-right: 7px; width: 11px; height: 11px; }
 /* side by side */
 .viewer.survey-mode { padding: 16px 18px 64px; }
 .survey { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr));

@@ -281,7 +281,10 @@ Sliders:
 
 And for the photo:
 - **Fix the player cut-out** (**Cut-out**): the picture shows in blue what the
-  app treats as the player. With **Add**, click a teammate, the ball or a flag
+  app treats as the player. The ball joins them on its own only when it is in
+  the play: about the right size for a ball at the player's own distance, near
+  them, and about as sharp as they are (a blurred ball in the background, or one
+  at the feet of a player far behind, is left out). With **Add**, click a teammate, the ball or a flag
   to make it part of the player; with **Take out**, click a pole or a sign.
   Each click is traced with SAM 2.1 (Meta's free Segment Anything model, run
   on this Mac; about 1 s, 160 MB downloaded once to `~/.cache/photo-crops`).
@@ -701,6 +704,30 @@ uv run vsdigitalpro-batch ~/Movies/"Game day" --all-presets
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
 
+**Field sets** (the Field group: the player on a field at night, dusk or golden hour, for
+soccer and football). Each keeps the photo's own grass under the player's feet, with its real
+shadows, relit as a pool of light that falls off into the dark. Everyone else and anything lying on
+the field (a goal's wheels, bags) is taken off it first with LaMa. Field lines are drawn on that
+grass in the photo's own perspective, worked out from where the field ends and how tall the player
+is in the frame; on a tight long-lens shot they move in so they stay in the picture. Everything
+behind the field becomes sky and a dark, out-of-focus stadium shape (press box, stands, a wall or
+a tree line). There are no floodlights or poles. The empty field is made once a photo (the first
+field look takes LaMa's few seconds, the rest show in well under a second).
+
+| Preset | What it does |
+|---|---|
+| Kneel Line | Blue-hour sky over a dark press box, a white line running out from under the player |
+| Goal Line Night | Night: a goal line across the turf just behind the player, the stands lost in the dark |
+| Center Circle | Soccer's halfway line and center circle around the player, stands at dusk |
+| Box Corner | The corner of the penalty box behind the player, a press box against a sunset |
+| Hash Marks | Football: a yard line under the player with the hash marks, a press box at night |
+| End Zone | Football: the goal line in front, the end line behind, steel-gray night |
+| Corner Arc | Soccer's corner arc around the player, the touchline meeting the goal line, trees at twilight |
+| Sideline Haze | Night with haze in the air: the stands fade into it, a line running out from the player |
+| Golden Field | Golden hour: a warm sky low behind a tree line, the pitch in late sun |
+| Blackout | Pure black around the player: only the turf at their feet and one line are lit |
+| Midfield Night | Night: the halfway line across under the player's feet, the center spot, stands above |
+
 The black-and-white looks lean on blue in their mix (like a red filter on
 film) so sunlit grass stays gray instead of going white.
 
@@ -1028,6 +1055,7 @@ photo_presets/
   grades.py           VS Digital Pro's own pro color grades, written as LUTs to luts_builtin/
   procedural.py       Generated textures
   backgrounds.py      Backgrounds made on this Mac (night stadium, smoke, storm, studio)
+  fields.py           Field sets: the photo's own grass relit, field lines in its perspective, a stadium behind
   assets.py           Finding, fetching and caching LUTs, textures and overlays
   curves.py           Tone curves: smooth point curves, RGB as brightness only, ready-made ones by situation
   edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling

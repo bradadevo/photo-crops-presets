@@ -249,6 +249,12 @@ STARTERS.update(ART_STARTERS)
 # The Background tool's backgrounds, as looks too (sharp: no blur), under Other
 from photo_presets import backgrounds as _backgrounds  # noqa: E402
 
+from photo_presets import fields as _fields
+STARTERS.update({look: {"protect_faces": True, "skin_protect": 0.8, "steps": [
+    {"op": "field_set", "look": look},
+    {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+    {"op": "vignette", "amount": 0.25}]} for look in _fields.LOOKS})
+
 BACKGROUND_LOOKS = {f"{n} Background": n for n in _backgrounds.NAMES}
 STARTERS.update({look: {"protect_faces": True, "steps": [{"op": "new_background", "bg": n}]}
                  for look, n in BACKGROUND_LOOKS.items()})
@@ -296,8 +302,9 @@ def delete(name: str) -> bool:
 # How the app lists the starters: in groups, each with a one-line description
 BOLD, EDITORIAL, STUDIO, MINE = "Bold and dramatic", "Clean editorial", "Studio, smoke and lights", "My presets"
 GRADES = "Pro color grades"
+FIELD = "Field sets"
 OTHER = "Other"
-GROUPS = [GRADES, BOLD, EDITORIAL, STUDIO, *ART_GROUPS, OTHER, MINE]
+GROUPS = [GRADES, BOLD, EDITORIAL, STUDIO, FIELD, *ART_GROUPS, OTHER, MINE]
 ABOUT: dict[str, tuple[str, str]] = {
     "Grit & Glory": (BOLD, "Gritty black and white with smoke at the feet and rough edges"),
     "Friday Night Lights": (BOLD, "A night-game color grade, a soft spotlight on the player and film grain"),
@@ -339,6 +346,7 @@ ABOUT: dict[str, tuple[str, str]] = {
 
 
 ABOUT.update(ART_ABOUT)
+ABOUT.update({look: (FIELD, about) for look, (about, _) in _fields.LOOKS.items()})
 ABOUT.update({look: (OTHER, f"New background: {_backgrounds.ABOUT[n][0].lower()}{_backgrounds.ABOUT[n][1:]}")
               for look, n in BACKGROUND_LOOKS.items()})
 

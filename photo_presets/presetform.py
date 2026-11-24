@@ -43,6 +43,7 @@ DEFAULTS = {
     "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0, "sm_ground": 0.7,
     "ns_on": False, "ns_keep": 0.15,
     "nb_on": False, "nb_bg": "Studio Grey", "nb_color": "#1f2a44", "nb_blur": 0.0,
+    "fs_on": False, "fs_look": "Kneel Line",
     "lights_on": False, "lights_count": 2, "lights_amount": 0.8,
     "st_on": False, "st_height": 0.7, "st_amount": 0.9, "st_color": "#fff3dc",
     "rain_on": False, "rain_amount": 0.5, "rain_angle": 12.0,
@@ -175,6 +176,8 @@ def to_recipe(v: dict) -> dict:
             s.append({"op": "texture", "asset": v[n], "blend": v[f"{n}_blend"], "opacity": v[f"{n}_opacity"]})
     if v["fog_on"]:
         s.append({"op": "fog", "density": v["fog_density"], "height": v["fog_height"], "color": v["fog_color"]})
+    if v["fs_on"]:  # a field set (fields.py)
+        s.append({"op": "field_set", "look": v["fs_look"]})
     if v["nb_on"]:  # a new background (the Background tool's, as a look)
         s.append({"op": "new_background", "bg": v["nb_bg"], "color": v["nb_color"], "blur": v["nb_blur"]})
     if v["ns_on"]:
@@ -297,6 +300,8 @@ def from_recipe(recipe: dict) -> dict:
                      sm_ground=g("ground", 0.7))
         elif op == "night_sky":
             v.update(ns_on=True, ns_keep=g("keep", 0.15))
+        elif op == "field_set":
+            v.update(fs_on=True, fs_look=g("look", "Kneel Line"))
         elif op == "new_background":
             v.update(nb_on=True, nb_bg=g("bg", "Studio Grey"), nb_color=g("color", "#1f2a44"), nb_blur=g("blur", 0.0))
         elif op == "stage_lights":
@@ -533,6 +538,11 @@ def components(ids: dict) -> dict:
                     slider("sm_size", 0.4, 2, "Size", info="Relative to the player's height.")
                     slider("sm_front", 0, 1, "Over the feet", info="How much floor smoke rolls in front of the feet.")
                     slider("sm_ground", 0, 1, "Shadow under feet", info="Grounds the players and goal posts so they don't float.")
+            check("fs_on", "Field set", "Puts the player on a field at night, dusk or golden hour: their own grass "
+                  "relit under their feet, soccer and football lines, and a dark stadium behind.")
+            with when("fs_on"):
+                from photo_presets import fields
+                drop("fs_look", list(fields.LOOKS), "Set")
             check("nb_on", "New background", "Puts the player in front of one of the backgrounds made here "
                   "(the same ones as the Background tool), sharp unless you add blur.")
             with when("nb_on"):

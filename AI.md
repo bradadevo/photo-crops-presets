@@ -56,6 +56,7 @@ gives advice; it never draws on your photos.
 | What you see in the app | The model | What it does |
 |---|---|---|
 | Remove (a bag, a pole, a parent on the sideline) | **LaMa** | Fills the hole with what would plausibly be behind it: grass, fence, sky. The app then matches the light and borrows real grass texture from right around it. |
+| Empty the field for the Field sets (everyone but the players, a goal's wheels) | **LaMa** | Once a photo and size; the ground behind the players is filled too, for their edges. |
 | The 20 illustration looks (anime, oil, comic, pencil, watercolor) | **Stable Diffusion 1.5 (DreamShaper 8) with ControlNet line art** | Redraws the players in a style, following the outlines of your actual photo, so the pose and shape stay true. |
 | Illustration looks at full size | **Real-ESRGAN, illustration version** | Enlarges the drawing 4 times with clean lines. |
 | Tight crops that stay sharp when exported | **Real-ESRGAN, photo version** | See the next section. |
