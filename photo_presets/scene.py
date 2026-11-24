@@ -796,6 +796,7 @@ def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
 
 BALL_IN_PLAY = 0.08  # a ball's size as a share of the nearest player's height, at least
 BALL_DEPTH = 0.7  # players this share of the tallest player in the play's height or more are at their distance
+BALL_SHARP = 0.6  # a ball softer than this (next to the players' sharpness) is out of focus: behind, not in the play
 BALL_REACH = 1.5  # how far a ball in the play can be from the nearest player, in their heights
 
 
@@ -820,6 +821,42 @@ def ball_in_play(ball: Box, in_play: list[Person]) -> bool:
     return size >= BALL_IN_PLAY * near.height and gap(near) <= BALL_REACH * near.height
 
 
+def _detail(gray: np.ndarray, box) -> float:
+    """How sharp a part of the photo is: its finest edges (the 90th percentile of the Laplacian)
+    against its contrast, so a dark or flat ball isn't taken for a soft one."""
+    h, w = gray.shape
+    x0, y0, x1, y1 = (int(round(v)) for v in box)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return 0.0
+    crop = gray[y0:y1, x0:x1].astype(np.float32)
+    lap = np.abs(cv2.Laplacian(crop, cv2.CV_32F, ksize=3))
+    lo, hi = np.percentile(crop, [5, 95])
+    return float(np.percentile(lap, 90) / max(hi - lo, 8.0))
+
+
+def ball_touching(ball: Box, in_play: list[Person]) -> bool:
+    """A ball at a player's foot or in their hands (a kicked ball can be blurred by its speed)."""
+    bx, by = (ball[0] + ball[2]) / 2, (ball[1] + ball[3]) / 2
+    for p in in_play:
+        gap = (max(p.box[0] - bx, 0, bx - p.box[2]) ** 2 + max(p.box[1] - by, 0, by - p.box[3]) ** 2) ** 0.5
+        if gap <= 0.05 * p.height and by >= p.box[1] + 0.6 * (p.box[3] - p.box[1]):
+            return True
+    return False
+
+
+def ball_sharpness(img: Image.Image, ball: Box, in_play: list[Person]) -> float:
+    """How sharp the ball is next to the players in the play (1: as sharp; a ball far behind them,
+    out of focus, is well under half)."""
+    if not in_play:
+        return 1.0
+    gray = np.asarray(img.convert("L"))
+    p = max(in_play, key=lambda q: q.height)
+    x0, y0, x1, y1 = p.box
+    body = (x0, y0, x1, y0 + (y1 - y0) * 0.55)  # (head and kit: where the focus is)
+    return _detail(gray, ball) / max(_detail(gray, body), 1e-3)
+
+
 def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing.Plan) -> Scene:
     w, h = img.size
     # The players in the play: everyone whose box is inside the crop's group (team photos: everyone big)
@@ -840,7 +877,8 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
     other_faces = [head(p) for p in others]
     other_hands = [(x / w, y / h, p.height * 0.065 / w) for p in others for x, y in p.hands]
     ball_list = [((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, (b[2] - b[0]) / 2 / w)
-                 for b in balls if ball_in_play(b, in_play)]
+                 for b in balls if ball_in_play(b, in_play) and (ball_touching(b, in_play)
+                                                                  or ball_sharpness(img, b, in_play) >= BALL_SHARP)]
     hands = [(x / w, y / h, p.height * 0.065 / w) for p in in_play for x, y in p.hands if p.height > 0.08 * h]
     subject = plan.subject
     feet = ((subject.box[0] + subject.box[2]) / 2 / w, subject.box[3] / h) if subject else None
