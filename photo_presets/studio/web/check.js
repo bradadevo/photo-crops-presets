@@ -1,4 +1,4 @@
-/* VS Digital Pro Studio: the Check tab. How a clip or photo was shot, what is holding it back, fixes for
+/* VS Digital Pro Studio: the Assessor tab (internally "check"). How a clip or photo was shot, what is holding it back, fixes for
    the file (a new copy; the original is never changed), what to change next time, files compared side
    by side, and the assessment exported. Loaded after app.js, whose helpers it uses. */
 "use strict";
@@ -47,7 +47,7 @@ function renderCheck() {
   const box = $("#check");
   if (!box.dataset.built) {
     box.dataset.built = "1";
-    box.innerHTML = `<aside class="ck-files"><div class="ck-head"><h2>Check <span class="count" id="ck-count"></span></h2>
+    box.innerHTML = `<aside class="ck-files"><div class="ck-head"><h2>Assessor <span class="count" id="ck-count"></span></h2>
         <button class="icon-btn" id="ck-help" title="What this is for, and the steps">${icon("info")}</button>
         <div class="menu-wrap"><button class="icon-btn" id="ck-add" title="Add clips or photos to check" aria-haspopup="menu">${icon("plus")}</button>
           <div class="menu" id="ck-add-menu" role="menu" hidden><button role="menuitem" data-ck-add="files">Add clips or photos…<small>Videos, JPG, HEIC or RAW</small></button>
@@ -109,7 +109,7 @@ const CK_STEPS = [
 function ckGuideHtml(back) {
   return `<div class="ck-guide">
     ${back ? `<button class="btn ghost ck-back" id="ck-guide-back">${icon("left")} Back to ${esc(ck.detail?.name || "the file")}</button>` : ""}
-    <div class="ck-intro">${icon("target")}<div><h1>Shot check</h1><p>Tells you how a clip or photo was shot, what's holding it back, fixes the file, and what to change next time. No AI and nothing leaves your Mac: it reads your camera's own settings from the file and measures the picture.</p></div></div>
+    <div class="ck-intro">${icon("target")}<div><h1>Assessor</h1><p>Tells you how a clip or photo was shot, what's holding it back, fixes the file, and what to change next time. No AI and nothing leaves your Mac: it reads your camera's own settings from the file and measures the picture.</p></div></div>
     ${back ? "" : `<div class="ck-guide-go"><button class="btn primary" data-ck-go="files">${icon("plus")} Add clips or photos…</button><button class="btn ghost" data-ck-go="folder">Add a folder…</button><span class="faint">or drop them on this window</span></div>`}
     <h2>Use it when you want to…</h2>
     <div class="ck-uses">${CK_USES.map(([ic, t, s]) => `<div class="ck-use">${icon(ic)}<b>${t}</b><span>${s}</span></div>`).join("")}</div>
@@ -120,7 +120,7 @@ function ckGuideHtml(back) {
       <li>Fixes help a file; they can't rescue missed focus or a too-slow shutter. The notes on each fix say what it can't do.</li>
       <li>Steadying smooths camera shake. When players fill the frame it may not help: the app checks its own result and tells you.</li>
       <li>Sharpness and grain numbers compare best between files from the same camera.</li>
-      <li>Taking a file out of the list never deletes it.</li>
+      <li>Taking a file out of the list never deletes it. A file dropped on the window is copied into the app; once you take that one out, the app's copy goes to the Trash (your original stays where it was).</li>
     </ul></div>`;
 }
 function ckShowGuide(main, back) {
@@ -137,6 +137,7 @@ function ckStatus(f) {
   if (f.state === "now") return `<span class="spin sm"></span> Checking · ${say(f.left || 3)} left`;
   if (f.state === "failed") return `<span class="bad-t">Couldn't read it</span>`;
   if (f.job?.state === "now") return `<span class="spin sm"></span> Making the fixed copy · ${Math.round(f.job.pct * 100)}%`;
+  if (f.verdict) return `<span class="${f.level === "good" ? "good-t" : f.level === "fix" ? "fix-t" : "warn-t"}">${esc(f.verdict)}</span>`;
   return f.problems ? `<span class="warn-t">${plural(f.problems, "thing")} to improve</span>` : `<span class="good-t">Looks good</span>`;
 }
 function renderCkFiles() {
@@ -263,7 +264,11 @@ function renderCkMain() {
   }
   const isVid = d.kind === "video";
   const problems = d.findings.filter((x) => !/^(No problems|Focus:|Focus mode|The sharpest detail)/.test(x) && !/fps: smooth motion|holds up well/.test(x));
-  const info = d.findings.filter((x) => !problems.includes(x));
+  let info = d.findings.filter((x) => !problems.includes(x));
+  if (isVid && d.moments.length) {  // (never "no problems" above a timeline of problem moments)
+    info = info.filter((x) => !x.startsWith("No problems"));
+    problems.push(`${plural(d.moments.length, "moment")} to look at: ${[...new Set(d.moments.map((m) => m.label.toLowerCase()))].join(", ")} (on the timeline above, and below).`);
+  }
   main.innerHTML = `<header class="ck-title"><div><h1>${esc(d.name)}</h1><p>${esc(d.summary)}</p></div>
       <div class="ck-acts"><button class="btn ghost" id="ck-open" title="Open it in ${isVid ? "QuickTime" : "Preview"}">${icon("image")} Open</button>
         <button class="btn ghost" id="ck-reveal">${icon("folder")} Show in Finder</button>
@@ -272,10 +277,10 @@ function renderCkMain() {
     <div class="ck-viewer" id="ck-viewer"></div>
     ${isVid ? `<div class="ck-timeline" id="ck-timeline" title="Click anywhere to see that moment">${d.moments.map((m, i) => `<span class="mo" data-mo="${i}" style="left:${m.start / d.duration * 100}%;width:${Math.max(0.6, (m.end - m.start) / d.duration * 100)}%;background:${MOMENT_COLOR[m.kind]}" title="${esc(m.clock)} · ${esc(m.label)}"></span>`).join("")}<span class="head" id="ck-head" style="left:${ck.t / d.duration * 100}%"></span></div>
       <div class="ck-legend">${[...new Set(d.moments.map((m) => m.kind))].map((k) => `<span><i style="background:${MOMENT_COLOR[k]}"></i>${esc(d.moments.find((m) => m.kind === k).label)}</span>`).join("")}${d.moments.length ? "" : `<span class="faint">No problem moments found</span>`}</div>` : ""}
-    <section class="ck-card"><h3><span class="n">2</span>${problems.length ? "What's holding it back" : "How it looks"}</h3>
+    <section class="ck-card"><h3>${problems.length ? "What's holding it back" : "How it looks"}</h3>
       <ul class="ck-find">${problems.map((x) => `<li class="warn">${esc(x)}</li>`).join("")}${(problems.length || info.some((x) => x.startsWith("No problems")) ? [] : ["No problems found."]).map((x) => `<li class="ok">${esc(x)}</li>`).join("")}${info.map((x) => `<li class="${x.startsWith("No problems") ? "ok" : "info"}">${esc(x)}</li>`).join("")}</ul>
       ${isVid && d.moments.length ? `<h4>When it happens <small class="faint">click one to see it</small></h4><div class="ck-moments">${d.moments.map((m, i) => `<button class="ck-mo${ck.moment === i ? " on" : ""}" data-mo="${i}"><i style="background:${MOMENT_COLOR[m.kind]}"></i><b>${esc(m.clock)}</b><span><b>${esc(m.label)}</b> ${esc(m.detail)}</span></button>`).join("")}</div>` : ""}</section>
-    <section class="ck-card"><h3><span class="n">4</span>Next time you shoot</h3>
+    <section class="ck-card"><h3>Next time you shoot</h3>
       ${d.advice.length ? `<table class="ck-table"><thead><tr><th>Setting</th><th>Change to</th><th>Why</th></tr></thead><tbody>${d.advice.map(([a, b, c]) => `<tr><td><b>${esc(a)}</b></td><td>${esc(b)}</td><td class="muted">${esc(c)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Your settings were right for this; nothing to change.</p>`}
       ${d.habits.length ? `<h4>Habits that help</h4><ol class="ck-habits">${d.habits.map((h) => `<li>${esc(h)}</li>`).join("")}</ol>` : ""}</section>
     <section class="ck-card"><h3>How it was shot</h3><div class="ck-grid2">
@@ -289,7 +294,7 @@ function renderCkMain() {
     const r = await api(`/api/check/file/${d.id}`, undefined, { method: "DELETE" });
     ck.detail = null; ck.picked.delete(d.id);
     await ckRefresh(); renderCkFiles(); if (ck.sel) ckLoad(ck.sel); else { renderCkMain(); renderCkSide(); }
-    toast(`Took ${d.name} out of the list`, { small: "The file itself is untouched", action: { label: "Undo", run: async (ev) => {
+    toast(`Took ${d.name} out of the list`, { small: r.dropped ? "This was the app's own copy of a file you dropped: it goes to the Trash when the app next starts. Your original is untouched" : "The file itself is untouched", action: { label: "Undo", run: async (ev) => {
       ev.target.closest(".toast")?.remove(); const back = await api("/api/check/restore", { entry: r.entry }); await ckRefresh(); ckLoad(back.id); } } });
   };
   main.querySelectorAll("[data-mo]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); ckMoment(+b.dataset.mo); });
@@ -351,7 +356,7 @@ function renderCkSide() {
   if (!side) return;
   if (ck.view !== "file" || !d || d.state !== "done" || ck.guide) { side.innerHTML = ""; return; }
   const isVid = d.kind === "video";
-  side.innerHTML = `<h3><span class="n">3</span>Fix this file <small class="faint">optional</small></h3><p class="faint">Turn on what you want, drag the line on the picture to compare, then make the copy. It goes next to the original, which is never changed.</p>
+  side.innerHTML = `<h3>Fix this file <small class="faint">optional</small></h3><p class="faint">Turn on what you want, drag the line on the picture to compare, then make the copy. It goes next to the original, which is never changed.</p>
     <div class="ck-fixes">${d.fixes.map((f) => `<div class="ck-fix${f.on ? " on" : ""}" data-fx="${f.id}">
       <div class="top"><label class="switch"><input type="checkbox" data-fx-on ${f.on ? "checked" : ""}><span></span></label><b>${esc(f.label)}</b><output>${fxValue(f)}</output></div>
       <input type="range" min="${f.lo}" max="${f.hi}" step="${f.step}" value="${f.value}" data-fx-v ${f.on ? "" : 'class="dim"'}>
@@ -378,7 +383,8 @@ function renderCkSide() {
     const f = d.fixes.find((x) => x.id === row.dataset.fx);
     const r = row.querySelector("[data-fx-v]"), sw = row.querySelector("[data-fx-on]");
     r.oninput = () => { f.value = +r.value; if (!f.on) { f.on = true; sw.checked = true; row.classList.add("on"); r.classList.remove("dim"); } row.querySelector("output").textContent = fxValue(f); changed(); };
-    r.ondblclick = () => { const s = (d.suggestedValues || {})[f.id]; if (s != null) { r.value = f.value = s; r.oninput(); } };
+    r.title = "Double-click: back to the suggested value";
+    r.ondblclick = () => { const s = f.suggested_value; if (s != null) { r.value = f.value = s; r.oninput(); } };
     sw.onchange = () => { f.on = sw.checked; if (f.on && !f.value) f.value = f.id === "exposure" ? 0.3 : 0.5; ck.sideSig = ""; renderCkSide(); changed(true); };
   });
   $("#ck-suggested").onclick = async () => {

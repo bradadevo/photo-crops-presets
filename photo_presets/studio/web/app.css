@@ -1708,3 +1708,4 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
 
 /* a dialog open: notes move to the top, so they never sit over its buttons */
 body:has(#modal-root .scrim) #toasts { top: 16px; bottom: auto; }
+.fix-t { color: var(--accent); }

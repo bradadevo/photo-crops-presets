@@ -57,6 +57,10 @@ class Files:
                 if Path(e["path"]).exists():
                     self._put(e["path"], e.get("id"), e.get("fixes"), e.get("fixed"))
             threading.Thread(target=self._work, daemon=True).start()
+        try:
+            clear_leftovers()
+        except Exception as x:  # (never stops the tab from opening)
+            print(f"check: leftovers: {type(x).__name__}: {x}", flush=True)
 
     def save(self):
         with self.lock:
@@ -189,6 +193,9 @@ def _row(e: dict) -> dict:
         problems = [f for f in r.advice.findings if not f.startswith(("No problems", "Focus:", "Focus mode", "The sharpest detail"))
                     and "fps: smooth motion" not in f and "holds up well" not in f]
         out.update(problems=len(problems), summary=summary_line(r), fixes_on=sum(1 for v in _settings(e).values() if v.get("on")))
+        x = _rec_input(e)  # (the list says what "In short" says: one verdict, never two)
+        rec = recommend.for_file(x["findings"], x["fixes_on"], x["settings"], x["habits"])
+        out.update(level=rec["level"], verdict=rec["verdict"])
     if e.get("job"):
         out["job"] = {k: v for k, v in e["job"].items() if k != "thread"}
     return out
@@ -215,7 +222,7 @@ def detail(fid: int):
         findings=r.advice.findings, advice=[list(s) for s in r.advice.settings], habits=r.advice.habits,
         camera=[list(x) for x in analyze.settings_rows(r)], measured=[list(x) for x in analyze.measurement_rows(r)],
         moments=[{**asdict(m), "clock": moments.clock(m.start)} for m in e.get("moments", [])],
-        fixes=[{**f, **settings.get(f["id"], {})} for f in e.get("suggested", [])],
+        fixes=[{**f, **settings.get(f["id"], {}), "suggested_value": f["value"]} for f in e.get("suggested", [])],
         width=r.info.width, height=r.info.height, fixed=e.get("fixed", []),
         raw=Path(e["path"]).suffix.lower() in still.RAW_EXTENSIONS)
     if r.kind == "video":
@@ -263,7 +270,9 @@ def remove(fid: int):
     with F.lock:
         F.items.pop(fid, None)
     F.save()
-    return {"entry": {"id": fid, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", [])}}
+    if _dropped(e["path"]):  # the app's own copy of a dropped file: to the Trash when the app next starts (Undo works till then)
+        _leftovers(add=e["path"])
+    return {"entry": {"id": fid, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", [])}, "dropped": _dropped(e["path"])}
 
 
 @router.post("/api/check/restore")
@@ -272,11 +281,46 @@ async def restore(req: Request):
     if not entry.get("path") or not Path(entry["path"]).exists():
         raise HTTPException(404, "That file is no longer there")
     F.load()
+    _leftovers(drop=entry["path"])
     with F.lock:
         fid = F._put(entry["path"], entry.get("id") if entry.get("id") not in F.items else None,
                      entry.get("fixes"), entry.get("fixed"))
     F.save()
     return {"id": fid}
+
+
+def _dropped(path: str) -> bool:
+    """A copy the app made of a file dropped on the page (the original stays wherever it was)."""
+    try:
+        return Path(path).resolve().is_relative_to(ADDED.resolve())
+    except OSError:
+        return False
+
+
+LEFTOVERS = HOME / "check-leftovers.json"
+
+
+def _leftovers(add: str | None = None, drop: str | None = None) -> list[str]:
+    """The app's copies of dropped files taken out of the list: moved to the Trash when the app next starts."""
+    try:
+        have = json.loads(LEFTOVERS.read_text())
+    except (OSError, ValueError):
+        have = []
+    have = [p for p in have if p != drop] + ([add] if add and add not in have else [])
+    HOME.mkdir(parents=True, exist_ok=True)
+    LEFTOVERS.write_text(json.dumps(have))
+    return have
+
+
+def clear_leftovers():
+    """At start: the app's own copies of dropped files that were taken out of the list go to the Trash."""
+    from photo_presets.cull import files as cull_files
+    gone = [p for p in _leftovers() if _dropped(p) and Path(p).exists()]
+    in_list = {e["path"] for e in F.items.values()}
+    gone = [p for p in gone if p not in in_list]
+    if gone and not _STATE:
+        cull_files.to_trash(gone)
+    LEFTOVERS.write_text("[]")
 
 
 # Adding files -------------------------------------------------------------------------------------
@@ -306,7 +350,10 @@ async def upload(files: list[UploadFile] = File(...)):
     folder.mkdir(parents=True, exist_ok=True)
     paths = []
     for f in files:
-        dest = folder / Path(f.filename or "file").name
+        name = Path(f.filename or "file").name
+        dest, n = folder / name, 2
+        while dest.exists():  # (two dropped files with one name, from two folders: both kept)
+            dest, n = folder / f"{Path(name).stem} ({n}){Path(name).suffix}", n + 1
         with open(dest, "wb") as out:
             while chunk := await f.read(8 << 20):
                 out.write(chunk)
@@ -531,7 +578,11 @@ async def compare(req: Request):
     for e in es[1:]:
         r = e["result"]
         if r.kind == ref.kind:
-            notes.append({"title": f"{r.name} vs {ref.name}", "notes": analyze.pair_differences(r, ref)})
+            same = [] if Path(r.path).stem != Path(ref.path).stem or \
+                (Path(r.path).suffix.lower() in still.RAW_EXTENSIONS) == (Path(ref.path).suffix.lower() in still.RAW_EXTENSIONS) else [
+                "The same photo: one is the camera's JPEG, the other its RAW. The camera sharpens and brightens its JPEG, "
+                "and the RAW is measured as it comes, so the RAW scores softer: not a real difference in the shot."]
+            notes.append({"title": f"{r.name} vs {ref.name}", "notes": same + analyze.pair_differences(r, ref)})
     files = [{"id": e["id"], "name": Path(e["path"]).name, "kind": e["kind"], "summary": summary_line(e["result"]),
               "problems": _row(e).get("problems", 0)} for e in es]
     return {"files": files, "groups": groups, "notes": notes}
@@ -554,7 +605,9 @@ async def export(req: Request):
         folder = FALLBACK_OUT
         folder.mkdir(parents=True, exist_ok=True)
     stem = Path(es[0]["path"]).stem + (f" and {len(es) - 1} more" if len(es) > 1 else "")
-    name = f"{stem} - {time.strftime('%Y-%m-%d %H%M')}"
+    name, n = f"{stem} - {time.strftime('%Y-%m-%d %H%M')}", 2
+    while any((folder / f"{name}{x}").exists() for x in (".docx", ".csv")):  # (a second report that minute: its own file)
+        name, n = f"{stem} - {time.strftime('%Y-%m-%d %H%M')} ({n})", n + 1
     results = [e["result"] for e in es]
     together = recommend.across([_rec_input(e) for e in es])
     extras = {}

@@ -394,13 +394,16 @@ width), and **Words and banners size** makes them all smaller or bigger.
 Exporting a poster in other sizes lays it out again for each size's shape
 (nothing is cropped off), and export has a **Wide 16:9** size too.
 
-**Check tab** (next to Looks and Reel, or Tools → Shot check): how a video or
+**Assessor tab** (next to Looks, Reel and Culling, or Tools → Assessor): how a video or
 photo was shot, what is holding it back, how to fix the file and what to change
 next time. No AI: the camera's own settings in the file, measurements of the
 picture, and plain rules.
 - **Add** clips and photos with **+** (they stay where they are) or drop them on
   the window. Videos take about a third of their length to check; photos a
-  second or two. Results are kept, so a file is checked once.
+  second or two. Results are kept, so a file is checked once. A dropped file is
+  copied into the app (two with one name are both kept); taking that one out of
+  the list sends the app's copy to the Trash when the app next starts (your
+  original is never touched). The list shows the same verdict as **In short**.
 - **In short** at the top of each file: a verdict (ready to use, good with a
   quick fix, or needs attention) and its few most useful recommendations in
   order: fix now, change next time, one habit. **Recommendations** (under the
@@ -418,13 +421,18 @@ picture, and plain rules.
   reduce grain, sharpen. Each is suggested when it is needed, says what it can't
   do, and shows live before/after (drag the line). **Make a fixed copy** saves a
   new file in a `Clip Analysis/Fixed` folder next to the original (never over
-  it); steadying checks its own result and says plainly if it didn't help.
+  it, nor over another fixed copy: a JPEG and its RAW fixed at once get
+  `DSC01234 fixed.jpg` and `DSC01234 fixed 2.jpg`); steadying checks its own
+  result and says plainly if it didn't help. Double-click a slider to go back to
+  its suggested value.
 - **Next time you shoot**: the settings to change and why, and habits.
 - **Compare**: tick two or more files. A table, the measurements that matter
   first, the best and weakest on each marked, **Only what differs**, plus plain
-  notes on what differs.
+  notes on what differs (a JPEG against its own RAW is called the same photo:
+  the RAW measures softer only because the camera sharpens its JPEG).
 - **Export**: a Word report (opens in Google Drive too) and/or a spreadsheet,
-  in a `Clip Analysis` folder next to the first file.
+  in a `Clip Analysis` folder next to the first file (a second report in the
+  same minute gets its own name).
 The same checks run from Terminal in the clip-analyzer project.
 
 **Edit anything on a poster, at any time** (Poster tool):
@@ -1015,7 +1023,7 @@ How the parts fit, in plain terms.
 - **Export** renders again from the full-size (16-bit when RAW) photo, in
   floating point to the end, then crops each size around the players, enlarges
   with AI when needed, and writes your credit into the file.
-- **Culling** (`cull/`), **Check** (`clipcheck/`) and **Find a player**
+- **Culling** (`cull/`), **Assessor** (`clipcheck/`) and **Find a player**
   (`players.py`) are separate parts sharing the same photo understanding.
 - **Where things live**: settings, presets, logos and posters in
   `~/.config/photo-crops-presets`; caches (looks made, edited photos, assets) in
@@ -1048,7 +1056,9 @@ The Culling tab has two more, on a scratch folder of photo copies (never your ow
 `tests/ui/delete_click.py <out folder>` checks the **Delete rejects** box (the folder, ORIGINAL or
 copy, undo), with a Trash of its own; `tests/ui/cull_walk.py <event copy> <out folder>` walks the
 whole tab at 1440 × 900 and 1280 × 800 and writes its timings. The findings and fixes are in
-[CULLING_AUDIT.md](CULLING_AUDIT.md).
+[CULLING_AUDIT.md](CULLING_AUDIT.md). The Assessor tab has `tests/ui/check_walk.py <folder of copies> <out folder>`
+(fixed copies, dropped files and reports never written over, one verdict, both window sizes);
+its findings are in [ASSESSOR_AUDIT.md](ASSESSOR_AUDIT.md).
 
 ```text
 photo_crops/          photo-crops (see its README): pose and outline models (YOLO), crops
@@ -1057,7 +1067,7 @@ photo_presets/
     server.py         Its local server: the session (photos, looks made, kept), the worker, the page's API
     web/              The page: index.html, app.css, app.js, edit.js, custom.js, background.js (no build step); fonts/
     cull.py           The Culling tab
-    check.py          The Check tab
+    check.py          The Assessor tab (named check in the code)
     macapp.py         vsdigitalpro-install-app: VS Digital Pro.app in ~/Applications
     share.py          AirDrop, Messages and Mail, the Mac's own share windows
   engine.py           Random and preset modes, previews, full-size export
@@ -1098,6 +1108,6 @@ photo_presets/
   app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
   cli.py              vsdigitalpro-batch
   cull/               Culling: measuring every photo, ranking, your taste, crops, export, optional Gemini
-  clipcheck/          Check: how a video or photo was shot, fixes, reports
+  clipcheck/          Assessor: how a video or photo was shot, fixes, reports
 tests/
 ```

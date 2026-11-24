@@ -131,3 +131,11 @@ def test_recommendations_in_short_and_across_files():
     assert s["worst"][0]["name"] == "c.mp4"
     assert s["headline"].startswith("1 of 3 ready to use") and "shutter speed (2 of 3)" in s["headline"]
     assert recommend.across([])["headline"] == "Nothing checked yet."
+
+
+def test_fixed_copies_made_at_once_never_share_a_name(tmp_path):
+    """A JPEG and its RAW (one name) fixed together: the name is taken the moment it is chosen."""
+    from photo_presets.clipcheck import fixes
+    a = fixes.fixed_path(str(tmp_path / "DSC1.JPG"), tmp_path / "fb", ".jpg")
+    b = fixes.fixed_path(str(tmp_path / "DSC1.ARW"), tmp_path / "fb", ".jpg")
+    assert a != b and a.exists() and b.exists() and b.name == "DSC1 fixed 2.jpg"

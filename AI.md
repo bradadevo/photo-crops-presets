@@ -115,7 +115,7 @@ photo, so the app has rules built in:
 A lot of the app is ordinary, predictable photo maths written by hand, not
 AI: the looks and color grades, the sliders (exposure, clarity, vibrance,
 color mixer and so on), the posters and fonts, the watercolor and pencil
-effects, export sizes and the Check tab. Given the same photo and the same
+effects, export sizes and the Assessor tab. Given the same photo and the same
 settings, they always give exactly the same result.
 
 ## Where the models live

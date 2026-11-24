@@ -467,12 +467,14 @@ def fixed_path(original: str, fallback: Path, ext: str) -> Path:
         folder = fallback
         folder.mkdir(parents=True, exist_ok=True)
     stem = Path(original).stem + " fixed"
-    dest = folder / f"{stem}{ext}"
-    n = 2
-    while dest.exists():
-        dest = folder / f"{stem} {n}{ext}"
-        n += 1
-    return dest
+    n = 1
+    while True:  # the name is taken here and now (an empty file), so two copies made at once (a JPEG and its
+        dest = folder / (f"{stem}{ext}" if n == 1 else f"{stem} {n}{ext}")  # RAW share a name) never get the same one
+        try:
+            with open(dest, "x"):
+                return dest
+        except FileExistsError:
+            n += 1
 
 
 def estimate_seconds(kind: str, settings: dict, info=None) -> float:

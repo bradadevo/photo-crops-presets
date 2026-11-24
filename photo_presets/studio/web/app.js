@@ -1723,7 +1723,7 @@ async function upload(files) {
   files = files.filter((f) => f.type.startsWith("image/") || PHOTO.test(f.name));
   const left = all.filter((f) => !files.includes(f));
   if (left.length) toast(left.length === 1 ? `“${left[0].name || "That file"}” isn't a photo, so it wasn't added` : `${left.length} files aren't photos, so they weren't added`,
-    { bad: true, small: "JPG, HEIC, PNG, TIFF and RAW work. Clips go in the Check tab." });
+    { bad: true, small: "JPG, HEIC, PNG, TIFF and RAW work. Clips go in the Assessor tab." });
   if (!files.length) return;
   const fd = new FormData();
   const now = new Date(), two = (n) => String(n).padStart(2, "0");
@@ -1765,7 +1765,7 @@ let dragDepth = 0;
 window.addEventListener("dragenter", (e) => {
   if (![...e.dataTransfer.types].includes("Files")) return;
   dragDepth++; $("#drop").hidden = false;
-  $("#drop b").textContent = st.mode === "check" ? "Drop to check these clips or photos" : "Drop to add photos";
+  $("#drop b").textContent = st.mode === "check" ? "Drop to assess these clips or photos" : "Drop to add photos";
 });
 window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").hidden = true; } });
 window.addEventListener("dragover", (e) => e.preventDefault());
@@ -1860,7 +1860,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.target.closest?.("input, textarea, select")) return;
-  if (undoKey && st.mode === "check") return;  // (the Check tab never changes your looks)
+  if (undoKey && st.mode === "check") return;  // (the Assessor tab never changes your looks)
   if (undoKey) { e.preventDefault(); (e.shiftKey ? redo : undo)(); return; }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && !String(window.getSelection())) {
     const cur = slotById(st.current);
