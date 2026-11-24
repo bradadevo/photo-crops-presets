@@ -1648,3 +1648,35 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
 /* A short window: the looks list always keeps room for a few looks (the panel scrolls instead of the list vanishing). */
 .looks-pane { overflow-y: auto; }
 .looks-pane > .look-grid { min-height: 220px; }
+
+/* The tone curve (Edit → Advanced) */
+.curve-ed { display: flex; flex-direction: column; gap: 8px; }
+.curve-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); margin-left: 4px; vertical-align: middle; }
+.curve-chs { display: flex; gap: 4px; }
+.curve-chs button { flex: 1; height: 24px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--muted);
+  font-size: 12px; font-weight: 600; position: relative; }
+.curve-chs button:hover { color: var(--text); }
+.curve-chs button.on { color: var(--text); border-color: var(--c); box-shadow: inset 0 -2px 0 var(--c); }
+.curve-chs button.set::after { content: ""; position: absolute; top: 3px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--c); }
+.curve-box { position: relative; aspect-ratio: 1; width: 100%; border-radius: 8px; background: #0b0d11; border: 1px solid var(--line); overflow: hidden; }
+.curve-hist { position: absolute; left: calc(6 / 267 * 100%); top: calc(6 / 267 * 100%); width: calc(255 / 267 * 100%); height: calc(255 / 267 * 100%); }
+.curve-svg { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; overflow: visible; }
+.curve-svg .curve-grid { stroke: rgba(255, 255, 255, .07); stroke-width: 1; vector-effect: non-scaling-stroke; fill: none; }
+.curve-svg .curve-diag { stroke: rgba(255, 255, 255, .16); stroke-width: 1; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; fill: none; }
+.curve-svg .curve-pt { fill: #0b0d11; stroke: var(--c); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: grab; }
+.curve-svg .curve-pt:hover { fill: var(--c); }
+.curve-svg.removing .curve-pt { opacity: .35; }
+.curve-read { position: absolute; right: 8px; top: 6px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted);
+  background: rgba(0, 0, 0, .6); padding: 1px 6px; border-radius: 6px; pointer-events: none; }
+.curve-help { margin: 0; font-size: 11px; color: var(--faint); line-height: 15px; }
+.curve-sits { display: flex; flex-direction: column; gap: 4px; }
+.curve-sit { position: relative; text-align: left; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 8px;
+  padding: 7px 10px; display: flex; flex-direction: column; gap: 2px; }
+.curve-sit:hover { border-color: var(--line-2); }
+.curve-sit.on { border-color: var(--accent-2); background: var(--accent-soft); }
+.curve-sit b { font-size: 12px; font-weight: 650; padding-right: 80px; }
+.curve-sit small { font-size: 11px; color: var(--muted); line-height: 14px; }
+.curve-sit .curve-where, .curve-sit .curve-sug { position: absolute; top: 6px; right: 8px; font-size: 10px; font-weight: 650; padding: 1px 6px; border-radius: 8px;
+  background: var(--panel-3); color: var(--muted); }
+.curve-sit .curve-sug { background: #2e9e5b; color: #fff; }
+.curve-sit .curve-where + .curve-sug:not([hidden]) { right: auto; left: auto; top: 6px; right: 80px; }

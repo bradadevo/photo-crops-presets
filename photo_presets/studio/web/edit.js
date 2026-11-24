@@ -178,6 +178,7 @@ const ADVANCED = [
     ["p_warmth", "Player warmth", -1, 1, 0.05, "", "warm"], ["p_sharpen", "Player sharpness", 0, 1, 0.05, "pct"], ["face_light", "Face light", 0, 1, 0.05, "pct"],
     ["rim_light", "Rim light", 0, 1, 0.05, "pct"], ["bg_blur", "Background blur", 0, 1, 0.05, "pct"], ["bg_saturation", "Background color", -1, 1, 0.05],
     ["bg_warmth", "Background warmth", -1, 1, 0.05, "", "warm"]]],
+  ["curve", "Tone curve", null],
   ["mixer", "Color mixer", null],
   ["grading", "Color grading", null],
   ["finish", "Finishing", [["noise", "Noise reduction", 0, 1, 0.05, "pct"], ["sharpen", "Sharpen", 0, 1, 0.05, "pct"], ["vignette", "Vignette", -1, 1, 0.05]]],
@@ -185,10 +186,14 @@ const ADVANCED = [
 const MIX_COLORS = [["red", "Red", "#e5484d"], ["orange", "Orange", "#f08c2e"], ["yellow", "Yellow", "#f2cf1d"], ["green", "Green", "#3fb950"],
   ["aqua", "Aqua", "#2fc6c6"], ["blue", "Blue", "#3b82f6"], ["purple", "Purple", "#8b5cf6"], ["magenta", "Magenta", "#e04fbf"]];
 const GRADES = [["sh", "Shadows"], ["mid", "Midtones"], ["hi", "Highlights"]];
-const ADJ_DEFAULT = { strength: 100, grade_sh_hue: 210, grade_mid_hue: 30, grade_hi_hue: 40 };
+const CURVE_PARTS = [["all", "Whole photo"], ["player", "Players"], ["bg", "Background"]];
+const CURVE_CHS = [["rgb", "RGB", "#e8ecf2"], ["r", "Red", "#ff5a5f"], ["g", "Green", "#3fd07a"], ["b", "Blue", "#4d8dff"]];
+const CURVE_KEYS = CURVE_PARTS.flatMap(([p]) => CURVE_CHS.map(([c]) => `curve_${p}_${c}`));
+const ADJ_DEFAULT = { strength: 100, grade_sh_hue: 210, grade_mid_hue: 30, grade_hi_hue: 40, ...Object.fromEntries(CURVE_KEYS.map((k) => [k, ""])) };
 /* Which Advanced sliders each fold holds (to show how many are in use) */
 const ADV_KEYS = {
-  punch: ADVANCED[0][2].map((r) => r[0]), player: ADVANCED[1][2].map((r) => r[0]), finish: ADVANCED[4][2].map((r) => r[0]),
+  punch: ADVANCED.find((g) => g[0] === "punch")[2].map((r) => r[0]), player: ADVANCED.find((g) => g[0] === "player")[2].map((r) => r[0]),
+  finish: ADVANCED.find((g) => g[0] === "finish")[2].map((r) => r[0]), curve: CURVE_KEYS,
   mixer: [...MIX_COLORS.flatMap(([c]) => ["h", "s", "l"].map((x) => `mix_${c}_${x}`)), "kit_pop"],
   grading: GRADES.map(([g]) => `grade_${g}`),
 };
@@ -361,6 +366,7 @@ function renderEdit(cur) {
         <button class="btn small" id="e-kit-pick" title="Click the kit on the picture to pick its color">${icon("pipette")} ${a.kit_color ? "Pick again" : "Pick the kit color"}</button>
         ${a.kit_color ? `<button class="icon-btn" id="e-kit-clear" title="Forget the kit color">${icon("x")}</button>` : ""}</div>
         ${a.kit_color ? sliderRow(["kit_pop", "Pop", 0, 1, 0.05, "pct"]) : ""}</div>`,
+    curve: curveEditor(a),
     grading: GRADES.map(([g, l]) => `<div class="grade-row">${sliderRow([`grade_${g}_hue`, `${l} color`, 0, 360, 1, "deg", "hue"])}${sliderRow([`grade_${g}`, l, 0, 1, 0.05, "pct"])}</div>`).join(""),
   };
   const advanced = group("advanced", "Advanced",
@@ -439,6 +445,7 @@ function bindEditPane(cur, pane) {
     afterSend(() => { const s = slotById(cur.id); pushHist({ type: "slot", sid: cur.id, before, after: snapshot(s) }); });
   };
   pane.querySelectorAll("[data-mix]").forEach((b) => b.onclick = () => { st.mixColor = b.dataset.mix; editSig = ""; renderEdit(slotById(cur.id)); });
+  bindCurve(cur, pane, vals);
   const setAdj = (change) => { const before = snapshot(slotById(cur.id)); change(vals); sendAdjust(cur.id, vals);
     afterSend(() => pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) })); };
   $("#e-kit-pick", pane)?.addEventListener("click", () => { const keep = { ...st.openGroups }; setTool("kitpick"); st.openGroups = keep; editSig = ""; render(); });
@@ -1688,3 +1695,166 @@ function sendUnsaved() {
 }
 window.addEventListener("pagehide", sendUnsaved);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendUnsaved(); });
+
+
+// The tone curve (pipeline.tone_curves, curves.py) ------------------------------------------------
+/* As in Lightroom: points on 0-255 joined by a smooth line that never overshoots. The RGB curve changes
+   brightness only (colors keep their hue); Red, Green and Blue grade color. Each can be on the whole
+   photo, the players or the background. Ready-made curves are named by the situation they're for. */
+st.curvePart = "all"; st.curveCh = "rgb";
+let curveSits = null;
+api("/api/curves", undefined, { quiet: true }).then((r) => { curveSits = r.situations; editSig = ""; const c = slotById(st.current); if (c && st.tab === "edit") renderEdit(c); }).catch(() => {});
+const curveParse = (t) => {
+  const pts = (t || "").split(";").map((p) => p.split(",").map(Number)).filter((p) => p.length === 2 && p.every(Number.isFinite));
+  return pts.length >= 2 ? pts.sort((a, b) => a[0] - b[0]) : [[0, 0], [255, 255]];
+};
+const curveText = (pts) => pts.every(([x, y]) => Math.round(x) === Math.round(y)) ? "" : pts.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`).join(";");  // (on the diagonal: no curve)
+const curveAt = (pts, x) => { const s = curveSamples(pts), k = Math.min(127, Math.floor(x / 255 * 128)), f = x / 255 * 128 - k; return s[k][1] + (s[k + 1][1] - s[k][1]) * f; };
+function curveSamples(pts) {  // (the same monotone curve as curves.py, for drawing)
+  const xs = pts.map((p) => p[0] / 255), ys = pts.map((p) => p[1] / 255), n = xs.length, out = [];
+  const d = xs.slice(1).map((x, i) => (ys[i + 1] - ys[i]) / Math.max(x - xs[i], 1e-9));
+  const m = ys.map((_, i) => i === 0 ? d[0] : i === n - 1 ? d[n - 2] : d[i - 1] * d[i] > 0 ? 2 / (1 / d[i - 1] + 1 / d[i]) : 0);
+  for (let k = 0; k <= 128; k++) {
+    const t = k / 128;
+    let y;
+    if (t <= xs[0]) y = ys[0]; else if (t >= xs[n - 1]) y = ys[n - 1];
+    else {
+      let i = 0; while (i < n - 2 && t > xs[i + 1]) i++;
+      const h = xs[i + 1] - xs[i], s = (t - xs[i]) / Math.max(h, 1e-9);
+      y = n === 2 ? ys[i] + (ys[i + 1] - ys[i]) * s
+        : (2 * s ** 3 - 3 * s ** 2 + 1) * ys[i] + (s ** 3 - 2 * s ** 2 + s) * h * m[i] + (-2 * s ** 3 + 3 * s ** 2) * ys[i + 1] + (s ** 3 - s ** 2) * h * m[i + 1];
+    }
+    out.push([t * 255, Math.min(1, Math.max(0, y)) * 255]);
+  }
+  return out;
+}
+function curveSvgInner(a) {
+  const key = `curve_${st.curvePart}_${st.curveCh}`, pts = curveParse(a[key]);
+  const col = CURVE_CHS.find((c) => c[0] === st.curveCh)[2];
+  const others = CURVE_CHS.filter(([c]) => c !== st.curveCh && a[`curve_${st.curvePart}_${c}`])
+    .map(([c, , oc]) => `<path d="M${curveSamples(curveParse(a[`curve_${st.curvePart}_${c}`])).map(([x, y]) => `${x.toFixed(1)},${(255 - y).toFixed(1)}`).join("L")}" stroke="${oc}" stroke-opacity=".35" stroke-width="1.2" fill="none"/>`).join("");
+  return `<path d="M64,0V255M128,0V255M192,0V255M0,64H255M0,128H255M0,192H255" class="curve-grid"/>
+    <path d="M0,255L255,0" class="curve-diag"/>${others}
+    <path d="M${curveSamples(pts).map(([x, y]) => `${x.toFixed(1)},${(255 - y).toFixed(1)}`).join("L")}" stroke="${col}" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"/>
+    ${pts.map(([x, y], i) => `<circle cx="${x}" cy="${255 - y}" r="5" data-pt="${i}" class="curve-pt" style="--c:${col}"/>`).join("")}`;
+}
+function curveEditor(a) {
+  const partUsed = (p) => CURVE_CHS.some(([c]) => a[`curve_${p}_${c}`]);
+  const sits = (curveSits || []).map((x) => {
+    const on = CURVE_CHS.every(([c]) => (a[`curve_${x.part}_${c}`] || "") === (x.curves[c] || ""));
+    const where = x.part === "player" ? "Players" : x.part === "bg" ? "Background" : "";
+    return `<button class="curve-sit${on ? " on" : ""}" data-sit="${x.key}" title="${esc(x.about)}${on ? " · click again to take it off" : ""}">
+      <b>${esc(x.name)}</b><small>${esc(x.about)}</small>${where ? `<span class="curve-where">${where}</span>` : ""}<span class="curve-sug" hidden>Suggested</span></button>`;
+  }).join("");
+  return `<div class="curve-ed">
+    <div class="seg full small curve-part" role="group" aria-label="Where the curve goes">${CURVE_PARTS.map(([p, l]) => `<button data-cpart="${p}" class="${p === st.curvePart ? "on" : ""}"
+      title="${p === "all" ? "The whole photo" : p === "player" ? "Only the players (their cut-out, soft edged)" : "Only what's behind the players"}">${l}${partUsed(p) ? ' <span class="curve-dot" title="A curve is set here"></span>' : ""}</button>`).join("")}</div>
+    <div class="curve-chs" role="group" aria-label="Channel">${CURVE_CHS.map(([c, l, col]) => `<button data-cch="${c}" class="${c === st.curveCh ? "on" : ""}${a[`curve_${st.curvePart}_${c}`] ? " set" : ""}" style="--c:${col}"
+      title="${c === "rgb" ? "Brightness: colors keep their hue" : `The ${l.toLowerCase()} channel: color grading`}">${l}</button>`).join("")}</div>
+    <div class="curve-box"><canvas class="curve-hist" width="256" height="256"></canvas>
+      <svg class="curve-svg" viewBox="-6 -6 267 267" preserveAspectRatio="none" role="img" aria-label="Tone curve">${curveSvgInner(a)}</svg>
+      <span class="curve-read" hidden></span></div>
+    <p class="curve-help">Click the line to add a point, then drag it · drag a point off, or double-click it, to take it out · double-click the graph to straighten</p>
+    ${sits ? `<span class="sub-label">For the situation</span><div class="curve-sits">${sits}</div>` : ""}
+  </div>`;
+}
+const curveStats = new Map();  // photo -> {hist (256 per channel), flat, dark}
+function curveHistogram(pane, cur) {
+  const cv = pane.querySelector(".curve-hist");
+  if (!cv) return;
+  const paint = (s) => {
+    const g = cv.getContext("2d"), h = s.hist[st.curveCh === "rgb" ? "l" : st.curveCh];
+    const max = Math.max(...h.slice(2, 254)) || 1;
+    g.clearRect(0, 0, 256, 256);
+    g.fillStyle = st.curveCh === "rgb" ? "rgba(255,255,255,.13)" : CURVE_CHS.find((c) => c[0] === st.curveCh)[2] + "30";
+    g.beginPath(); g.moveTo(0, 256);
+    for (let i = 0; i < 256; i++) g.lineTo(i, 256 - Math.min(1, h[i] / max) * 240);
+    g.lineTo(255, 256); g.fill();
+    const sug = s.flat ? "flat" : s.dark ? "night" : null;
+    pane.querySelectorAll(".curve-sit").forEach((b) => { b.querySelector(".curve-sug").hidden = b.dataset.sit !== sug; });
+  };
+  const have = curveStats.get(cur.photo);
+  if (have) { paint(have); return; }
+  const img = new Image();
+  img.onload = () => {
+    const w = 320, h = Math.max(1, Math.round(320 * img.naturalHeight / img.naturalWidth));
+    const c = Object.assign(document.createElement("canvas"), { width: w, height: h }), g = c.getContext("2d", { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data, hist = { l: new Array(256).fill(0), r: new Array(256).fill(0), g: new Array(256).fill(0), b: new Array(256).fill(0) };
+    for (let i = 0; i < d.length; i += 4) {
+      hist.r[d[i]]++; hist.g[d[i + 1]]++; hist.b[d[i + 2]]++;
+      hist.l[Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)]++;
+    }
+    const n = d.length / 4, at = (q) => { let s = 0; for (let i = 0; i < 256; i++) { s += hist.l[i]; if (s >= q * n) return i / 255; } return 1; };
+    const lo = at(0.05), hi = at(0.95), mid = at(0.5);
+    const s = { hist, flat: hi - lo < 0.5 && mid > 0.25, dark: mid < 0.22 };  // (a gray, overcast photo; a night game)
+    curveStats.set(cur.photo, s);
+    if (pane.isConnected) paint(s);
+  };
+  img.src = `/img/photo/${cur.photo}/view.jpg`;
+}
+function bindCurve(cur, pane, vals) {
+  const svg = pane.querySelector(".curve-svg");
+  if (!svg) return;
+  curveHistogram(pane, cur);
+  const redraw = () => { editSig = ""; renderEdit(slotById(cur.id)); };
+  pane.querySelectorAll("[data-cpart]").forEach((b) => b.onclick = () => { st.curvePart = b.dataset.cpart; redraw(); });
+  pane.querySelectorAll("[data-cch]").forEach((b) => b.onclick = () => { st.curveCh = b.dataset.cch; redraw(); });
+  const commit = (before) => afterSend(() => { pushHist({ type: "slot", sid: cur.id, before, after: snapshot(slotById(cur.id)) }); redraw(); });
+  pane.querySelectorAll("[data-sit]").forEach((b) => b.onclick = () => {
+    const x = curveSits.find((c) => c.key === b.dataset.sit), before = snapshot(slotById(cur.id));
+    const on = b.classList.contains("on");
+    CURVE_CHS.forEach(([c]) => { vals[`curve_${x.part}_${c}`] = on ? "" : (x.curves[c] || ""); });
+    st.curvePart = x.part; st.curveCh = on ? st.curveCh : Object.keys(x.curves)[0];
+    sendAdjust(cur.id, vals); commit(before);
+  });
+  const key = () => `curve_${st.curvePart}_${st.curveCh}`;
+  const read = pane.querySelector(".curve-read");
+  const toCurve = (e) => {
+    const r = svg.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * 267 - 6, 255 - (((e.clientY - r.top) / r.height) * 267 - 6)];
+  };
+  let drag = null, lastDown = { t: 0, x: 0, y: 0 };
+  svg.onpointerdown = (e) => {
+    e.preventDefault();
+    const pts = curveParse(vals[key()]), [x] = toCurve(e);
+    let i = e.target.dataset?.pt != null ? +e.target.dataset.pt : -1;
+    const twice = Date.now() - lastDown.t < 400 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 8;
+    lastDown = { t: Date.now(), x: e.clientX, y: e.clientY };
+    if (twice) {  // (double-click: a point taken out; on the empty graph, the curve straightened)
+      const before = drag?.before || snapshot(slotById(cur.id));
+      drag = null;
+      const near = pts.findIndex((p, k) => k > 0 && k < pts.length - 1 && Math.abs(p[0] - x) < 8);
+      vals[key()] = near > 0 ? curveText(pts.filter((_, k) => k !== near)) : "";
+      svg.innerHTML = curveSvgInner(vals); sendAdjust(cur.id, vals); commit(before);
+      return;
+    }
+    if (i < 0) {  // (a new point on the line itself: nothing changes until you drag it)
+      const nx = Math.round(Math.min(254, Math.max(1, x)));
+      i = pts.findIndex((p) => Math.abs(p[0] - nx) < 6);
+      if (i < 0) { pts.push([nx, curveAt(pts, nx)]); pts.sort((a, b) => a[0] - b[0]); i = pts.findIndex((p) => p[0] === nx); svg.innerHTML = curveSvgInner({ ...vals, [key()]: pts.map(([a, b]) => `${a},${b}`).join(";") }); }
+    }
+    drag = { pts, i, before: snapshot(slotById(cur.id)), gone: false, moved: false };
+    svg.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    if (!drag) return;
+    drag.moved = true;
+    const { pts, i } = drag, [x, y] = toCurve(e), end = i === 0 || i === pts.length - 1;
+    const lo = i > 0 ? pts[i - 1][0] + 2 : 0, hi = i < pts.length - 1 ? pts[i + 1][0] - 2 : 255;
+    drag.gone = !end && (x < lo - 30 || x > hi + 30 || y < -30 || y > 285);  // (dragged off: taken out)
+    pts[i] = [Math.min(hi, Math.max(lo, x)), Math.min(255, Math.max(0, y))];
+    const use = drag.gone ? pts.filter((_, k) => k !== i) : pts;
+    vals[key()] = curveText(use.map(([px, py]) => [Math.round(px), Math.round(py)]));
+    svg.innerHTML = curveSvgInner(vals);
+    read.hidden = drag.gone; read.textContent = `${Math.round(pts[i][0])} → ${Math.round(pts[i][1])}`;
+    svg.classList.toggle("removing", drag.gone);
+    sendAdjust(cur.id, vals);
+  };
+  svg.onpointermove = move;
+  svg.onpointerup = svg.onpointercancel = () => {
+    if (!drag) return;
+    const { before, moved } = drag; drag = null; read.hidden = true; svg.classList.remove("removing");
+    if (moved) commit(before);
+  };
+}

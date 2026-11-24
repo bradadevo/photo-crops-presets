@@ -108,7 +108,7 @@ def step_layer(step: dict) -> str:
 def needs_cutout(recipe: dict) -> bool:
     from photo_presets import effects  # noqa: F401
     adj = adjustments(recipe)
-    return (bool(adj["subject"] or adj["background"] or adj["auto_fill"] or any(adj[k] for k in PLAYER_KEYS) or adj["face_light"])
+    return (bool(adj["subject"] or adj["background"] or adj["auto_fill"] or any(adj[k] for k in PLAYER_KEYS + CURVE_PART_KEYS) or adj["face_light"])
             or any(step_layer(s) != "all" or getattr(OPS.get(s.get("op", "")), "cutout", False)
                    for s in recipe.get("steps", [])))
 
@@ -149,9 +149,12 @@ ADJUST = {
     "noise": 0.0,        # noise reduction (0-1)
     "sharpen": 0.0,      # a final crispness (0-1)
     "vignette": 0.0,     # - darker corners, + lighter
+    # Tone curves (see curves.py): points "x,y;x,y" on 0-255, on the whole photo, the players or the background
+    **{f"curve_{part}_{ch}": "" for part in ("all", "player", "bg") for ch in ("rgb", "r", "g", "b")},
 }
 MIX_HUES = {"red": 0, "orange": 30, "yellow": 58, "green": 115, "aqua": 180, "blue": 222, "purple": 272, "magenta": 318}
 PLAYER_KEYS = ("p_clarity", "p_vibrance", "p_warmth", "p_sharpen", "rim_light", "bg_blur", "bg_saturation", "bg_warmth")
+CURVE_PART_KEYS = tuple(f"curve_{part}_{ch}" for part in ("player", "bg") for ch in ("rgb", "r", "g", "b"))  # (need the cut-out)
 FILL_MAX = 0.75  # the most the automatic fill light adds, in stops
 FILL_RATIO = 0.85  # it lifts a player until they are this bright next to the background
 
@@ -220,6 +223,7 @@ def finish(before: np.ndarray, look: np.ndarray, recipe: dict, alpha: np.ndarray
     if adj["dehaze"]:
         out = _dehaze(out, adj["dehaze"])
     out = tone(out, adj)
+    out = tone_curves(out, adj, alpha, notes)
     if adj["clarity"] or adj["texture"]:
         out = _local_contrast(out, adj["clarity"], adj["texture"])
     if adj["warmth"]:
@@ -477,6 +481,23 @@ def tone(out: np.ndarray, adj: dict) -> np.ndarray:
         new = new + bl * 0.12 * np.clip(1 - new / 0.45, 0, 1) ** 2
     ratio = np.clip(new, 0, 1.2) / np.maximum(lum, 0.004)
     return out * np.clip(ratio, 0, 4)[..., None]
+
+
+def tone_curves(out: np.ndarray, adj: dict, alpha: np.ndarray | None, notes: list) -> np.ndarray:
+    """The tone curves, right after the basic tone (as in Lightroom): the whole photo's, then the
+    players' and the background's (soft edged, from the cut-out)."""
+    from photo_presets import curves
+    for part in curves.PARTS:
+        chans = {ch: adj[f"curve_{part}_{ch}"] for ch in curves.CHANNELS if adj[f"curve_{part}_{ch}"]}
+        if not chans:
+            continue
+        if part == "all":
+            out = curves.apply(out, chans)
+        elif alpha is None:
+            notes.append("no player cut-out here, so the players' and background's curves were skipped")
+        else:
+            out = curves.apply(out, chans, alpha if part == "player" else 1 - alpha)
+    return out
 
 
 DITHER_TILE = 256

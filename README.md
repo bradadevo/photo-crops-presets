@@ -257,6 +257,18 @@ Sliders:
   (Vibrance, Clarity, Texture, Dehaze, Whites, Blacks); **Player and
   background** (the player's clarity, vibrance, warmth and sharpness, Face
   light, Rim light, Background blur, color and warmth, using the cut-out);
+  **Tone curve** (as in Lightroom, right after the light sliders: your
+  photo's histogram behind the curve; **RGB** changes brightness only, so
+  skin and kit keep their hue, while **Red**, **Green** and **Blue** grade
+  color. Click the line to add a point and drag it, drag a point off or
+  double-click it to take it out, double-click the graph to straighten it.
+  **Whole photo**, **Players** or **Background**: a curve on just the
+  players or just what's behind them, soft edged from the cut-out, as
+  Lightroom and Capture One masks do. Ready-made curves are named by the
+  situation: **Flat, overcast light**, **Punchy action**, **Make the player
+  pop** (players only), **Night game** (background only), **Faded film**,
+  **Cool shadows, warm highlights**; one is marked **Suggested** when the
+  photo is flat or dark, and a second click takes it off);
   **Color mixer** (hue, saturation and lightness for eight colors, and **Kit
   color pop**: pick a kit color and make it richer); **Color grading** (a
   color and amount for shadows, midtones and highlights); **Finishing** (Noise
@@ -1017,6 +1029,7 @@ photo_presets/
   procedural.py       Generated textures
   backgrounds.py      Backgrounds made on this Mac (night stadium, smoke, storm, studio)
   assets.py           Finding, fetching and caching LUTs, textures and overlays
+  curves.py           Tone curves: smooth point curves, RGB as brightness only, ready-made ones by situation
   edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling
   retouch.py          Removing distractions with LaMa
   poster.py           The poster layouts

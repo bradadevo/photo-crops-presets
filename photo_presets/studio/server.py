@@ -1257,6 +1257,15 @@ def state():
             "prefs": {"folder": DEFAULT_EXPORT} | prefs()}
 
 
+@app.get("/api/curves")
+def tone_curves():
+    """The ready-made tone curves, named by the situation they're for (see curves.py)."""
+    from photo_presets import curves
+    return {"situations": [{"key": k, "name": name, "about": about, "part": part,
+                            "curves": {ch: curves.text(pts) for ch, pts in chans.items()}}
+                           for k, (name, about, part, chans) in curves.SITUATIONS.items()]}
+
+
 @app.get("/api/prep")
 def prep():
     """Each photo getting ready (its players cut out once), for the Photos panel."""
