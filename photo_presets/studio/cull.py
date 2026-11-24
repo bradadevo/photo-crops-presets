@@ -310,8 +310,13 @@ def _osascript(script: str) -> str:
 
 
 def _out_folder(sh: Shoot, name: str) -> Path:
+    """The new folder next to the event's photos. Only a name: never a path elsewhere, and never the event
+    folder itself (so a copy or an edit is never written among your originals)."""
     base = TEST_OUT if TEST_OUT else Path(sh.folders[0])
-    return base / name
+    clean = export.safe_name(str(name).replace("..", "").strip())
+    if clean in ("", ".", "Label"):
+        clean = "Picks"
+    return base / clean
 
 
 # -- the API ------------------------------------------------------------------------------------
@@ -471,18 +476,38 @@ async def trash(sid: int, req: Request):
     """Moves these photos (every file of each shot: JPEG and RAW) to the Trash."""
     sh = C.shoot(sid)
     ids = [int(i) for i in (await req.json()).get("ids", [])]
-    chosen = [sh.photos[i] for i in ids if 0 <= i < len(sh.photos) and sh.photos[i].get("state") != "gone"]
+    with C.lock:  # checked here, at the moment of deleting: only photos that are still rejects (yours or pass 1's)
+        asked = [sh.photos[i] for i in ids if 0 <= i < len(sh.photos) and sh.photos[i].get("state") != "gone"]
+        chosen = [p for p in asked if _flag(sh, p) == "reject"]
     moved = await _thread(_to_trash, [f for p in chosen for f in p["files"]])
     gone = {was for was, _ in moved}
+    # a shot whose JPEG went but whose RAW couldn't (or the other way): the part that went comes back, so a
+    # pair is never split between the Trash and the folder
+    split = [(was, now) for p in chosen if not all(f in gone for f in p["files"]) for was, now in moved if was in p["files"]]
+    if split:
+        await _thread(files.from_trash, split)
+        moved = [m for m in moved if m not in split]
+        gone = {was for was, _ in moved}
+    done, stuck = [], []
     with C.lock:
         for p in chosen:
             if all(f in gone for f in p["files"]):
                 p["state"] = "gone"
                 sh.bump(p)
+                done.append(p["id"])
+            else:
+                stuck.append({"id": p["id"], "name": p["name"],
+                              "files": [Path(f).name for f in p["files"]]})
     token = f"{sid}-{time.time():.3f}"
     C.trashed[token] = moved
-    return {"moved": len(chosen), "files": len(moved), "token": token,
+    return {"moved": len(done), "ids": done, "files": len(moved), "token": token, "stuck": stuck,
+            "not_rejects": [p["id"] for p in asked if p not in chosen],
             "from": sorted({files.shown(str(Path(was).parent)) for was, _ in moved})}
+
+
+def _flag(sh: Shoot, p: dict) -> str | None:
+    """A photo's mark now: yours, else pass 1's."""
+    return C.marks.get(p["path"], {}).get("flag") or (sh.auto.get(p["path"]) or [None])[0]
 
 
 @router.post("/api/cull/shoots/{sid}/untrash")
@@ -521,6 +546,15 @@ async def export_keepers(sid: int, req: Request):
     folder = _out_folder(sh, body.get("folder") or ("Picks" if what == "copy" else f"Culled - {export.FOLDER_NAMES[size]}"))
     sh.job = {"state": "now", "what": what, "done": 0, "total": len(chosen), "folder": str(folder), "started": time.time()}
 
+    stems, used = {}, set()  # two keepers with one file name (two folders or cameras): the second gets -2, never written over
+    for p in chosen:
+        base = st = Path(p["path"]).stem
+        n = 2
+        while st in used:
+            st, n = f"{base}-{n}", n + 1
+        used.add(st)
+        stems[p["id"]] = st
+
     def run():
         enlarged = []
         try:
@@ -537,7 +571,7 @@ async def export_keepers(sid: int, req: Request):
                     if crop is None and size != "ai":
                         crop = C.marks.get(p["path"], {}).get("crop")
                     export.edit_one(Path(p["path"]), p.get("m") or {}, size, versions, folder, crop, ai_crop, adjust_fn, fit,
-                                    enlarged)
+                                    enlarged, stem=stems[p["id"]])
                     sh.job["enlarged"] = enlarge.summary(enlarged)
                 sh.job["done"] = i
             sh.job["state"] = "done"
@@ -694,6 +728,7 @@ def view(sid: int, pid: int):
 
 _full: dict[str, Image.Image] = {}
 _full_lock = threading.Lock()
+_making: dict[str, threading.Lock] = {}
 
 
 def _full_image(path: str) -> Image.Image:
@@ -701,12 +736,18 @@ def _full_image(path: str) -> Image.Image:
     with _full_lock:
         if path in _full:
             return _full[path]
-    p = Path(path)
-    img = images.develop_raw(p) if images.is_raw(p) else ImageOps.exif_transpose(Image.open(p)).convert("RGB")
-    with _full_lock:
-        if len(_full) >= 2:
-            _full.pop(next(iter(_full)))
-        _full[path] = img
+        mine = _making.setdefault(path, threading.Lock())  # (one photo is developed once: a second ask waits for it)
+    with mine:
+        with _full_lock:
+            if path in _full:
+                return _full[path]
+        p = Path(path)
+        img = images.develop_raw(p) if images.is_raw(p) else ImageOps.exif_transpose(Image.open(p)).convert("RGB")
+        with _full_lock:
+            if len(_full) >= 3:
+                _full.pop(next(iter(_full)))
+            _full[path] = img
+            _making.pop(path, None)
     return img
 
 

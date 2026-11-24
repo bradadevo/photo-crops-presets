@@ -575,7 +575,8 @@ tournaments (1,500+ photos stay quick: thumbnails come from the camera's own pre
 minute, and only what is on screen is drawn).
 
 1. **Pass 1, the app.** Add an event's folder (or **Import from the camera card**: new photos only,
-   into a dated folder, culled while they copy). On this Mac and free, the app looks at every photo:
+   into a dated folder, culled while they copy; nothing on the card is changed, and a different photo
+   with a name already used, from a second camera, gets a new name with its RAW, never written over). On this Mac and free, the app looks at every photo:
    is the main player sharp (judged against the rest of the shoot, so a dull day doesn't mark
    everything soft), are the eyes open (Apple's face quality on each player's face), did the camera's
    focus point land on a player, is the ball in the play, the light, and which frames are one burst.
@@ -583,11 +584,15 @@ minute, and only what is on screen is drawn).
    how many to keep (the best ones, a number or a share), how picky, and best frame per burst.
 2. **Your pass.** Starts with the photos pass 1 was least sure about. `P` keep, `X` reject, `1`–`5`
    stars, `←` `→` next, `Space` one big photo, `Z` 100% (on the face), `C` compare a burst or your
-   selection side by side, `G` gallery, `⌘Z` undo. Your marks always win over pass 1's (dashed marks are
+   selection side by side, `G` gallery, `⌘Z` undo (`?` lists every key). **Pass 1 unsure** shows every
+   close call, none hidden in a burst stack. Marks are saved in order, and a note says so if the app
+   isn't answering. Your marks always win over pass 1's (dashed marks are
    pass 1's, solid ones yours), and teach it your taste for the next event.
 3. **Finish** (one page, top to bottom):
    1. **Clear out the rejects**: look at them first, or delete them (JPEG and RAW together go to the
-      Trash, with undo).
+      Trash, with undo). The box names the folder they leave and says whether they are your ORIGINAL
+      photos or copies (and why); the app re-checks each is still a reject at that moment, and a JPEG
+      is never split from its RAW.
    2. **What to do with the keepers**: **Crop them for posting**, **Copy them as they are** (a Picks
       folder) or **Use them in VS Digital Pro** (Looks, Reel). For cropping, on the same page: where
       they'll be posted (Instagram post 4:5, Story or Reel 9:16, YouTube 16:9; more choices: same size

@@ -75,6 +75,27 @@ def test_raw_and_jpeg_of_a_shot_are_one(tmp_path):
     assert one["raw"] and len(one["files"]) == 2
 
 
+def test_card_import_never_writes_over_a_different_photo(tmp_path):
+    import os
+    def card(name, body, raw=None, t=1_700_000_000):
+        d = tmp_path / name / "DCIM" / "100MSDCF"; d.mkdir(parents=True)
+        (d / "DSC00001.JPG").write_bytes(body); os.utime(d / "DSC00001.JPG", (t, t))
+        if raw:
+            (d / "DSC00001.ARW").write_bytes(raw); os.utime(d / "DSC00001.ARW", (t, t))
+        return tmp_path / name
+    dest = tmp_path / "Import"
+    a = card("a", b"first camera" * 10, b"raw one" * 10)
+    assert files.import_card(a, dest) == (2, 0)
+    assert files.import_card(a, dest) == (0, 2)  # (the same card again: nothing new)
+    b = card("b", b"second camera" * 10, b"raw two" * 10, t=1_700_000_500)  # same names, other photos
+    assert files.import_card(b, dest) == (2, 0)
+    assert (dest / "DSC00001.JPG").read_bytes() == b"first camera" * 10  # never written over
+    assert (dest / "DSC00001-2.JPG").read_bytes() == b"second camera" * 10 and (dest / "DSC00001-2.ARW").exists()  # JPEG and RAW renamed together
+    c = card("c", b"x" * 120, t=1_700_000_900)  # same name AND same size as the first, another photo
+    assert files.import_card(c, dest) == (1, 0) and (dest / "DSC00001-3.JPG").read_bytes() == b"x" * 120
+    assert files.import_card(b, dest) == (0, 2)  # (the renamed ones are known again)
+
+
 def test_trash_undo_puts_files_back(tmp_path):
     a = tmp_path / "a.jpg"
     a.write_bytes(b"x")
@@ -169,8 +190,11 @@ def test_api_marks_win_and_trash_round_trip(tmp_path, monkeypatch):
     w = c.post(f"/api/cull/shoots/{sid}/trash-preview", json={"ids": [photos["IMG3.jpg"]["id"]]}).json()
     assert w["folders"][0]["path"] == str(shoot) and w["folders"][0]["jpeg"] == 1 and w["originals"] == 1 and not w["copies"]
     assert w["names"] == ["IMG3.jpg"] and (shoot / "IMG3.jpg").exists()  # (only a look: nothing moved)
-    gone = c.post(f"/api/cull/shoots/{sid}/trash", json={"ids": [photos["IMG3.jpg"]["id"]]}).json()
-    assert gone["moved"] == 1 and not (shoot / "IMG3.jpg").exists() and gone["from"] == [files.shown(str(shoot))]
+    # only photos that are still rejects at the moment of deleting go: a keeper asked for is left alone
+    c.post(f"/api/cull/shoots/{sid}/mark", json={"items": [{"id": photos["IMG3.jpg"]["id"], "flag": "reject"}]})
+    gone = c.post(f"/api/cull/shoots/{sid}/trash", json={"ids": [photos["IMG3.jpg"]["id"], photos["IMG0.jpg"]["id"]]}).json()
+    assert gone["moved"] == 1 and gone["ids"] == [photos["IMG3.jpg"]["id"]] and gone["not_rejects"] == [photos["IMG0.jpg"]["id"]]
+    assert not (shoot / "IMG3.jpg").exists() and (shoot / "IMG0.jpg").exists() and gone["from"] == [files.shown(str(shoot))]
     c.post(f"/api/cull/shoots/{sid}/untrash", json={"token": gone["token"]})
     assert (shoot / "IMG3.jpg").exists()
 
@@ -256,3 +280,43 @@ def test_narrow_photo_keeps_the_player_whole_on_a_border(tmp_path):
     blue = np.where((out[:, :, 2] > 200) & (out[:, :, 0] < 60))[0]
     assert len(red) and len(blue)
     assert red.min() > 0.05 * h and blue.max() < 0.97 * h  # room above the head and below the feet
+
+
+def test_export_never_writes_one_keeper_over_another_with_the_same_name(tmp_path, monkeypatch):
+    """Two folders (two cameras) in one event, both with DSC00001.jpg: each keeper gets its own file."""
+    from fastapi.testclient import TestClient
+    import time
+    import photo_presets.studio.cull as cu
+    from photo_presets.studio import server
+    monkeypatch.setattr(cu, "HOME", tmp_path)
+    monkeypatch.setattr(cu, "STATE_FILE", tmp_path / "cull.json")
+    monkeypatch.setattr(cu, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(cu, "TEST_OUT", None)
+    cams = [tmp_path / "Event" / "cam A", tmp_path / "Event" / "cam B"]
+    for i, d in enumerate(cams):
+        d.mkdir(parents=True)
+        Image.new("RGB", (600, 400), (200 * i, 60, 60)).save(d / "DSC00001.jpg")
+    monkeypatch.setattr(cu.measure, "measure", lambda path, cache: m())
+    monkeypatch.setattr(cu, "C", cu.Cull())
+    c = TestClient(server.app)
+    sid = c.post("/api/cull/shoots", json={"folders": [str(d) for d in cams]}).json()["id"]
+    for _ in range(100):
+        r = c.get(f"/api/cull/shoots/{sid}/photos").json()
+        if r["shoot"]["pass1"]:
+            break
+        time.sleep(0.05)
+    ids = [p["id"] for p in r["photos"]]
+    assert len(ids) == 2
+    for what, body in (("edit", {"versions": "O", "size": "youtube"}), ("copy", {})):
+        out = c.post(f"/api/cull/shoots/{sid}/export", json={"what": what, "ids": ids, "folder": f"Out {what}", **body}).json()
+        for _ in range(200):
+            j = c.get("/api/cull/state").json()["shoots"][0]["job"]
+            if j["state"] != "now":
+                break
+            time.sleep(0.05)
+        assert j["state"] == "done", j
+        made = sorted(p.name for p in Path(out["folder"]).iterdir())
+        assert len(made) == 2, made  # (one each: neither written over)
+    # a folder name is only a name: never a path somewhere else
+    out = c.post(f"/api/cull/shoots/{sid}/export", json={"what": "copy", "ids": ids[:1], "folder": "../../elsewhere"}).json()
+    assert Path(out["folder"]).parent == cams[0]

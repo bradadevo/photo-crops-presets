@@ -120,17 +120,57 @@ def _card_photos(dcim: Path):
                 yield p
 
 
+def same_file(a: Path, b: Path) -> bool:
+    """The same photo already copied: the same size and the same bytes at its start and end. Two different
+    photos can share a name (two cameras, or a camera's numbers starting again) and even a size
+    (uncompressed RAW are all one size), so the name, or name and size, never is."""
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        n = 1 << 16  # the same size: the same bytes at the start (the camera data, the time to 1/100 s) and the end
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            if fa.read(n) != fb.read(n):
+                return False
+            size = a.stat().st_size
+            if size > 2 * n:
+                fa.seek(size - n); fb.seek(size - n)
+                return fa.read(n) == fb.read(n)
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
 def import_card(volume: Path, dest: Path, progress=None, on_file=None) -> tuple[int, int]:
     """Copies the card's photos (JPEG and RAW; not videos) into dest, oldest first, skipping any
-    already there (same name and size), so importing the same card again only adds the new ones.
-    progress(done, total); on_file(path) as each shot's files are in. Returns (copied, skipped)."""
+    already there (the same photo: same name and the same bytes), so importing the same card again only adds
+    the new ones. A different photo with a name already used (a second camera, or a camera's numbers
+    starting again) is never written over: its JPEG and RAW get a new name together (DSC00001-2.JPG).
+    Nothing on the card is changed. progress(done, total); on_file(path) as each file is in.
+    Returns (copied, skipped)."""
     files = sorted(_card_photos(volume / "DCIM"), key=lambda p: (p.stat().st_mtime, p.name))
     dest.mkdir(parents=True, exist_ok=True)
+    shots: dict[tuple[str, str], list[Path]] = {}
+    for f in files:
+        shots.setdefault((str(f.parent), f.stem), []).append(f)
+    stem_for: dict[tuple[str, str], str] = {}
+    taken: set[str] = set()  # (stems given to another shot of this card)
+
+    def fits(stem: str, group: list[Path]) -> bool:
+        return stem not in taken and all(not (dest / (stem + g.suffix)).exists() or same_file(g, dest / (stem + g.suffix)) for g in group)
+
+    for key, group in shots.items():
+        stem, n = key[1], 2
+        while not fits(stem, group):
+            stem, n = f"{key[1]}-{n}", n + 1
+        stem_for[key] = stem
+        taken.add(stem)
     copied = skipped = 0
     for i, f in enumerate(files, 1):
-        target = dest / f.name
-        if target.exists() and target.stat().st_size == f.stat().st_size:
+        target = dest / (stem_for[(str(f.parent), f.stem)] + f.suffix)
+        if target.exists() and same_file(f, target):
             skipped += 1
+        elif target.exists():  # (never: fits() chose a free name; kept as a last guard)
+            raise RuntimeError(f"{target.name} is already there and is a different photo")
         else:
             tmp = target.with_name("." + target.name + ".part")
             shutil.copy2(f, tmp)

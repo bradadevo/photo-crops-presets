@@ -23,7 +23,7 @@ const cu = {
   tile: store.get("cull.tile", 210), group: store.get("cull.group", true), open: new Set(),
   show: "all", issues: new Set(), stars: 0, sort: store.get("cull.sort", "time"),
   advance: store.get("cull.advance", true), cropShow: store.get("cull.crop", false), marks: store.get("cull.marks", true),
-  zoom: null, hist: [], future: [], timer: null, built: false, shootSig: "", gridSig: "",
+  zoom: null, hist: [], future: [], timer: null, built: false, shootSig: "", gridSig: "", pending: new Map(),
   survey: null, spray: null, labelF: new Set(), labels: [],
   people: [], person: null, personHits: null, personJob: null, picking: false,
 };
@@ -55,7 +55,11 @@ async function cuPhotos(full = false) {
   if (full) { cu.photos = new Map(); cu.rev = 0; }
   const r = await fetch(`/api/cull/shoots/${sh.id}/photos?since=${cu.rev}`).then((x) => x.json()).catch(() => null);
   if (!r || cu.sel !== sh.id) return false;
-  r.photos.forEach((p) => cu.photos.set(p.id, p));
+  r.photos.forEach((p) => {  // (a mark still on its way to the app stays on top of what the app last knew)
+    const pend = cu.pending.get(`${sh.id}:${p.id}`);
+    if (pend) { const { sid, id, ...mine } = pend; Object.assign(p, mine); }
+    cu.photos.set(p.id, p);
+  });
   cu.rev = r.rev;
   Object.assign(sh, r.shoot);
   return r.photos.length > 0;
@@ -100,8 +104,9 @@ function cuSort() {
   } else if (cu.sort === "score") list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || byTime(a, b));
   else if (cu.sort === "unsure") list.sort((a, b) => ((a.flag ? 2 : a.auto?.[1] ?? 1) - (b.flag ? 2 : b.auto?.[1] ?? 1)) || byTime(a, b));
   else list.sort(byTime);
-  // bursts as one stack: the frame that stands for it (yours kept, else the best), unless opened
-  if (cu.group) {
+  // bursts as one stack: the frame that stands for it (yours kept, else the best), unless opened. Not in
+  // Pass 1 unsure: every close call shows, so "that's every one" is true and none hides in a stack
+  if (cu.group && cu.show !== "unsure") {
     const lead = new Map();
     for (const p of list) {
       if (p.burst == null || p.bsize < 2 || cu.open.has(p.burst)) continue;
@@ -111,8 +116,15 @@ function cuSort() {
     }
     list = list.filter((p) => p.burst == null || p.bsize < 2 || cu.open.has(p.burst) || lead.get(p.burst) === p);
   }
+  const was = cu.order;
   cu.order = list.map((p) => p.id);
-  if (cu.cur == null || !cu.order.includes(cu.cur)) cu.cur = cu.order[0] ?? null;
+  if (cu.cur == null || !cu.order.includes(cu.cur)) {
+    // the photo you were on left this list (you marked it, in Unsure or Not checked): stay where you were,
+    // on the next one still here, never back at the start
+    const i = was.indexOf(cu.cur), here = new Set(cu.order);
+    const next = i < 0 ? null : was.slice(i + 1).find((id) => here.has(id)) ?? was.slice(0, i).reverse().find((id) => here.has(id));
+    cu.cur = next ?? cu.order[0] ?? null;
+  }
 }
 function cuCounts() {
   const c = { all: 0, keep: 0, reject: 0, unsure: 0, todo: 0, mine: 0 }, iss = {};
@@ -283,8 +295,8 @@ function cuPaintBar() {
     <button class="icon-btn cu-tog${cu.group ? " on" : ""}" id="cu-group" title="${cu.group ? "Bursts are stacked: each shows as its best frame (click to show every frame)" : "Every frame shows (click to stack each burst as its best frame)"}">${icon("stack")}</button>
     <span class="grow"></span>
     ${n > 1 ? `<span class="cu-selinfo">${n} selected</span>` : ""}
-    <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo (the original files in the event folder, with their RAW) to the Trash. You see the folder and files first, and can undo">${icon("trash")}<span class="lbl"> Delete rejects</span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
-    <button class="btn ${cu.finish ? "ghost on" : "primary"}" id="cu-fin" ${off(!c.keep, "No keepers yet")} title="Step 3: delete the rejects, then crop, copy or use the keepers">Finish${c.keep ? ` · ${c.keep.toLocaleString()} keepers` : ""} ${icon("right")}</button>`;
+    <button class="btn danger" id="cu-del" ${off(!c.reject, "No rejects to delete")} title="Move every rejected photo (the original files in the event folder, with their RAW) to the Trash. You see the folder and files first, and can undo">${icon("trash")}<span class="lbl"> Delete<span class="lbl2"> rejects</span></span>${c.reject ? ` (${c.reject.toLocaleString()})` : ""}</button>
+    <button class="btn ${cu.finish ? "ghost on" : "primary"}" id="cu-fin" ${off(!c.keep, "No keepers yet")} title="Step 3: delete the rejects, then crop, copy or use the keepers${c.keep ? ` (${c.keep.toLocaleString()} keepers)` : ""}">Finish${c.keep ? `<span class="cnt"> · ${c.keep.toLocaleString()} keepers</span>` : ""} ${icon("right")}</button>`;
   paintIcons(bar);
   $("#cu-pass1").onclick = cuPass1;
   $("#cu-pass2").onclick = () => { cu.finish = false; cu.show = c.unsure ? "unsure" : "todo"; cu.sort = "unsure"; store.set("cull.sort", cu.sort); cuRefilter(); if (cu.order.length) cuSetView("one");
@@ -368,14 +380,31 @@ function cuPaintGrid() {
   const sig = [r0, r1, cols, tw, cu.rev, cu.cur, [...cu.picked].join(","), cu.order.length, cu.order[r0 * cols], cu.marks, cu.group].join("|");
   if (sig === cu.gridSig) return;
   cu.gridSig = sig;
-  let html = "";
+  const space = $("#cu-space");
+  if (!cu.order.length) {
+    space.innerHTML = `<div class="cu-none">${cu.photos.size ? "Nothing matches what's shown: change Show or Problems on the left." : cuShoot() ? `<span class="spin"></span> Reading the photos…` : ""}</div>`;
+    return;
+  }
+  // only tiles that changed are made again: the rest (and their pictures) stay put, so nothing flickers
+  // while pass 1 works or when you mark one
+  const old = new Map([...space.children].map((e) => [e.dataset.p, e]));
+  const want = [];
   for (let i = r0 * cols; i < Math.min(cu.order.length, r1 * cols); i++) {
     const p = cuP(cu.order[i]);
-    html += cuTile(p, 8 + (i % cols) * (tw + gap), 8 + Math.floor(i / cols) * (th + gap), tw, th);
+    const html = cuTile(p, 8 + (i % cols) * (tw + gap), 8 + Math.floor(i / cols) * (th + gap), tw, th);
+    const e = old.get(String(p.id));
+    if (e && e.__h === html) { old.delete(String(p.id)); continue; }
+    want.push(html);
   }
-  if (!cu.order.length) html = `<div class="cu-none">${cu.photos.size ? "Nothing matches what's shown: change Show or Problems on the left." : cuShoot() ? `<span class="spin"></span> Reading the photos…` : ""}</div>`;
-  $("#cu-space").innerHTML = html;
-  paintIcons($("#cu-space"));
+  old.forEach((e) => e.remove());
+  if (want.length) {
+    const t = document.createElement("template");
+    t.innerHTML = want.join("");
+    const made = [...t.content.children];
+    made.forEach((e, i) => { e.__h = want[i]; });
+    paintIcons(t.content);
+    space.append(...made);
+  }
 }
 function cuScrollTo(id) {
   if (cu.view !== "grid") return;
@@ -708,9 +737,15 @@ function cuPaintMain() {
   cuFitPic();
   if (cu.picking) cuPickLayer();
   cuCropDrag(p);
-  // the next and previous ones load while you look
-  [1, -1].forEach((d) => { const q = cu.order[cu.order.indexOf(p.id) + d]; if (q != null) new Image().src = `/img/cull/${cu.sel}/${q}/view.jpg`; });
+  // the next three and the one before load while you look: holding → through a burst never waits
+  const at = cu.order.indexOf(p.id);
+  [1, 2, 3, -1].forEach((d) => { const q = cu.order[at + d]; if (q != null && !cuPre.has(q + ":" + cu.sel)) { cuPre.add(q + ":" + cu.sel); new Image().src = `/img/cull/${cu.sel}/${q}/view.jpg`; } });
+  if (cuPre.size > 400) cuPre.clear();
+  // stay on a photo a moment and its full size is got ready (a RAW takes seconds): Z at 100% is then instant
+  clearTimeout(cu.warmT);
+  if (!cu.zoom) cu.warmT = setTimeout(() => { if (cu.cur === p.id && cu.view === "one") fetch(`/img/cull/${cu.sel}/${p.id}/zoom.jpg?w=8&h=8`).catch(() => {}); }, 600);
 }
+const cuPre = new Set();  // (big photos already asked for)
 function cuFitPic() {
   const st = $("#cu-stage"), img = $("#cu-img"); if (!st || !img) return;
   img.style.maxHeight = `${Math.max(120, st.clientHeight - 24)}px`;
@@ -1123,8 +1158,35 @@ async function cuSet(ids, change, label, record = true) {
   items.forEach((it) => Object.assign(cuP(it.id), it.after));
   if (record) { cu.hist.push({ label, items }); cu.future = []; if (cu.hist.length > 300) cu.hist.shift(); }
   cuAfterMark();
-  await api(`/api/cull/shoots/${sh.id}/mark`, { items: items.map((it) => ({ id: it.id, ...it.after })) }).catch(() => {});
+  cuSave(sh.id, items.map((it) => ({ id: it.id, ...it.after })));
 }
+/* Marks are saved in order and never dropped: one the app can't take yet (busy, restarting) stays here,
+   on screen, and is sent again until it's saved, with a note while it waits. */
+let cuSaving = false, cuSaveFails = 0, cuSaveNote = null;
+function cuSave(sid, items) {
+  items.forEach((it) => { const k = `${sid}:${it.id}`; cu.pending.set(k, { ...(cu.pending.get(k) || {}), ...it, sid }); });
+  cuFlush();
+}
+async function cuFlush() {
+  if (cuSaving || !cu.pending.size) return;
+  cuSaving = true;
+  const batch = new Map(cu.pending), bySid = new Map();
+  batch.forEach((v) => { const { sid, ...it } = v; (bySid.get(sid) || bySid.set(sid, []).get(sid)).push(it); });
+  try {
+    for (const [sid, items] of bySid) await api(`/api/cull/shoots/${sid}/mark`, { items }, { quiet: true });
+    batch.forEach((v, k) => { if (cu.pending.get(k) === v) cu.pending.delete(k); });
+    cuSaveFails = 0;
+    if (cuSaveNote) { cuSaveNote.close(); cuSaveNote = null; toast("Your marks are saved"); }
+    cuSaving = false;
+    if (cu.pending.size) cuFlush();
+  } catch {
+    cuSaveFails++;
+    if (cuSaveFails >= 2 && !cuSaveNote) cuSaveNote = toast(`${plural(cu.pending.size, "mark")} not saved yet`, { bad: true, sticky: true,
+      small: "The app isn't answering. They're kept here and saved as soon as it is: leave this window open" });
+    setTimeout(() => { cuSaving = false; cuFlush(); }, Math.min(10000, 1000 * cuSaveFails));
+  }
+}
+window.addEventListener("beforeunload", (e) => { if (cu.pending.size) { e.preventDefault(); e.returnValue = ""; } });
 function cuAfterMark() {
   cu.gridSig = ""; cuPaintGrid(); cuPaintTimeline(); cuPaintSide(); cuPaintBar(); if (cu.view !== "grid") cuPaintMain(); cuPaintInfo();
 }
@@ -1144,8 +1206,8 @@ async function cuUndo(redo = false) {
   to.push(step);
   const sh = cuShoot();
   if (step.trash) {
-    if (redo) { const r = await api(`/api/cull/shoots/${sh.id}/trash`, { ids: step.ids }); step.token = r.token; step.ids.forEach((id) => cuP(id) && (cuP(id).state = "gone")); }
-    else { await api(`/api/cull/shoots/${sh.id}/untrash`, { token: step.token }); step.ids.forEach((id) => cuP(id) && (cuP(id).state = "done")); }
+    if (redo) { const r = await api(`/api/cull/shoots/${sh.id}/trash`, { ids: step.ids }); step.token = r.token; step.ids = r.ids; r.ids.forEach((id) => cuP(id) && (cuP(id).state = "gone")); }
+    else { await api(`/api/cull/shoots/${sh.id}/untrash`, { token: step.token }); await cuPhotos(); }
     cuSort(); cuAfterMark();
     toast(redo ? `Moved ${plural(step.ids.length, "photo")} to the Trash again` : `Put ${plural(step.ids.length, "photo")} back from the Trash`);
     return;
@@ -1154,10 +1216,17 @@ async function cuUndo(redo = false) {
   step.items.forEach((it) => Object.assign(cuP(it.id), it[key]));
   cuSort(); cuAfterMark();
   toast(`${redo ? "Redid" : "Undid"}: ${step.label}`, { small: plural(step.items.length, "photo") });
-  await api(`/api/cull/shoots/${sh.id}/mark`, { items: step.items.map((it) => ({ id: it.id, ...it[key] })) }).catch(() => {});
+  cuSave(sh.id, step.items.map((it) => ({ id: it.id, ...it[key] })));
 }
 function cuEndOfList() {
   const [c] = cuCounts();
+  const stacked = cu.group && cu.show !== "unsure" ? [...cu.photos.values()].filter((p) => alive(p) && p.bsize > 1 && !cu.open.has(p.burst)).length
+    - new Set([...cu.photos.values()].filter((p) => alive(p) && p.bsize > 1 && !cu.open.has(p.burst)).map((p) => p.burst)).size : 0;
+  if (cu.show === "todo" && stacked > 0) {
+    toast(`That's the last one shown · ${plural(stacked, "more frame")} inside bursts`, { small: "Bursts show their best frame. Show every frame to check them all",
+      action: { label: "Show every frame", run: (ev) => { ev.target.closest(".toast")?.remove(); cu.group = false; store.set("cull.group", false); cuRefilter(); } } });
+    return;
+  }
   if (cu.show === "unsure" || cu.show === "todo") {
     const nextTodo = cu.show === "unsure" && c.todo > 0;
     toast(cu.show === "unsure" ? "That's every photo pass 1 was unsure about" : "You've checked them all", {
@@ -1233,10 +1302,14 @@ async function cuDeleteRejects() {
     closeModal();
     const ids = rej.map((p) => p.id);
     const r = await api(`/api/cull/shoots/${sh.id}/trash`, { ids });
-    ids.forEach((id) => cuP(id).state = "gone");
-    cu.hist.push({ label: "Delete rejects", trash: true, token: r.token, ids }); cu.future = [];
+    r.ids.forEach((id) => cuP(id).state = "gone");  // (only what really went: the server checks each is still a reject)
+    if (r.ids.length) { cu.hist.push({ label: "Delete rejects", trash: true, token: r.token, ids: r.ids }); cu.future = []; }
     cuSort(); cuAfterMark(); if (cu.finish) cuPaintFinish($("#cu-one"));
-    toast(`Moved ${plural(r.moved, all ? "original" : "photo")} to the Trash`, { small: `${plural(r.files, "file")} from ${(r.from || []).join(", ")}`, action: { label: "Undo", run: (ev) => { ev.target.closest(".toast")?.remove(); cuUndo(); } } });
+    if (r.moved) toast(`Moved ${plural(r.moved, all ? "original" : "photo")} to the Trash`, { small: `${plural(r.files, "file")} from ${(r.from || []).join(", ")}`, action: { label: "Undo", run: (ev) => { ev.target.closest(".toast")?.remove(); cuUndo(); } } });
+    if (r.stuck.length) toast(`${plural(r.stuck.length, "photo")} could not be moved to the Trash`, { bad: true, sticky: true,
+      small: `${r.stuck.slice(0, 3).map((x) => x.name).join(", ")}${r.stuck.length > 3 ? "…" : ""}: still in the folder, nothing lost. Is the drive read-only or a file open in another app?` });
+    if (r.not_rejects.length) { await cuPhotos(); cuSort(); cuAfterMark();
+      toast(`${plural(r.not_rejects.length, "photo")} left alone`, { small: "Its mark changed to keep before deleting, so it was not touched" }); }
   };
 }
 function cuKeepers() {
@@ -1300,7 +1373,8 @@ async function cuImport() {
   if (!cards.length) { toast("No camera card found", { small: "Plug in the card (or its reader); it shows up here by itself" }); return; }
   const card = cards[0];
   const m = modal(`<header><h2>Import from ${esc(card.name)}</h2></header><div class="body">
-      <p style="margin-top:0">${card.photos.toLocaleString()} photos (JPEG and RAW; videos are left on the card). Photos already copied before are skipped. Pass 1 starts on each one as it arrives.</p>
+      <p style="margin-top:0">${card.photos.toLocaleString()} photos are <b>copied</b> to your Mac (JPEG and RAW; videos stay on the card). Pass 1 starts on each one as it arrives.</p>
+      <p class="muted" style="margin:0">Nothing on the card is changed or deleted. Photos already copied before are skipped; a different photo with a name already used (a second camera) gets a new name, so nothing is written over.</p>
       <label class="cu-field"><span>New folder's name</span><input id="im-name" placeholder="The day's date + Import"></label>
       <label class="check-row"><input type="checkbox" id="im-choose"><span>Choose where it goes<small>Otherwise: Pictures › VS Digital Pro Imports</small></span></label>
     </div><footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="im-go">${icon("card")} Import and cull</button></footer>`);
@@ -1320,7 +1394,14 @@ function cuHelp() {
       <li><span class="n">1</span><div><b>Pass 1: the app</b><p>Add an event's folder (or import the camera card). The app looks at every photo on your Mac, free: is the main player sharp, are the eyes open, did the camera focus on the players, is the ball in the play, the light, and which frames are one burst. It marks each one <b>keep</b> or <b>reject</b> with the reason, and how sure it is.</p></div></li>
       <li><span class="n">2</span><div><b>Your pass</b><p>Press <b>Your pass</b>: the photos pass 1 was least sure about come first. <kbd>P</kbd> keep, <kbd>X</kbd> reject, <kbd>→</kbd> next, <kbd>Space</kbd> big, <kbd>Z</kbd> 100%, <kbd>C</kbd> compare a burst. Your mark always wins, and teaches pass 1 your taste for the next event.</p></div></li>
       <li><span class="n">3</span><div><b>Finish</b><p><b>Delete rejects</b> moves them to the Trash (undo with ⌘Z, or from the Trash). <b>Keepers</b>: copy them, crop and edit them for Instagram / Story / YouTube, or send them to Looks and Reel.</p></div></li></ol>
-    <p class="faint">Bursts show as one stack (the best frame on top): open one with its ×N badge. The timeline at the top is the whole event: tall bars are the big moments. Gemini is only used when you ask (Ask AI to rate, the D edit), and shows the cost first.</p>
+    <h4 class="sub">Every key</h4>
+    <table class="ck-kv cu-keytable"><tbody>${[["P or K", "Keep (again: back to pass 1's mark)"], ["X, Delete", "Reject (again: back to pass 1's mark)"], ["U", "Back to pass 1's mark"],
+      ["1–5, 0", "Stars, none"], ["6–9", "Color labels (L: the Spray can for many)"], ["← →, ↑ ↓", "Next, previous (Shift: select as you go)"], ["Home, End", "First, last"],
+      ["Space or Enter", "One big photo / back to the gallery"], ["Z", "100%, on the main face"], ["C", "Compare a burst or your selection side by side"],
+      ["G", "Gallery"], ["B or Shift-G", "Open or close a burst"], ["R", "Show the crop on the big photo"], ["M", "Hide or show the marks"],
+      ["⌘A", "Select everything shown"], ["⌘Z, Shift-⌘Z", "Undo, redo (deleting rejects too)"], ["Esc", "Back out of zoom, big photo, selection"]]
+      .map(([k, v]) => `<tr><th><kbd>${k}</kbd></th><td>${v}</td></tr>`).join("")}</tbody></table>
+    <p class="faint"><b>Words:</b> <b>Pass 1</b> is the app's own first look at every photo. A <b>burst</b> is a run of frames shot together: it shows as one stack with the best frame on top (open it with its badge). <b>Your taste</b>: the app learns from your keeps and rejects, on this Mac. The timeline at the top is the whole event: tall bars are the big moments. Gemini is only used when you ask, and shows the cost first.</p>
     </div><footer><button class="btn primary" data-close>Got it</button></footer>`);
 }
 

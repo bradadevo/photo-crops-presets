@@ -1045,7 +1045,16 @@ function toast(text, { bad = false, sticky = false, spin = false, action = null,
     t.querySelector(".icon-btn").onclick = () => t.remove();
   };
   paint(text, small, spin, action);
-  $("#toasts").appendChild(t);
+  // the same note again replaces the one showing (holding a key never piles them up), and at most three
+  // short notes show at once, so they never cover the photo's own buttons
+  const box = $("#toasts");
+  t.dataset.say = text;
+  if (!sticky) {
+    [...box.children].filter((x) => x.dataset.say === text && !x.dataset.sticky).forEach((x) => x.remove());
+    const brief = [...box.children].filter((x) => !x.dataset.sticky);
+    brief.slice(0, Math.max(0, brief.length - 2)).forEach((x) => x.remove());
+  } else t.dataset.sticky = "1";
+  box.appendChild(t);
   if (!sticky) setTimeout(() => t.remove(), bad ? 7000 : 4500);
   return {
     el: t,

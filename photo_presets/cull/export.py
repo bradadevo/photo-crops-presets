@@ -39,13 +39,18 @@ def safe_name(name: str) -> str:
     return re.sub(r'[/:\\]+', "-", name).strip(" .") or "Label"
 
 
+def files_same(a: Path, b: Path) -> bool:
+    from photo_presets.cull.files import same_file
+    return same_file(a, b)
+
+
 def copy_files(files: list[Path], folder: Path) -> list[Path]:
     """Straight copies (dates kept); one already there with the same size is skipped."""
     folder.mkdir(parents=True, exist_ok=True)
     out = []
     for f in files:
         dest = folder / f.name
-        if dest.exists() and dest.stat().st_size == f.stat().st_size:
+        if dest.exists() and files_same(f, dest):  # (the same photo, copied before: a different one gets a new name)
             out.append(dest)
             continue
         dest = unique(dest)
@@ -164,8 +169,10 @@ def team_on_border(img: Image.Image, group, aspect: float, t, room: bool = True)
 
 
 def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, override: tuple | None = None,
-             ai_crop: tuple | None = None, adjust_fn=None, fit: str = "widen", report: list | None = None) -> list[Path]:
-    """One keeper's versions, saved in folder as <name>_<version>.jpg with its camera data.
+             ai_crop: tuple | None = None, adjust_fn=None, fit: str = "widen", report: list | None = None,
+             stem: str | None = None) -> list[Path]:
+    """One keeper's versions, saved in folder as <name>_<version>.jpg with its camera data (stem: the
+    name to use, when two keepers of one export share a file name).
     adjust_fn: Gemini's adjustments for D (given the natural edit), only when D is asked for."""
     photo = images.load(path)
     img, exif = photo.image, images.upright_exif(photo.exif) if photo.from_raw else photo.exif
@@ -185,7 +192,7 @@ def edit_one(path: Path, m: dict, size_key: str, versions: str, folder: Path, ov
     out = []
 
     def save(im, v):
-        dest = folder / f"{path.stem}_{WORDS[v]}.jpg"  # (made again: replaces the last export's own file)
+        dest = folder / f"{stem or path.stem}_{WORDS[v]}.jpg"  # (made again: replaces the last export's own file)
         images.save_jpeg(im, dest, exif)
         out.append(dest)
 

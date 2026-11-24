@@ -1095,7 +1095,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .cu-bar { flex-wrap: wrap; row-gap: 8px; } .cu-steps, .cu-bar > * { flex: none; } .cu-bar .grow { flex: 1; }
 .cu-step .x { margin-left: -3px; color: var(--muted); }
 @container (max-width: 960px) { .cu-step .x { display: none; } }
-@container (max-width: 780px) { .cu-step .t { display: none; } .cu-step { padding-right: 6px; } .cu-step svg { display: none; } }
+@container (max-width: 600px) { .cu-step .t { display: none; } .cu-step { padding-right: 6px; } .cu-step svg { display: none; } }
 @container (max-width: 560px) { #cu-del span.lbl { display: none; } }
 
 .cu-one { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -1697,3 +1697,14 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
 .del-copies { margin: 0; padding-left: 18px; font-size: 13px; }
 .del-names summary { cursor: pointer; font-size: 13px; color: var(--muted, #9aa3b2); }
 .del-names div { margin-top: 6px; font-size: 12px; max-height: 120px; overflow-y: auto; word-break: break-word; }
+.cu-keytable th { white-space: nowrap; padding-right: 14px; text-align: left; font-weight: 500; }
+.cu-keytable td { color: var(--muted); }
+
+/* the culling bar stays one row: the extras give way first (the counts, the 3rd step, which the Finish
+   button repeats, the labels of the Spray can and Delete), never the step names */
+.cu-bar { flex-wrap: nowrap; }
+@container (max-width: 1000px) { #cu-pass3 { display: none; } #cu-fin .cnt { display: none; } .cu-spray-btn .lbl { display: none; } }
+@container (max-width: 800px) { #cu-del .lbl2 { display: none; } }
+
+/* a dialog open: notes move to the top, so they never sit over its buttons */
+body:has(#modal-root .scrim) #toasts { top: 16px; bottom: auto; }
