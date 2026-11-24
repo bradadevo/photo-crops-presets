@@ -33,7 +33,7 @@ def test_faded_black_is_gray_and_smooth_near_black():
     v = np.linspace(0, 0.2, 400, dtype=np.float32)
     img = np.stack([v, v, v], -1)[None]
     out = C.apply(img, {"rgb": C.text(C.SITUATIONS["faded"][3]["rgb"])})[0]
-    assert abs(out[0, 0] - 26 / 255) < 0.01 and np.ptp(out[0]) < 1e-5
+    assert abs(out[0, 0] - C.SITUATIONS["faded"][3]["rgb"][0][1] / 255) < 0.01 and np.ptp(out[0]) < 1e-5
     assert (np.diff(out[:, 0]) > -1e-5).all() and np.abs(np.diff(out[:, 0], 2)).max() < 0.002
 
 def test_channel_curve_only_moves_its_channel_and_weight_limits_it():

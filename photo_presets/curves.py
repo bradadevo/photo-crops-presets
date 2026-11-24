@@ -97,17 +97,18 @@ def apply(out: np.ndarray, curves: dict[str, str], weight: np.ndarray | None = N
 # Ready-made curves, named by the situation they're for (channel -> points), and where each goes.
 SITUATIONS = {
     "flat": ("Flat, overcast light", "More contrast for a gray day: deeper shadows, brighter highlights", "all",
-             {"rgb": [(0, 0), (64, 52), (192, 206), (255, 255)]}),
+             {"rgb": [(0, 0), (64, 42), (192, 216), (255, 255)]}),
     "punchy": ("Punchy action", "A strong S: bold, high-energy contrast", "all",
-               {"rgb": [(0, 0), (60, 42), (128, 128), (196, 216), (255, 255)]}),
+               {"rgb": [(0, 0), (56, 28), (128, 128), (200, 230), (255, 255)]}),
     "pop": ("Make the player pop", "Contrast on the players only; the background stays as it is", "player",
-            {"rgb": [(0, 0), (64, 54), (192, 210), (255, 255)]}),
+            {"rgb": [(0, 0), (64, 40), (128, 138), (192, 222), (255, 255)]}),
     "night": ("Night game", "The background into deep blacks, its lights kept; the players untouched", "bg",
-              {"rgb": [(0, 0), (60, 34), (140, 120), (255, 255)]}),
+              {"rgb": [(0, 0), (64, 20), (150, 104), (255, 240)]}),
     "faded": ("Faded film", "Lifted blacks and a soft S: a matte, film look", "all",
-              {"rgb": [(0, 26), (70, 66), (190, 200), (255, 246)]}),
+              {"rgb": [(0, 44), (70, 74), (190, 204), (255, 238)]}),
     "teal_orange": ("Cool shadows, warm highlights", "Color grading with the Red and Blue curves", "all",
-                    {"r": [(0, 0), (70, 62), (190, 200), (255, 255)], "b": [(0, 0), (70, 80), (190, 180), (255, 255)]}),
+                    {"r": [(0, 0), (64, 46), (192, 214), (255, 255)], "g": [(0, 0), (64, 70), (192, 190), (255, 255)],
+                     "b": [(0, 10), (64, 90), (192, 168), (255, 240)]}),
 }
 
 
