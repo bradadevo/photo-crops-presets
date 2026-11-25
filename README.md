@@ -714,6 +714,8 @@ uv run vsdigitalpro-batch ~/Movies/"Game day" --all-presets
 | Smoke Studio | A red studio backdrop, white smoke billowing at the player's sides and rolling across the floor in front of their feet, stage lights above |
 | Color Smoke | A dark night background with team-colored smoke bombs (blue left, gold right) behind the player |
 | Stadium Smoke | A dark night stadium, gray smoke at the player's sides and over the floor, and two banks of floodlights glowing through the haze |
+
+Both smoke looks first take the field clean (on this Mac, with LaMa): the other players, the goals (posts, net and wheels), bags and cones come off, so nothing is left half standing in the dark. **Lens blur** on a field photo works like a real lens: the grass where the player stands stays as sharp as their feet and softens with distance; the far side of the field and everything behind it gets the full blur.
 | Neon Pop Art | The player as a neon pop-art painting (indigo, cyan, pink, orange and yellow-green paint, painted lines, a glowing outline) with paint splatter and swooping strokes, on a dark sepia background |
 | Neon Pop Art Sharp | Neon Pop Art with crisp, screen-print edges: hard-edged paint shapes, thin ink and bright etched lines, a thin outline, whip lines flying outward, and a near-black background |
 | Neon Pop Art Sharp Black | Neon Pop Art Sharp on a true black background instead of sepia brown |

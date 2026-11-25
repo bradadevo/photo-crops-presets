@@ -296,12 +296,16 @@ def others(img: np.ndarray, alpha: np.ndarray, scene) -> np.ndarray | None:
     m &= cv2.dilate((alpha > 0.3).astype(np.uint8), np.ones((5, 5), np.uint8)) == 0
     if m.sum() < 0.0005 * h * w:
         return None
-    r = max(3, int(0.012 * max(h, w)))
-    grown = cv2.dilate(m.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    # (grown on a smaller copy: the reach is wide and coarse, and full size takes seconds)
+    k = min(1.0, 1600 / max(h, w))
+    sm = cv2.resize(m.astype(np.uint8), (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_NEAREST)
+    r = max(3, int(0.012 * max(sm.shape)))
+    grown = cv2.dilate(sm, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
     # their shadows lie at their feet: reach a little further down and sideways there
     down = cv2.dilate(grown, np.ones((r * 2, r * 4), np.uint8), anchor=(r * 2, 0))
+    reach = cv2.resize(((grown | down) > 0).astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
     keep_off = cv2.dilate((alpha > 0.05).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
-    return ((grown | down) > 0) & ~keep_off
+    return (reach | m) & ~keep_off
 
 
 def build(img: np.ndarray, alpha: np.ndarray, scene, style: dict, seed: int = 7,
@@ -524,17 +528,64 @@ def clutter(img: np.ndarray, alpha: np.ndarray, horizon: np.ndarray | None, fy: 
     return cv2.dilate(keep.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * g + 1, 2 * g + 1))) > 0
 
 
+def goals(img: np.ndarray, alpha: np.ndarray, horizon: np.ndarray | None) -> np.ndarray | None:
+    """Goals (and other white frames standing on the field: a flag, a sideline post): white shapes that
+    rise from the field past its far edge, which a painted line never does. The whole of each one on
+    the field comes out (its posts, its net and what shows through the net, its wheels), so no half a
+    goal is left standing when what is behind the field is replaced."""
+    if horizon is None:
+        return None
+    h, w = alpha.shape
+    k = min(1.0, 900 / max(h, w))
+    sh, sw = max(8, round(h * k)), max(8, round(w * k))
+    small = cv2.resize(np.clip(img, 0, 1), (sw, sh), interpolation=cv2.INTER_AREA)
+    sa = cv2.resize(alpha, (sw, sh), interpolation=cv2.INTER_AREA)
+    hz = cv2.resize(horizon[None, :].astype(np.float32), (sw, 1), interpolation=cv2.INTER_LINEAR)[0] * k
+    hsv = cv2.cvtColor((small * 255).astype(np.uint8), cv2.COLOR_RGB2HSV)
+    white = ((hsv[..., 1] < 70) & (hsv[..., 2] > 150) & (sa < 0.05)).astype(np.uint8)
+    # posts, crossbar and net threads into one shape
+    white = cv2.dilate(white, np.ones((3, 3), np.uint8))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(white, connectivity=8)
+    yy = np.arange(sh)[:, None]
+    above = yy < hz[None, :] - 0.015 * sh  # clearly behind the field's far edge
+    below = yy > hz[None, :] + 0.005 * sh  # clearly on the field
+    field = yy > hz[None, :] - 0.01 * sh
+    out = np.zeros((sh, sw), np.uint8)
+    for i in range(1, n):
+        x, y, bw, bh, area = stats[i]
+        if bh < 0.06 * sh or area < 0.0004 * sh * sw:
+            continue
+        part = lab == i
+        rise = part & above
+        if not (part & below).any() or not rise.any():
+            continue
+        if np.ptp(np.nonzero(rise)[0]) < 0.03 * sh:  # (a white car's roof on the edge is not a goal)
+            continue
+        hull = np.zeros((sh, sw), np.uint8)
+        cv2.fillConvexPoly(hull, cv2.convexHull(cv2.findNonZero(part.astype(np.uint8))), 1)
+        hull &= field.astype(np.uint8)
+        if hull.sum() > 0.5 * field.sum():  # (not a goal: something filling the frame)
+            continue
+        out |= hull
+    if not out.any():
+        return None
+    g = max(2, int(0.006 * max(sh, sw)))
+    out = cv2.dilate(out, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * g + 1, 2 * g + 1)))
+    return cv2.resize(out, (w, h), interpolation=cv2.INTER_NEAREST) > 0
+
+
 def cleaned(img: np.ndarray, alpha: np.ndarray, scene, horizon: np.ndarray | None = None) -> np.ndarray | None:
-    """The empty field: the photo with everyone taken out (LaMa, on this Mac). The players in the
-    cut-out go back on top; the ground filled in behind them is for their edges."""
+    """The empty field: the photo with everyone taken out (LaMa, on this Mac), and the goals and what
+    lies on the field. The players in the cut-out go back on top; the ground filled in behind them
+    is for their edges."""
     m = others(img, alpha, scene)
     h, w = alpha.shape
     r = max(2, int(0.004 * max(h, w)))
     body = cv2.dilate((alpha > 0.05).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
     m = body if m is None else (m | body)  # (the players too: the ground behind them, for their edges)
-    c = clutter(img, alpha, horizon, feet_of(alpha, scene)[1])
-    if c is not None:
-        m = m | c
+    for c in (clutter(img, alpha, horizon, feet_of(alpha, scene)[1]), goals(img, alpha, horizon)):
+        if c is not None:
+            m = m | c
     from photo_presets import retouch
     u8 = (np.clip(img, 0, 1) * 255 + 0.5).astype(np.uint8)
     out, _ = retouch.fill(u8, m)

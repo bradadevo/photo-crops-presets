@@ -298,10 +298,46 @@ def lens_blur(a, p, ctx):
     if ctx.alpha is None or p.get("layer", "background") != "background":
         return _soft_blur(a, sigma)
     keep = 1 - ctx.alpha
-    blurred = _soft_blur(a * keep[..., None], sigma)
-    weight = _soft_blur(keep, sigma)
-    weight = weight[..., None] if weight.ndim == 2 else weight
-    return np.where(weight > 1e-3, blurred / np.maximum(weight, 1e-3), a)
+
+    def blur(s):
+        blurred = _soft_blur(a * keep[..., None], s)
+        weight = _soft_blur(keep, s)
+        weight = weight[..., None] if weight.ndim == 2 else weight
+        return np.where(weight > 1e-3, blurred / np.maximum(weight, 1e-3), a)
+
+    depth = _focus_depth(ctx, *a.shape[:2])
+    if depth is None:
+        return blur(sigma)
+    # on a field the way a lens does it: the grass the player stands on as sharp as their feet,
+    # softer with distance (most behind the field's far edge), a little softer close in front
+    stops = [0.0, 0.15, 0.35, 0.65, 1.0]
+    out = np.zeros_like(a)
+    for i, s in enumerate(stops):
+        wt = np.interp(depth, stops, np.eye(len(stops))[i]).astype(np.float32)
+        if wt.max() > 0:
+            out += (a if s == 0 else blur(s * sigma)) * wt[..., None]
+    return out
+
+
+def _focus_depth(ctx, h: int, w: int) -> np.ndarray | None:
+    """How far out of focus each part of the background is (0 sharp, 1 the full blur) when the player
+    stands on a field: 0 on the ground at their feet, rising to 1 at the field's far edge and
+    everything behind it, and to 0.5 on the ground close in front. None with no field (one blur)."""
+    from photo_presets import fields
+    if ctx.alpha is None or ctx.original is None or not fields._grass_below(ctx.original, ctx.alpha):
+        return None
+    hz = _horizon(ctx, h, w)
+    _, fy, ph = fields.feet_of(ctx.alpha, ctx.scene)
+    if fy > 0.98 * h and ph > 0.7 * h:
+        return None  # (no ground shows under a tight portrait)
+    far = (hz if hz is not None else np.zeros((w,), np.float32))[None, :].astype(np.float32)
+    far = np.minimum(far, fy - 0.05 * ph)
+    y = np.arange(h, dtype=np.float32)[:, None]
+    behind = np.clip(((fy - y) / np.maximum(fy - far, 1.0) - 0.05) / 0.95, 0, 1) ** 0.8
+    front = 0.5 * np.clip((y - fy) / max(0.6 * ph, 1.0) - 0.05, 0, 1)
+    depth = np.where(y < fy, behind, front).astype(np.float32)
+    depth = np.where(y < far, 1.0, depth).astype(np.float32)
+    return cv2.GaussianBlur(np.broadcast_to(depth, (h, w)).copy(), (0, 0), max(1.0, 0.004 * h))
 
 
 def _soft_blur(a: np.ndarray, sigma: float) -> np.ndarray:
@@ -439,6 +475,20 @@ def field_set(a, p, ctx):
     hz = _horizon(ctx, h, w)
     clean = fields.cleaned_kept(a, ctx.alpha, ctx.scene, hz)  # (made once a photo and size: shared by every field look)
     return fields.place(a, ctx.alpha, ctx.scene, style, ctx.seed, hz, clean)
+
+
+@op("clean_field", cutout=True, label="Clean field (other players and goals off)", layer="background")
+def clean_field(a, p, ctx):
+    """Takes everyone but the cut-out players off the field, and the goals, bags and cones (LaMa, on
+    this Mac), so a look that darkens or replaces the background has nothing left half standing in
+    it: no headless legs, no goal cut off at the crossbar."""
+    from photo_presets import fields
+    if ctx.alpha is None:
+        ctx.notes.append("Clean field skipped: no player cut-out here")
+        return a
+    h, w = a.shape[:2]
+    clean = fields.cleaned_kept(a, ctx.alpha, ctx.scene, _horizon(ctx, h, w))
+    return a if clean is None else clean
 
 
 # Studio smoke and light ---------------------------------------------------------

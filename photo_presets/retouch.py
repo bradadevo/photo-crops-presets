@@ -95,9 +95,20 @@ def _match_seam(tile: np.ndarray, filled: np.ndarray, hole: np.ndarray) -> np.nd
         return filled
     diff = (tile - filled) * ring[..., None]
     sigma = max(3.0, np.sqrt(hole.sum()) * 0.25)
-    spread = cv2.GaussianBlur(diff, (0, 0), sigma)
-    weight = cv2.GaussianBlur(ring.astype(np.float32), (0, 0), sigma)[..., None]
+    spread = _wide(diff, sigma)
+    weight = _wide(ring.astype(np.float32), sigma)[..., None]
     return filled + np.where(hole[..., None], spread / np.maximum(weight, 1e-3), 0)
+
+
+def _wide(a: np.ndarray, sigma: float) -> np.ndarray:
+    """A wide blur done on a smaller copy and scaled back: the same smooth result (a blur this wide
+    has no fine detail to lose), minutes quicker on a big hole in a full-size photo."""
+    scale = min(1.0, 8.0 / sigma)
+    if scale >= 1.0:
+        return cv2.GaussianBlur(a, (0, 0), sigma)
+    h, w = a.shape[:2]
+    small = cv2.resize(a, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
+    return cv2.resize(cv2.GaussianBlur(small, (0, 0), sigma * scale), (w, h), interpolation=cv2.INTER_LINEAR)
 
 
 def _high(a: np.ndarray, sigma: float = 1.4) -> np.ndarray:

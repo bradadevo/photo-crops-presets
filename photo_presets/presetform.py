@@ -41,7 +41,7 @@ DEFAULTS = {
     "fog_on": False, "fog_density": 0.5, "fog_height": 0.65, "fog_color": "#d9dee6",
     "sm_on": False, "sm_color": "#f4f1ee", "sm_two": False, "sm_color2": "#d9a520", "sm_place": "sides",
     "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0, "sm_ground": 0.7,
-    "ns_on": False, "ns_keep": 0.15,
+    "ns_on": False, "ns_keep": 0.15, "cf_on": False,
     "nb_on": False, "nb_bg": "Studio Grey", "nb_color": "#1f2a44", "nb_blur": 0.0,
     "fs_on": False, "fs_look": "Kneel Line",
     "lights_on": False, "lights_count": 2, "lights_amount": 0.8,
@@ -84,6 +84,8 @@ FIELDS = list(DEFAULTS)
 def to_recipe(v: dict) -> dict:
     """The form as a recipe, steps in a fixed order."""
     s = []
+    if v["cf_on"]:  # first: the other players and the goals off the field, before anything darkens it
+        s.append({"op": "clean_field"})
     if v["clean_on"]:
         s.append({"op": "clean", "strength": "light"})
     kind = v["color_kind"]
@@ -298,6 +300,8 @@ def from_recipe(recipe: dict) -> dict:
                      sm_color2=g("color2") or v["sm_color2"], sm_place=g("place", "sides"),
                      sm_amount=g("amount", 0.85), sm_size=g("size", 1.0), sm_front=g("front", 0.0),
                      sm_ground=g("ground", 0.7))
+        elif op == "clean_field":
+            v["cf_on"] = True
         elif op == "night_sky":
             v.update(ns_on=True, ns_keep=g("keep", 0.15))
         elif op == "field_set":
@@ -551,6 +555,8 @@ def components(ids: dict) -> dict:
                     drop("nb_bg", backgrounds.NAMES, "Background")
                     color("nb_color", "Its color", info="The team color, for the backgrounds that use one.")
                     slider("nb_blur", 0, 1, "Blur", info="0 = sharp. More = out of focus, like a fast lens.")
+            check("cf_on", "Clean field", "Takes the other players, the goals, bags and cones off the field "
+                  "(on this Mac), so a dark or new background has nothing left half standing in it.")
             check("ns_on", "Night sky", "Swaps everything behind the far edge of the field (cars, houses, daytime sky) "
                   "for a dark night sky with lit haze.")
             with when("ns_on"):

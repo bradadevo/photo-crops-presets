@@ -143,6 +143,7 @@ STARTERS: dict[str, dict] = {
         {"op": "contrast", "amount": 0.15},
     ]},
     "Color Smoke": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "clean_field"},
         {"op": "exposure", "stops": -2.2, "layer": "background"},
         {"op": "saturation", "amount": 0.5, "layer": "background"},
         {"op": "night_sky", "amount": 1.0, "keep": 0.15},
@@ -152,9 +153,10 @@ STARTERS: dict[str, dict] = {
         {"op": "subject_vignette", "amount": 0.4, "spread": 0.35},
     ]},
     "Stadium Smoke": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "clean_field"},
         {"op": "exposure", "stops": -2.0, "layer": "background"},
         {"op": "saturation", "amount": 0.35, "layer": "background"},
-        {"op": "lens_blur", "amount": 0.006, "layer": "background"},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
         {"op": "night_sky", "amount": 1.0, "keep": 0.15},
         {"op": "smoke_cloud", "color": "#d9d9d9", "place": "sides_floor", "amount": 0.85, "size": 1.25, "front": 0.7},
         {"op": "stadium_lights", "height": 0.7, "amount": 0.9, "color": "#fff3dc"},
