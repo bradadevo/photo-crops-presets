@@ -573,3 +573,15 @@ def test_the_photos_panel_says_which_photos_are_getting_ready(client):
         server.CUT.queue.clear()
     b = client.get("/api/prep").json()
     assert b == b | {"now": None, "waiting": [], "done": 3, "total": 3, "left_s": 0}
+
+
+def test_only_a_photo_with_a_player_becomes_a_looks_example(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(server, "_PLAYER", {})
+    monkeypatch.setattr(server, "camera_photo", lambda p: True)  # (both from a camera)
+    player = SimpleNamespace(subject_box=(0.4, 0.2, 0.6, 0.9), subject_height=0.7)
+    bird = SimpleNamespace(subject_box=None, subject_height=0.5)  # (no person found: a heron on grass)
+    speck = SimpleNamespace(subject_box=(0.5, 0.5, 0.52, 0.55), subject_height=0.05)
+    assert server.example_photo(tmp_path / "player.jpg", player)
+    assert not server.example_photo(tmp_path / "heron.jpg", bird)
+    assert not server.example_photo(tmp_path / "far.jpg", speck)

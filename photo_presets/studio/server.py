@@ -519,6 +519,24 @@ def camera_photo(path: Path) -> bool:
     return _CAMERA[key]
 
 
+_PLAYER: dict[str, bool] = {}
+
+
+def example_photo(path: Path, scene=None) -> bool:
+    """A photo fit to be a look's example in the picker: taken with a camera, with a player in it big
+    enough to see (a bird, a landscape or a far-off speck of a player never stands for a look)."""
+    if not camera_photo(path):
+        return False
+    key = str(path)
+    if key not in _PLAYER:
+        try:
+            scene = scene if scene is not None else E.prepared(path, "none").scene
+            _PLAYER[key] = scene.subject_box is not None and scene.subject_height >= 0.15
+        except Exception:
+            return False
+    return _PLAYER[key]
+
+
 def keep_example(name: str, img: Image.Image) -> None:
     """The look's latest picture, shown in the picker until a photo previews it."""
     try:
@@ -554,7 +572,7 @@ def _swatch(pid: int, name: str, token: str = "") -> bytes | None:
     small = p.image.copy()
     small.thumbnail((SWATCH, SWATCH))
     img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
-    if not token and camera_photo(path):
+    if not token and example_photo(path, p.scene):
         keep_example(name, img)
     return jpeg(img, quality=84)
 
@@ -708,7 +726,7 @@ class Ahead:
         img, _ = pipeline.render(small, recipe, E.library, p.scene, 0)
         # (the look; its small picture for the list; its card for the grid: the look is drawn once for all three)
         data = (jpeg(img, quality=90), jpeg(img, CHIP, 82), jpeg(img, SWATCH, 84))
-        if not token and camera_photo(path):
+        if not token and example_photo(path, p.scene):
             keep_example(name, img)
         try:
             AHEAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -1084,7 +1102,7 @@ def _make(slot: Slot, job: Job, crop: str) -> None:
     elif cutting and not loading:  # how long the cut-out itself took, for the next estimates
         timing.learn("__cut_out__", max(5.0, took - slot.expect - (timing.PHOTO_READY if extra > timing.cut_out() else 0)))
     design = design_of(job.recipe.get("design"))
-    if name in presets.load_all() and not design and camera_photo(job.path):
+    if name in presets.load_all() and not design and example_photo(job.path):
         keep_example(name, r.after)
     future = S.future.get(slot.photo)
     if future:  # removed from every look of this photo, so from this one too
