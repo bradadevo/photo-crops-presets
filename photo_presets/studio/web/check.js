@@ -5,9 +5,10 @@
 
 const ck = { files: [], sel: store.get("check.sel", null), detail: null, picked: new Set(), view: "file",
   t: 0, moment: null, split: 50, after: true, marks: false, cmp: null, onlyDiff: store.get("check.onlyDiff", false),
-  timer: null, sideSig: "", mainSig: "", guide: !store.get("check.seenGuide", false) };
+  timer: null, sideSig: "", mainSig: "", guide: !store.get("check.seenGuide", false), focusView: false, picking: false, people: null };
 const KIND_ICON = { video: "film", photo: "image" };
-const MOMENT_COLOR = { soft_pan: "#f5a623", shaky: "#ff5d5d", jump: "#b38cff", dark: "#4f8bff", bright: "#f5c443" };
+const MOMENT_COLOR = { soft_pan: "#f5a623", shaky: "#ff5d5d", jump: "#b38cff", dark: "#4f8bff", bright: "#f5c443",
+  focus: "#2ad4c4", frame_soft: "#8fa3b8" };
 
 async function ckRefresh() {
   const data = await fetch("/api/check/state").then((r) => r.json()).catch(() => null);
@@ -25,6 +26,38 @@ async function ckRefresh() {
   }
 }
 const ckFile = (id) => ck.files.find((f) => f.id === id);
+
+/* Take files out of the list (one Undo puts them all back). The files themselves are never deleted: a
+   file dropped on the window was the app's own copy, and that copy goes to the Trash when the app next starts. */
+async function ckRemove(ids) {
+  ids = ids.filter((id) => ckFile(id));
+  if (!ids.length) return;
+  const names = ids.map((id) => ckFile(id).name);
+  const order = ck.files.map((f) => f.id);
+  const next = order.slice(order.indexOf(ck.sel) + 1).concat(order.slice(0, order.indexOf(ck.sel)).reverse()).find((id) => !ids.includes(id));
+  const gone = [];
+  for (const id of ids) gone.push(await api(`/api/check/file/${id}`, undefined, { method: "DELETE" }).catch(() => null));
+  const done = gone.filter(Boolean);
+  ids.forEach((id) => ck.picked.delete(id));
+  if (ids.includes(ck.sel)) { ck.sel = next ?? null; ck.detail = null; }
+  await ckRefresh(); renderCkFiles();
+  if (ck.view === "file") { if (ck.sel) ckLoad(ck.sel); else { renderCkMain(); renderCkSide(); } }
+  const dropped = done.some((r) => r.dropped);
+  toast(done.length === 1 ? `Took ${names[0]} out of the list` : `Took ${done.length} files out of the list`, {
+    small: dropped ? "A file you dropped on the window was the app's own copy: it goes to the Trash when the app next starts. Your originals are untouched" : "The files themselves are untouched",
+    action: { label: "Undo", run: async (ev) => {
+      ev.target.closest(".toast")?.remove();
+      let back = null;
+      for (const r of done) back = await api("/api/check/restore", { entry: r.entry }).catch(() => back);
+      await ckRefresh(); if (back) ckLoad(back.id); } } });
+}
+document.addEventListener("keydown", (e) => {
+  if (st.mode !== "check" || e.metaKey || e.ctrlKey || e.altKey || modalOpen?.() || e.target.closest?.('input:not([type="checkbox"]), textarea, select')) return;
+  if (e.key === "Escape" && ck.picking) { ck.picking = false; paintCkViewer(); return; }
+  if (e.key !== "Delete" && e.key !== "Backspace") return;
+  const ids = ck.picked.size ? [...ck.picked] : ck.view === "file" && ck.sel ? [ck.sel] : [];
+  if (ids.length) { e.preventDefault(); ckRemove(ids); }
+});
 function ckPoll() {
   clearTimeout(ck.timer);
   if (st.mode !== "check") return;
@@ -147,13 +180,15 @@ function renderCkFiles() {
   list.innerHTML = ck.files.length ? ck.files.map((f) => `<div class="ck-row${f.id === ck.sel && ck.view === "file" ? " on" : ""}" data-ck="${f.id}" title="${esc(f.path)}">
       <label class="ck-tick" title="Tick files to compare or export them together"><input type="checkbox" data-ck-pick="${f.id}" ${ck.picked.has(f.id) ? "checked" : ""}></label>
       <div class="ck-thumb">${f.state === "done" || f.state === "failed" ? `<img src="/img/check/${f.id}/thumb.jpg" alt="" loading="lazy" onerror="this.remove()">` : ""}<span class="kind">${icon(KIND_ICON[f.kind] || "image")}</span></div>
-      <div class="ck-txt"><b>${esc(f.name)}</b><small>${ckStatus(f)}</small></div></div>`).join("")
+      <div class="ck-txt"><b>${esc(f.name)}</b><small>${ckStatus(f)}</small></div>
+      <button class="ck-x" data-ck-x="${f.id}" title="Take it out of this list (Delete key). The file itself stays where it is" aria-label="Take ${esc(f.name)} out of the list">${icon("x")}</button></div>`).join("")
     : `<div class="ck-empty"><p><b>Nothing added yet</b></p><p>Start with step 1: add a clip or photo.</p>
        <button class="btn primary" data-ck-add2="files">${icon("plus")} Add clips or photos…</button><button class="btn ghost" data-ck-add2="folder">Add a folder…</button><p class="faint">or drop them here</p></div>`;
   paintIcons(list);
   list.querySelectorAll("[data-ck-add2]").forEach((b) => b.onclick = () => ckChoose(b.dataset.ckAdd2));
+  list.querySelectorAll("[data-ck-x]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); ckRemove([+b.dataset.ckX]); });
   list.querySelectorAll("[data-ck]").forEach((row) => row.onclick = (e) => {
-    if (e.target.closest(".ck-tick")) return;
+    if (e.target.closest(".ck-tick, .ck-x")) return;
     ck.view = "file"; ck.guide = false; $("#check").classList.remove("comparing");
     ckLoad(+row.dataset.ck);
   });
@@ -178,8 +213,10 @@ function renderCkFoot() {
         <button role="menuitem" data-fmt="both">Word report + spreadsheet<small>Opens in Word or Google Drive</small></button>
         <button role="menuitem" data-fmt="docx">Word report only</button>
         <button role="menuitem" data-fmt="csv">Spreadsheet only (CSV)<small>One row per file</small></button></div></div>
-    <small class="faint">${picked.length ? `${plural(picked.length, "file")} ticked` : "Tick files to compare or export some"}</small>` : "";
+    ${ck.picked.size ? `<button class="btn" id="ck-remove-ticked" title="Take the ticked files out of this list (Delete key). The files themselves stay where they are">${icon("x")} Remove (${ck.picked.size})</button>` : ""}
+    <small class="faint">${picked.length ? `${plural(picked.length, "file")} ticked` : "Tick files to compare, export or remove some"}</small>` : "";
   paintIcons(foot);
+  $("#ck-remove-ticked")?.addEventListener("click", () => ckRemove([...ck.picked]));
   $("#ck-compare")?.addEventListener("click", () => {
     if (picked.length < 2) return;
     ck.view = ck.view === "compare" ? "file" : "compare"; ck.guide = false;
@@ -277,6 +314,7 @@ function renderCkMain() {
     <div class="ck-viewer" id="ck-viewer"></div>
     ${isVid ? `<div class="ck-timeline" id="ck-timeline" title="Click anywhere to see that moment">${d.moments.map((m, i) => `<span class="mo" data-mo="${i}" style="left:${m.start / d.duration * 100}%;width:${Math.max(0.6, (m.end - m.start) / d.duration * 100)}%;background:${MOMENT_COLOR[m.kind]}" title="${esc(m.clock)} · ${esc(m.label)}"></span>`).join("")}<span class="head" id="ck-head" style="left:${ck.t / d.duration * 100}%"></span></div>
       <div class="ck-legend">${[...new Set(d.moments.map((m) => m.kind))].map((k) => `<span><i style="background:${MOMENT_COLOR[k]}"></i>${esc(d.moments.find((m) => m.kind === k).label)}</span>`).join("")}${d.moments.length ? "" : `<span class="faint">No problem moments found</span>`}</div>` : ""}
+    ${isVid && d.focus ? ckFocusCard(d) : ""}
     <section class="ck-card"><h3>${problems.length ? "What's holding it back" : "How it looks"}</h3>
       <ul class="ck-find">${problems.map((x) => `<li class="warn">${esc(x)}</li>`).join("")}${(problems.length || info.some((x) => x.startsWith("No problems")) ? [] : ["No problems found."]).map((x) => `<li class="ok">${esc(x)}</li>`).join("")}${info.map((x) => `<li class="${x.startsWith("No problems") ? "ok" : "info"}">${esc(x)}</li>`).join("")}</ul>
       ${isVid && d.moments.length ? `<h4>When it happens <small class="faint">click one to see it</small></h4><div class="ck-moments">${d.moments.map((m, i) => `<button class="ck-mo${ck.moment === i ? " on" : ""}" data-mo="${i}"><i style="background:${MOMENT_COLOR[m.kind]}"></i><b>${esc(m.clock)}</b><span><b>${esc(m.label)}</b> ${esc(m.detail)}</span></button>`).join("")}</div>` : ""}</section>
@@ -290,27 +328,32 @@ function renderCkMain() {
   paintIcons(main);
   $("#ck-open").onclick = () => api("/api/check/open", { path: d.path });
   $("#ck-reveal").onclick = () => api("/api/reveal", { path: d.path });
-  $("#ck-remove").onclick = async () => {
-    const r = await api(`/api/check/file/${d.id}`, undefined, { method: "DELETE" });
-    ck.detail = null; ck.picked.delete(d.id);
-    await ckRefresh(); renderCkFiles(); if (ck.sel) ckLoad(ck.sel); else { renderCkMain(); renderCkSide(); }
-    toast(`Took ${d.name} out of the list`, { small: r.dropped ? "This was the app's own copy of a file you dropped: it goes to the Trash when the app next starts. Your original is untouched" : "The file itself is untouched", action: { label: "Undo", run: async (ev) => {
-      ev.target.closest(".toast")?.remove(); const back = await api("/api/check/restore", { entry: r.entry }); await ckRefresh(); ckLoad(back.id); } } });
-  };
+  $("#ck-remove").onclick = () => ckRemove([d.id]);
   main.querySelectorAll("[data-mo]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); ckMoment(+b.dataset.mo); });
-  $("#ck-timeline")?.addEventListener("click", (e) => {
+  const seekFrom = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
-    ck.t = Math.max(0, Math.min(d.duration - 0.05, (e.clientX - r.left) / r.width * d.duration)); ck.moment = null;
-    $("#ck-head").style.left = `${ck.t / d.duration * 100}%`;
-    main.querySelectorAll(".ck-mo").forEach((x) => x.classList.remove("on"));
-    paintCkViewer();
-  });
+    ckSeek((e.clientX - r.left) / r.width * d.duration);
+  };
+  $("#ck-timeline")?.addEventListener("click", seekFrom);
+  $("#ck-fchart")?.addEventListener("click", seekFrom);
+  $("#ck-pick")?.addEventListener("click", () => { ck.picking = !ck.picking; ck.focusView = true; renderCkMain(); });
+  $("#ck-auto")?.addEventListener("click", () => ckSetSubject({}));
+  paintCkViewer();
+}
+function ckSeek(t) {
+  const d = ck.detail;
+  ck.t = Math.max(0, Math.min(d.duration - 0.05, t)); ck.moment = null;
+  $("#ck-head").style.left = `${ck.t / d.duration * 100}%`;
+  if ($("#ck-fhead")) $("#ck-fhead").style.left = `${ck.t / d.duration * 100}%`;
+  $$("#ck-main .ck-mo").forEach((x) => x.classList.remove("on"));
   paintCkViewer();
 }
 function ckMoment(i) {
   const d = ck.detail, m = d.moments[i];
   ck.moment = i; ck.t = (m.start + m.end) / 2;
+  if ((m.kind === "focus" || m.kind === "frame_soft") && d.focus) ck.focusView = true;
   $("#ck-head").style.left = `${ck.t / d.duration * 100}%`;
+  if ($("#ck-fhead")) $("#ck-fhead").style.left = `${ck.t / d.duration * 100}%`;
   $$("#ck-main .ck-mo").forEach((x) => x.classList.toggle("on", +x.dataset.mo === i));
   paintCkViewer();
 }
@@ -318,24 +361,29 @@ function ckMoment(i) {
 function paintCkViewer() {
   const v = $("#ck-viewer"), d = ck.detail;
   if (!v || !d) return;
-  const fixed = anyFixOn(d) && ck.after;
   const isVid = d.kind === "video";
+  const focusing = isVid && d.focus && ck.focusView;
+  const fixed = anyFixOn(d) && ck.after && !focusing;
   const m = ck.moment != null ? d.moments[ck.moment] : null;
   v.innerHTML = `<div class="ck-pic" id="ck-pic" style="aspect-ratio:${d.width}/${d.height}">
       <img class="before" src="${ck.marks ? `/img/check/${d.id}/marks.jpg` : ckViewUrl(d, false)}" alt="">
       ${fixed && !ck.marks ? `<img class="after" id="ck-after" src="${ckViewUrl(d, true)}" alt="" style="clip-path:inset(0 0 0 ${ck.split}%)"><span class="split" id="ck-split" style="left:${ck.split}%"></span><span class="tag l">Before</span><span class="tag r">After</span>` : ""}
       ${!isVid && d.focus_spot && ck.marks ? `<span class="spot" style="left:${d.focus_spot[0] * 100}%;top:${d.focus_spot[1] * 100}%" title="The sharpest detail"></span>` : ""}
+      ${focusing ? `<div class="ck-fover${ck.picking ? " picking" : ""}" id="ck-fover"></div>` : ""}
+      ${focusing && ck.picking ? `<span class="tag l pickhint">Click the person who should have been sharp · Esc to cancel</span>` : ""}
       <span class="ck-loading" id="ck-loading"><span class="spin sm"></span></span>
     </div>
-    <div class="ck-vbar">${isVid ? `<span class="faint">${moClock(ck.t)} of ${moClock(d.duration)}</span>${m ? `<button class="btn ghost sm" id="ck-play">${icon("film")} Play this moment</button>` : ""}` : `<button class="chip-btn${ck.marks ? " on" : ""}" id="ck-marks" title="Pure white areas in red, pure black in blue, the sharpest detail circled">${icon("target")} Problem areas</button>`}
+    <div class="ck-vbar">${isVid ? `<span class="faint">${moClock(ck.t)} of ${moClock(d.duration)}</span>${m ? `<button class="btn ghost sm" id="ck-play">${icon("film")} Play this moment</button>` : ""}${d.focus ? `<button class="chip-btn${ck.focusView ? " on" : ""}" id="ck-fview" title="Your subject's box (green sharp, red out of focus), the sharpest part of the picture (yellow) and everyone else found">${icon("target")} Focus</button>` : ""}` : `<button class="chip-btn${ck.marks ? " on" : ""}" id="ck-marks" title="Pure white areas in red, pure black in blue, the sharpest detail circled">${icon("target")} Problem areas</button>`}
       <span style="flex:1"></span>
-      ${anyFixOn(d) ? `<div class="seg small"><button class="${ck.after ? "" : "on"}" data-ba="0">Original</button><button class="${ck.after ? "on" : ""}" data-ba="1">Before / after</button></div>` : `<span class="faint">Switch on a fix to see it here</span>`}</div>`;
+      ${focusing ? `<span class="faint">The original, with your subject and the sharpest part marked</span>` : anyFixOn(d) ? `<div class="seg small"><button class="${ck.after ? "" : "on"}" data-ba="0">Original</button><button class="${ck.after ? "on" : ""}" data-ba="1">Before / after</button></div>` : `<span class="faint">Switch on a fix to see it here</span>`}</div>`;
   paintIcons(v);
   const imgs = v.querySelectorAll("img"); let left = imgs.length;
   const loaded = () => { if (--left <= 0) $("#ck-loading")?.remove(); };
   imgs.forEach((im) => { if (im.complete) loaded(); else { im.onload = loaded; im.onerror = loaded; } });
   v.querySelectorAll("[data-ba]").forEach((b) => b.onclick = () => { ck.after = b.dataset.ba === "1"; paintCkViewer(); });
   $("#ck-marks")?.addEventListener("click", () => { ck.marks = !ck.marks; paintCkViewer(); });
+  $("#ck-fview")?.addEventListener("click", () => { ck.focusView = !ck.focusView; if (!ck.focusView) ck.picking = false; paintCkViewer(); });
+  if (focusing) ckPaintFocus(d);
   $("#ck-play")?.addEventListener("click", () => {
     $("#ck-pic").innerHTML = `<video src="/media/check/${d.id}/moment/${ck.moment}.mp4" autoplay controls playsinline loop></video><span class="ck-loading"><span class="spin sm"></span> Getting the moment ready…</span>`;
     const vid = $("#ck-pic video"); vid.oncanplay = () => $("#ck-pic .ck-loading")?.remove();
@@ -347,6 +395,72 @@ function paintCkViewer() {
     pic.onpointerdown = (e) => { move(e); pic.setPointerCapture(e.pointerId); pic.onpointermove = move; };
     pic.onpointerup = () => { pic.onpointermove = null; };
   }
+}
+/* Focus on the subject: how sharp they are next to the sharpest part of the picture, over time */
+const F_STATE = { sharp: "As sharp as anything in the picture", slightly_soft: "A little soft", soft: "Out of focus",
+  frame_soft: "The whole picture is soft", unknown: "Too small or hidden to judge" };
+function ckFocusCard(d) {
+  const f = d.focus, W = 600, H = 80, dur = d.duration;
+  const x = (t) => t / dur * W;
+  const v = (r) => r ? Math.min(1, 1 / r) : null;  // 1: as sharp as the sharpest part of the frame
+  const y = (k) => 4 + (1 - k) * (H - 8);
+  let path = "", prev = null;
+  for (const p of f.points) {
+    const k = v(p.ratio);
+    if (k == null) { prev = null; continue; }
+    path += `${prev != null && p.t - prev <= 0.8 ? "L" : "M"}${x(p.t).toFixed(1)},${y(k).toFixed(1)} `; prev = p.t;
+  }
+  const step = f.points.length > 1 ? f.points[1].t - f.points[0].t : 0.25;
+  const strip = f.points.map((p) => `<rect x="${x(p.t - step / 2).toFixed(1)}" width="${Math.max(1, x(step)).toFixed(1)}" y="0" height="8" class="${p.state}"><title>${moClock(p.t)} · ${F_STATE[p.state]}</title></rect>`).join("");
+  const bands = f.runs.map((r) => `<rect x="${x(r.start).toFixed(1)}" y="0" width="${Math.max(1, x(r.end) - x(r.start)).toFixed(1)}" height="${H}" class="band ${r.kind}"/>`).join("");
+  const soft = y(1 / f.soft);
+  return `<section class="ck-card ck-focus"><h3>Focus on your subject <small class="faint">${f.picked ? "the person you picked" : "picked for you: the person the camera followed"}</small></h3>
+    <p class="ck-fsay ${f.missed ? "warn" : "ok"}">${esc(f.finding)}</p>
+    <div class="ck-fchart" id="ck-fchart" title="How sharp your subject is next to the sharpest part of the picture. Click to see that moment">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="plot">${bands}<line x1="0" x2="${W}" y1="${y(1)}" y2="${y(1)}" class="top"/><line x1="0" x2="${W}" y1="${soft.toFixed(1)}" y2="${soft.toFixed(1)}" class="soft"/><path d="${path}" class="line"/></svg>
+      <svg viewBox="0 0 ${W} 8" preserveAspectRatio="none" class="fstrip">${strip}</svg>
+      <span class="lab hi">Sharp</span><span class="lab lo" style="top:${(soft / H * 100).toFixed(1)}%">Out of focus below</span>
+      <span class="head" id="ck-fhead" style="left:${ck.t / dur * 100}%"></span></div>
+    <div class="ck-frow"><span class="ck-fkey"><i class="sharp"></i>Sharp <i class="slightly_soft"></i>A little soft <i class="soft"></i>Out of focus <i class="frame_soft"></i>Whole picture soft</span>
+      <span style="flex:1"></span>
+      <button class="btn ghost sm${ck.picking ? " on" : ""}" id="ck-pick" title="Click the person on the picture who should have been sharp">${icon("target")} ${ck.picking ? "Click them on the picture…" : "Not who you meant? Pick someone"}</button>
+      ${f.picked ? `<button class="btn ghost sm" id="ck-auto" title="Back to the person the camera followed">Automatic</button>` : ""}</div></section>`;
+}
+async function ckPaintFocus(d) {
+  const box = $("#ck-fover"), f = d.focus;
+  if (!box || !f) return;
+  const t = ck.t;
+  const near = f.points.reduce((a, p) => Math.abs(p.t - t) < Math.abs(a.t - t) ? p : a, f.points[0]);
+  const close = Math.abs(near.t - t) <= 0.5;
+  const pos = (b) => `left:${b[0] * 100}%;top:${b[1] * 100}%;width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%`;
+  const softer = (r) => r == null ? "" : r < f.sharp ? "sharp" : `${r.toFixed(1)}x softer than the sharpest part`;
+  const draw = (people) => {
+    if (ck.t !== t || !$("#ck-fover")) return;
+    let html = "";
+    if (close) html += near.sharp_boxes.map((b, i) => `<div class="fb sharpest" style="${pos(b)}">${i === 0 ? `<span>Sharpest${near.named && near.state === "soft" ? ` (the ${esc(near.named)})` : ""}</span>` : ""}</div>`).join("");
+    for (const p of people || []) {
+      if (p.subject) continue;
+      html += `<button class="fb other" style="${pos(p.box)}" data-px="${(p.box[0] + p.box[2]) / 2}" data-py="${(p.box[1] + p.box[3]) / 2}" title="${ck.picking ? "This is who should have been sharp" : `Someone else${p.ratio ? ` · ${softer(p.ratio)}` : ""}`}"></button>`;
+    }
+    if (close) html += `<div class="fb subject ${near.state}" style="${pos(near.box)}"><span>Your subject · ${esc(near.ratio == null ? F_STATE[near.state] : near.state === "frame_soft" ? F_STATE.frame_soft : softer(near.ratio))}</span></div>`;
+    else html += `<span class="fnote">Your subject isn't in the picture here</span>`;
+    $("#ck-fover").innerHTML = html;
+    $("#ck-fover").querySelectorAll("[data-px]").forEach((b) => b.onclick = (e) => {
+      if (!ck.picking) return;
+      e.stopPropagation(); ckSetSubject({ t: ck.peopleT ?? t, x: +b.dataset.px, y: +b.dataset.py });
+    });
+  };
+  draw(null);
+  const r = await api(`/api/check/file/${d.id}/people?t=${t.toFixed(2)}`, undefined, { quiet: true }).catch(() => null);
+  if (r) { ck.peopleT = r.t; draw(r.people); }
+}
+async function ckSetSubject(pick) {
+  const d = ck.detail;
+  ck.picking = false;
+  await api(`/api/check/file/${d.id}/subject`, pick);
+  ck.focusView = true;
+  await ckLoad(d.id);
+  toast(pick.t != null ? "Checking focus on the person you picked" : "Back to the person the camera followed", { small: "The focus card, the timeline and the advice now follow them" });
 }
 const moClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 

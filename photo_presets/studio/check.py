@@ -12,7 +12,7 @@ import pickle
 import subprocess
 import threading
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from queue import Queue
 
@@ -22,9 +22,11 @@ from fastapi.responses import FileResponse, Response
 from PIL import Image
 
 from photo_presets.clipcheck import analyze, fixes, moments, recommend, report, still
+from photo_presets.clipcheck import focus as focuscheck
+from photo_presets.clipcheck.advice import Advice
 
 router = APIRouter()
-VERSION = 3  # bump when the measurements change, so old results are measured again
+VERSION = 4  # bump when the measurements change, so old results are measured again
 _STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_STATE") else None
 HOME = _STATE or Path("~/.config/photo-crops-presets").expanduser()
 LIST_FILE = HOME / "check.json"
@@ -55,7 +57,7 @@ class Files:
                 saved = []
             for e in saved:
                 if Path(e["path"]).exists():
-                    self._put(e["path"], e.get("id"), e.get("fixes"), e.get("fixed"))
+                    self._put(e["path"], e.get("id"), e.get("fixes"), e.get("fixed"), e.get("subject"))
             threading.Thread(target=self._work, daemon=True).start()
         try:
             clear_leftovers()
@@ -64,18 +66,18 @@ class Files:
 
     def save(self):
         with self.lock:
-            data = [{"id": i, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", [])}
-                    for i, e in self.items.items()]
+            data = [{"id": i, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", []),
+                     **({"subject": e["subject"]} if e.get("subject") else {})} for i, e in self.items.items()]
         HOME.mkdir(parents=True, exist_ok=True)
         tmp = LIST_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=1))
         tmp.replace(LIST_FILE)
 
-    def _put(self, path: str, fid: int | None = None, saved_fixes=None, fixed=None) -> int:
+    def _put(self, path: str, fid: int | None = None, saved_fixes=None, fixed=None, subject=None) -> int:
         fid = fid or self.next
         self.next = max(self.next, fid + 1)
         self.items[fid] = {"id": fid, "path": path, "kind": analyze.kind_of(path), "state": "wait", "added": time.time(),
-                           "fixes": saved_fixes, "fixed": fixed or [], "job": None}
+                           "fixes": saved_fixes, "fixed": fixed or [], "job": None, "subject": subject}
         self.queue.put(fid)
         return fid
 
@@ -132,6 +134,10 @@ def measure(path: str) -> dict:
     if r.kind == "video":
         out["moments"] = moments.find(r.stats, r.info.fps, r.info.duration)
         out["look"] = fixes.measure_look(path, "video", r.info.duration)
+        try:  # was the subject sharp, and why not (people found with the app's own model; measured once)
+            out["focus"] = focuscheck.sample(path, r.info.width, r.info.height, r.info.duration)
+        except Exception as x:  # (the rest of the assessment never depends on it)
+            print(f"check: focus: {type(x).__name__}: {x}", flush=True)
         shaky = sum(m.end - m.start for m in out["moments"] if m.kind == "shaky") / max(0.1, r.info.duration)
     else:
         out["moments"] = []
@@ -149,7 +155,7 @@ def _estimate(e: dict) -> float:
     from photo_presets.clipcheck.video import duration_of
     if "duration" not in e:
         e["duration"] = duration_of(e["path"])
-    return 4 + e["duration"] * 0.45
+    return 6 + e["duration"] * 1.6  # (the focus check is two thirds of it)
 
 
 def summary_line(r) -> str:
@@ -168,6 +174,49 @@ def summary_line(r) -> str:
     return " · ".join(b for b in bits if b)
 
 
+def _focus(e: dict) -> dict | None:
+    """Was the subject sharp, and why not: from the focus measurements, for the subject picked (or the
+    one the camera followed). Worked out again only when the subject changes."""
+    s = e.get("focus")
+    if not s or e["kind"] != "video" or not e.get("result"):
+        return None
+    key = json.dumps(e.get("subject"), sort_keys=True)
+    kept = e.get("_focus")
+    if kept and kept[0] == key:
+        return kept[1]
+    st = e["result"].stats
+    t, sp = np.array(st.times or [0.0]), np.array(st.speed or [0.0])
+    a = focuscheck.analyze(s, e.get("subject"), lambda x: float(np.interp(x, t, sp)))
+    e["_focus"] = (key, a)
+    return a
+
+
+def _moments(e: dict) -> list:
+    """The problem moments, the subject out of focus among them."""
+    out = list(e.get("moments") or [])
+    a = _focus(e)
+    for r in (a or {}).get("runs", []):
+        if r["kind"] == "frame" and any(m.kind == "soft_pan" and min(m.end, r["end"]) - max(m.start, r["start"]) >
+                                        0.5 * (r["end"] - r["start"]) for m in out):
+            continue  # (already there as a soft pan)
+        label, detail = focuscheck.run_text(r)
+        out.append(moments.Moment("focus" if r["kind"] == "focus" else "frame_soft", r["start"], r["end"], label, detail,
+                                  (r["end"] - r["start"]) * (r["ratio"] or 1)))
+    return sorted(out, key=lambda m: m.start)
+
+
+def _advice(e: dict) -> Advice:
+    """The findings, settings and habits, with what the focus check found first."""
+    r = e["result"]
+    a = _focus(e)
+    if not a or not a.get("finding"):
+        return r.advice
+    findings = [a["finding"]] + [f for f in r.advice.findings if not (a["missed"] and f.startswith("No problems"))]
+    names = {x[0] for x in a["advice"]}
+    settings = [tuple(x) for x in a["advice"]] + [x for x in r.advice.settings if x[0] not in names]
+    return Advice(findings, settings, list(dict.fromkeys(a["habits"] + r.advice.habits)))
+
+
 def _settings(e: dict) -> dict:
     """The fixes as you set them (or as suggested)."""
     sug = {f["id"]: {"on": f["on"], "value": f["value"]} for f in e.get("suggested", [])}
@@ -176,10 +225,10 @@ def _settings(e: dict) -> dict:
 
 def _rec_input(e: dict) -> dict:
     """What the recommendations are made from: the findings, the fixes turned on, the settings and habits."""
-    r, on = e["result"], _settings(e)
-    return {"name": Path(e["path"]).name, "kind": r.kind, "findings": r.advice.findings,
+    r, on, adv = e["result"], _settings(e), _advice(e)
+    return {"name": Path(e["path"]).name, "kind": r.kind, "findings": adv.findings,
             "fixes_on": [f for f in e.get("suggested", []) if on.get(f["id"], {}).get("on")],
-            "settings": [list(s) for s in r.advice.settings], "habits": r.advice.habits}
+            "settings": [list(s) for s in adv.settings], "habits": adv.habits}
 
 
 def _row(e: dict) -> dict:
@@ -190,7 +239,7 @@ def _row(e: dict) -> dict:
         out["left"] = max(1, est - (time.time() - e.get("started", time.time()))) if e["state"] == "now" else est
     if e["state"] == "done":
         r = e["result"]
-        problems = [f for f in r.advice.findings if not f.startswith(("No problems", "Focus:", "Focus mode", "The sharpest detail"))
+        problems = [f for f in _advice(e).findings if not f.startswith(("No problems", "Focus:", "Focus mode", "The sharpest detail"))
                     and "fps: smooth motion" not in f and "holds up well" not in f]
         out.update(problems=len(problems), summary=summary_line(r), fixes_on=sum(1 for v in _settings(e).values() if v.get("on")))
         x = _rec_input(e)  # (the list says what "In short" says: one verdict, never two)
@@ -218,15 +267,21 @@ def detail(fid: int):
         return out
     r = e["result"]
     settings = _settings(e)
+    adv = _advice(e)
     out.update(
-        findings=r.advice.findings, advice=[list(s) for s in r.advice.settings], habits=r.advice.habits,
+        findings=adv.findings, advice=[list(s) for s in adv.settings], habits=adv.habits,
         camera=[list(x) for x in analyze.settings_rows(r)], measured=[list(x) for x in analyze.measurement_rows(r)],
-        moments=[{**asdict(m), "clock": moments.clock(m.start)} for m in e.get("moments", [])],
+        moments=[{**asdict(m), "clock": moments.clock(m.start)} for m in _moments(e)],
         fixes=[{**f, **settings.get(f["id"], {}), "suggested_value": f["value"]} for f in e.get("suggested", [])],
         width=r.info.width, height=r.info.height, fixed=e.get("fixed", []),
         raw=Path(e["path"]).suffix.lower() in still.RAW_EXTENSIONS)
     if r.kind == "video":
         out.update(duration=r.info.duration, fps=r.info.fps)
+        a = _focus(e)
+        if a and a.get("subject"):
+            out["focus"] = {"points": [{k: p[k] for k in ("t", "ratio", "state", "box", "sharp_boxes", "named")} for p in a["points"]],
+                            "runs": a["runs"], "finding": a["finding"], "missed": a["missed"], "sharpest": a["sharpest"],
+                            "picked": bool(e.get("subject")), "soft": focuscheck.SOFT, "sharp": focuscheck.SHARP}
     else:
         out["focus_spot"] = list(r.stats.focus_spot)
     out["estimate"] = fixes.estimate_seconds(r.kind, settings, r.info)
@@ -272,7 +327,36 @@ def remove(fid: int):
     F.save()
     if _dropped(e["path"]):  # the app's own copy of a dropped file: to the Trash when the app next starts (Undo works till then)
         _leftovers(add=e["path"])
-    return {"entry": {"id": fid, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", [])}, "dropped": _dropped(e["path"])}
+    return {"entry": {"id": fid, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", []), "subject": e.get("subject")},
+            "dropped": _dropped(e["path"])}
+
+
+@router.get("/api/check/file/{fid}/people")
+def people_at(fid: int, t: float = 0.0):
+    """The people found nearest time t (shares of the frame), how sharp each is next to the sharpest part
+    of the picture, and which one is the subject: for picking who should have been sharp."""
+    e = F.get(fid)
+    s = e.get("focus")
+    if not s or not s.samples:
+        return {"t": t, "people": []}
+    smp = min(s.samples, key=lambda x: abs(x.t - t))
+    a = _focus(e) or {}
+    mine = next((p["box"] for p in a.get("points", []) if abs(p["t"] - smp.t) < 1e-6), None)
+    return {"t": smp.t, "people": [{"box": list(p.box), "ratio": round(p.width / smp.best, 2) if p.width and smp.best else None,
+                                    "subject": mine is not None and tuple(p.box) == tuple(mine)} for p in smp.people]}
+
+
+@router.post("/api/check/file/{fid}/subject")
+async def set_subject(fid: int, req: Request):
+    """{t, x, y}: the person at that point (shares of the frame) at time t is the one who should have been
+    sharp; {} goes back to the one the camera followed."""
+    e = F.get(fid)
+    body = await req.json()
+    pick = {k: float(body[k]) for k in ("t", "x", "y")} if all(k in body for k in ("t", "x", "y")) else None
+    e["subject"] = pick
+    F.save()
+    a = _focus(e)
+    return {"ok": True, "found": bool(a and a.get("subject"))}
 
 
 @router.post("/api/check/restore")
@@ -284,7 +368,7 @@ async def restore(req: Request):
     _leftovers(drop=entry["path"])
     with F.lock:
         fid = F._put(entry["path"], entry.get("id") if entry.get("id") not in F.items else None,
-                     entry.get("fixes"), entry.get("fixed"))
+                     entry.get("fixes"), entry.get("fixed"), entry.get("subject"))
     F.save()
     return {"id": fid}
 
@@ -424,10 +508,10 @@ def marks(fid: int):
 @router.get("/media/check/{fid}/moment/{i}.mp4")
 def moment_clip(fid: int, i: int):
     e = F.get(fid)
-    ms = e.get("moments") or []
+    ms = _moments(e)
     if not 0 <= i < len(ms):
         raise HTTPException(404)
-    dest = CACHE / "moments" / f"{_key(e['path'])}-{i}.mp4"
+    dest = CACHE / "moments" / f"{_key(e['path'])}-{ms[i].start:.2f}-{ms[i].end:.2f}.mp4"
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
         fixes.moment_clip(e["path"], ms[i].start, ms[i].end, dest)
@@ -512,7 +596,7 @@ def _metrics(e: dict) -> dict:
         m["Grain"] = ("-" if s.grain_still is None else f"{s.grain_still:.2f}", _num(s.grain_still), "low")
         m["Biggest brightness swing (2 s)"] = (f"{s.brightness_swing:.0f} of 255", _num(s.brightness_swing), "low")
         m["Time panning fast"] = (f"{s.fast_share:.0%}", _num(s.fast_share), None)
-        ms = e.get("moments", [])
+        ms = _moments(e)
         shaky = sum(x.end - x.start for x in ms if x.kind == "shaky")
         m["Shaky moments"] = (f"{shaky:.1f} s", _num(shaky), "low")
         m["Problem moments"] = (str(len(ms)), len(ms), "low")
@@ -608,13 +692,13 @@ async def export(req: Request):
     name, n = f"{stem} - {time.strftime('%Y-%m-%d %H%M')}", 2
     while any((folder / f"{name}{x}").exists() for x in (".docx", ".csv")):  # (a second report that minute: its own file)
         name, n = f"{stem} - {time.strftime('%Y-%m-%d %H%M')} ({n})", n + 1
-    results = [e["result"] for e in es]
+    results = [replace(e["result"], advice=_advice(e)) for e in es]
     together = recommend.across([_rec_input(e) for e in es])
     extras = {}
     for e in es:
         on = _settings(e)
         extras[e["path"]] = {"moments": [{"clock": moments.clock(m.start), "label": m.label, "detail": m.detail}
-                                         for m in e.get("moments", [])],
+                                         for m in _moments(e)],
                              "fixes": [f for f in e.get("suggested", []) if on.get(f["id"], {}).get("on")]}
         x = _rec_input(e)
         extras[e["path"]]["recommend"] = recommend.for_file(x["findings"], x["fixes_on"], x["settings"], x["habits"])

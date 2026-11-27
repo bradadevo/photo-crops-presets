@@ -1709,3 +1709,49 @@ input[type=range].has-zero { background: linear-gradient(var(--faint), var(--fai
 /* a dialog open: notes move to the top, so they never sit over its buttons */
 body:has(#modal-root .scrim) #toasts { top: 16px; bottom: auto; }
 .fix-t { color: var(--accent); }
+
+/* Assessor: taking files out of the list from the list itself */
+.ck-row { grid-template-columns: 20px 64px 1fr 22px; }
+.ck-x { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); display: grid; place-items: center; opacity: 0; cursor: pointer; }
+.ck-x svg { width: 13px; height: 13px; }
+.ck-row:hover .ck-x, .ck-row.on .ck-x, .ck-x:focus-visible { opacity: 1; }
+.ck-x:hover { background: var(--panel-2); color: var(--text); }
+
+/* Assessor: focus on the subject */
+.ck-focus .ck-fsay { margin: 2px 0 10px; line-height: 1.45; }
+.ck-focus .ck-fsay.warn { color: var(--text); border-left: 3px solid #2ad4c4; padding-left: 10px; }
+.ck-fchart { position: relative; cursor: pointer; padding-left: 0; }
+.ck-fchart svg { display: block; width: 100%; }
+.ck-fchart svg.plot { height: 80px; background: var(--panel-2); border-radius: 6px 6px 0 0; }
+.ck-fchart svg.fstrip { height: 8px; border-radius: 0 0 6px 6px; overflow: hidden; }
+.ck-fchart .line { fill: none; stroke: #2ad4c4; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ck-fchart .top { stroke: var(--muted); stroke-width: 1; opacity: .35; vector-effect: non-scaling-stroke; }
+.ck-fchart .soft { stroke: #ff5d5d; stroke-width: 1; stroke-dasharray: 4 4; opacity: .7; vector-effect: non-scaling-stroke; }
+.ck-fchart .band.focus { fill: #ff5d5d; opacity: .13; } .ck-fchart .band.frame { fill: #8fa3b8; opacity: .18; }
+.ck-fchart .lab { position: absolute; right: 6px; font-size: 10.5px; color: var(--muted); pointer-events: none; transform: translateY(-110%); }
+.ck-fchart .lab.hi { top: 14px; } .ck-fchart .lab.lo { color: #ff8a8a; }
+.ck-fchart .head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text); opacity: .8; pointer-events: none; }
+.ck-fchart rect.sharp, .ck-fkey i.sharp { fill: #3ecf7a; background: #3ecf7a; }
+.ck-fchart rect.slightly_soft, .ck-fkey i.slightly_soft { fill: #f5c443; background: #f5c443; }
+.ck-fchart rect.soft, .ck-fkey i.soft { fill: #ff5d5d; background: #ff5d5d; }
+.ck-fchart rect.frame_soft, .ck-fkey i.frame_soft { fill: #8fa3b8; background: #8fa3b8; }
+.ck-fchart rect.unknown { fill: transparent; }
+.ck-frow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.ck-fkey { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.ck-fkey i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 6px; }
+.ck-frow .btn.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.ck-fover { position: absolute; inset: 0; pointer-events: none; }
+.ck-fover .fb { position: absolute; border-radius: 4px; padding: 0; margin: 0; background: transparent; }
+.ck-fover .fb > span { position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; white-space: nowrap; font-size: 11px; padding: 2px 7px; border-radius: 5px; background: rgba(0,0,0,.72); color: #fff; }
+.ck-fover .fb.sharpest { background: rgba(245,196,67,.10); box-shadow: inset 0 0 0 1px rgba(245,196,67,.45); border-radius: 0; }
+.ck-fover .fb.sharpest > span { color: #f5c443; top: 4px; left: 4px; bottom: auto; margin: 0; }
+.ck-fover .fb.subject { border: 2.5px solid #3ecf7a; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+.ck-fover .fb.subject.slightly_soft { border-color: #f5c443; } .ck-fover .fb.subject.soft { border-color: #ff5d5d; }
+.ck-fover .fb.subject.frame_soft, .ck-fover .fb.subject.unknown { border-color: #8fa3b8; }
+.ck-fover .fb.subject > span { top: 100%; bottom: auto; margin: 3px 0 0; }
+.ck-fover .fb.other { border: 1px solid rgba(255,255,255,.55); }
+.ck-fover.picking { background: rgba(0,0,0,.25); }
+.ck-fover.picking .fb.other { pointer-events: auto; cursor: pointer; border: 2px solid #fff; }
+.ck-fover.picking .fb.other:hover { background: rgba(42,212,196,.25); border-color: #2ad4c4; }
+.ck-fover .fnote { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-size: 12px; padding: 3px 9px; border-radius: 6px; background: rgba(0,0,0,.65); color: #fff; }
+.ck-pic .tag.pickhint { top: auto; bottom: 8px; background: #2ad4c4; color: #062a27; font-weight: 600; }

@@ -416,6 +416,28 @@ picture, and plain rules.
   stretches; click one to see that frame, **Play this moment** to watch it.
   Photos: **Problem areas** shows pure white in red, pure black in blue and
   circles the sharpest detail.
+- **Focus on your subject** (videos): it finds the person the camera follows
+  (or the one you pick: **Not who you meant? Pick someone**, then click them on
+  the picture; **Automatic** goes back) and measures, four times a second, how
+  sharp they are next to the sharpest part of the same frame (edge width: how
+  many pixels an edge takes to go from dark to light, so a plain dark shirt
+  doesn't count as blurry). It says how long they were out of focus and why,
+  with times: the focus sat **behind** or **in front of** them (naming a sharp
+  car, truck or other person), it was **set once and didn't follow** them as
+  they came closer or moved off (the focus matched them only early on), they
+  **moved too fast** for the shutter, came **too close**, or the **whole
+  picture** went soft (a fast swing or the lens hunting). The chart is clickable;
+  **Subject out of focus** moments go on the timeline; the **Focus** button on
+  the picture draws their box (green sharp, yellow a little soft, red out of
+  focus), the sharpest part in yellow, and everyone else found. The focus
+  settings to change (AF-C, tracking area, face/eye AF, subject shift
+  sensitivity, transition speed) lead **Next time you shoot**. It uses the
+  people finder the Looks tab already loads (no AI service, nothing leaves the
+  Mac) and adds about a second per second of 4K video to the check.
+- **Take files out of the list** from the list itself: the **x** on a row, or
+  tick several and **Remove (n)** under the list, or press **Delete** (the
+  ticked files, else the open one). One **Undo** puts them all back. The files
+  themselves are never deleted.
 - **Fix this file**: brightness, recover bright areas (photos; far more from
   RAW), neutral color, even out brightness and steady the camera (videos),
   reduce grain, sharpen. Each is suggested when it is needed, says what it can't
