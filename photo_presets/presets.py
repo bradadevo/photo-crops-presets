@@ -143,29 +143,26 @@ STARTERS: dict[str, dict] = {
         {"op": "contrast", "amount": 0.15},
     ]},
     "Color Smoke": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "clean_field"},
         {"op": "exposure", "stops": -2.2, "layer": "background"},
         {"op": "saturation", "amount": 0.5, "layer": "background"},
+        {"op": "night_sky", "amount": 1.0, "keep": 0.15},
         {"op": "smoke_cloud", "color": "#2340ff", "color2": "#d9a520", "place": "sides", "amount": 0.9, "size": 1.1},
         {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
         {"op": "contrast", "amount": 0.2},
         {"op": "subject_vignette", "amount": 0.4, "spread": 0.35},
     ]},
     "Stadium Smoke": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "clean_field"},
         {"op": "exposure", "stops": -2.0, "layer": "background"},
         {"op": "saturation", "amount": 0.35, "layer": "background"},
-        {"op": "lens_blur", "amount": 0.006, "layer": "background"},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
+        {"op": "night_sky", "amount": 1.0, "keep": 0.15},
         {"op": "smoke_cloud", "color": "#d9d9d9", "place": "sides_floor", "amount": 0.85, "size": 1.25, "front": 0.7},
         {"op": "stadium_lights", "height": 0.7, "amount": 0.9, "color": "#fff3dc"},
         {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
         {"op": "contrast", "amount": 0.15},
         {"op": "subject_vignette", "amount": 0.3, "spread": 0.4}]},
-    "Neon Pop Art": {"protect_faces": False, "skin_protect": 0.0, "steps": [
-        {"op": "exposure", "stops": -1.1, "layer": "background"},
-        {"op": "lens_blur", "radius": 0.008, "layer": "background"},
-        {"op": "pop_art", "levels": 7, "mottle": 0.35, "lines": 0.6, "glow": 0.7, "background": "#9a6a44",
-         "background_amount": 0.85},
-        {"op": "paint_splatter", "amount": 0.85, "strokes": 0.7, "front": 0.25},
-        {"op": "grain", "amount": 0.1}]},
     "Neon Pop Art Sharp": {"protect_faces": False, "skin_protect": 0.0, "steps": [
         {"op": "exposure", "stops": -1.7, "layer": "background"},
         {"op": "lens_blur", "radius": 0.006, "layer": "background"},
@@ -192,6 +189,56 @@ STARTERS: dict[str, dict] = {
         {"op": "paint_splatter", "amount": 0.2, "strokes": 0.0, "front": 0.0, "whips": 0.4,
          "palette": "#ff2d95,#ff6a2a,#ffd23f,#7dff4a,#22e6ff,#b14dff",
          "stroke_colors": "#ff2d95,#ffd23f,#22e6ff,#7dff4a"}]},
+    # Pro color grades: VS Digital Pro's own LUTs (photo_presets/grades.py), finished on the player
+    "Prime Time": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Prime Time", "strength": 1.0},
+        {"op": "lens_blur", "radius": 0.004, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "subject_vignette", "amount": 0.25, "spread": 0.4}]},
+    "Golden Hour": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Golden Hour", "strength": 1.0},
+        {"op": "glow", "amount": 0.2, "threshold": 0.7},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+        {"op": "vignette", "amount": 0.25}]},
+    "Night Match": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "lut", "asset": "lut:VS Night Match", "strength": 1.0},
+        {"op": "exposure", "stops": -1.0, "layer": "background"},
+        {"op": "saturation", "amount": 0.8, "layer": "background"},
+        {"op": "specular_bloom", "amount": 0.4, "threshold": 0.8},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "vignette", "amount": 0.4}]},
+    "Blockbuster": {"protect_faces": True, "skin_protect": 0.8, "steps": [
+        {"op": "lut", "asset": "lut:VS Blockbuster", "strength": 1.0},
+        {"op": "exposure", "stops": -0.4, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"},
+        {"op": "grain", "amount": 0.08},
+        {"op": "vignette", "amount": 0.35}]},
+    "Bleach Bypass": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Bleach Bypass", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.8},
+        {"op": "grain", "amount": 0.15},
+        {"op": "vignette", "amount": 0.35}]},
+    "Film Stock": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Film Stock", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.3, "layer": "subject"},
+        {"op": "grain", "amount": 0.2}]},
+    "Heritage Chrome": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Heritage Chrome", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+        {"op": "grain", "amount": 0.12},
+        {"op": "vignette", "amount": 0.25}]},
+    "Ice Cold": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Ice Cold", "strength": 1.0},
+        {"op": "lens_blur", "radius": 0.004, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.6, "layer": "subject"}]},
+    "Lush Pitch": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Lush Pitch", "strength": 1.0},
+        {"op": "athletic_clarity", "amount": 0.5, "layer": "subject"},
+        {"op": "vignette", "amount": 0.2}]},
+    "Matte Editorial": {"protect_faces": True, "steps": [
+        {"op": "lut", "asset": "lut:VS Matte Editorial", "strength": 1.0},
+        {"op": "lens_blur", "radius": 0.006, "layer": "background"},
+        {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"}]},
     "Player Vignette": {"protect_faces": True, "steps": [
         {"op": "subject_vignette", "amount": 0.6, "spread": 0.3},
         {"op": "contrast", "amount": 0.1},
@@ -200,6 +247,19 @@ STARTERS: dict[str, dict] = {
 
 
 STARTERS.update(ART_STARTERS)
+
+# The Background tool's backgrounds, as looks too (sharp: no blur), under Other
+from photo_presets import backgrounds as _backgrounds  # noqa: E402
+
+from photo_presets import fields as _fields
+STARTERS.update({look: {"protect_faces": True, "skin_protect": 0.8, "steps": [
+    {"op": "field_set", "look": look},
+    {"op": "athletic_clarity", "amount": 0.4, "layer": "subject"},
+    {"op": "vignette", "amount": 0.25}]} for look in _fields.LOOKS})
+
+BACKGROUND_LOOKS = {f"{n} Background": n for n in _backgrounds.NAMES}
+STARTERS.update({look: {"protect_faces": True, "steps": [{"op": "new_background", "bg": n}]}
+                 for look, n in BACKGROUND_LOOKS.items()})
 
 
 def load_all() -> dict[str, dict]:
@@ -243,7 +303,10 @@ def delete(name: str) -> bool:
 
 # How the app lists the starters: in groups, each with a one-line description
 BOLD, EDITORIAL, STUDIO, MINE = "Bold and dramatic", "Clean editorial", "Studio, smoke and lights", "My presets"
-GROUPS = [BOLD, EDITORIAL, STUDIO, *ART_GROUPS, MINE]
+GRADES = "Pro color grades"
+FIELD = "Field sets"
+OTHER = "Other"
+GROUPS = [GRADES, BOLD, EDITORIAL, STUDIO, FIELD, *ART_GROUPS, OTHER, MINE]
 ABOUT: dict[str, tuple[str, str]] = {
     "Grit & Glory": (BOLD, "Gritty black and white with smoke at the feet and rough edges"),
     "Friday Night Lights": (BOLD, "A night-game color grade, a soft spotlight on the player and film grain"),
@@ -266,16 +329,28 @@ ABOUT: dict[str, tuple[str, str]] = {
     "Smoke Studio": (STUDIO, "Red studio backdrop, white smoke at the sides and feet, lights above"),
     "Color Smoke": (STUDIO, "Night background with two-color smoke bombs (blue and gold)"),
     "Stadium Smoke": (STUDIO, "Night stadium with smoke at the sides and feet and floodlights"),
-    "Neon Pop Art": (BOLD, "The player as a neon pop-art painting with paint splatters, on a dark sepia background"),
-    "Neon Pop Art Sharp": (BOLD, "Neon Pop Art with crisp, screen-print edges and thin ink lines"),
-    "Neon Pop Art Sharp Black": (BOLD, "Neon Pop Art Sharp on a near-black background instead of sepia brown"),
+    "Neon Pop Art Sharp": (BOLD, "The player as a neon pop-art painting with crisp screen-print edges, thin ink lines and paint splatters, on dark sepia"),
+    "Neon Pop Art Sharp Black": (BOLD, "The player as a neon pop-art painting with crisp edges and paint splatters, on a near-black background"),
     "Neon Splash": (BOLD, "The player as glowing neon line art on black, with a paint explosion behind them"),
     "Neon Streaks": (BOLD, "Neon line art on black with fine paint streaks, drops and specks flying out behind the player"),
+    "Prime Time": (GRADES, "A premium broadcast grade: rich and deep, cool shadows, warm skin, a true-green pitch"),
+    "Golden Hour": (GRADES, "Late-afternoon sun: amber highlights, a soft glow and gently teal shadows"),
+    "Night Match": (GRADES, "Under the lights: cool, deep blues, a darker background and glowing highlights"),
+    "Blockbuster": (GRADES, "The big-film look: teal shadows and background, warm skin and highlights"),
+    "Bleach Bypass": (GRADES, "Silvery, harsh and gritty, like the bleach-bypass film process"),
+    "Film Stock": (GRADES, "Soft film: pastel color, lifted blacks, warm highlights and fine grain"),
+    "Heritage Chrome": (GRADES, "Old slide film: rich reds and blues, deep contrast, a vintage warmth"),
+    "Ice Cold": (GRADES, "Crisp and cold: clean whites, steel-blue shadows, quieter color"),
+    "Lush Pitch": (GRADES, "The pitch at its best: deep, rich greens, punchy kits and true skin"),
+    "Matte Editorial": (GRADES, "The modern magazine look: muted, matte and calm"),
     "Player Vignette": (STUDIO, "Darkens the photo gently outward from the player's outline"),
 }
 
 
 ABOUT.update(ART_ABOUT)
+ABOUT.update({look: (FIELD, about) for look, (about, _) in _fields.LOOKS.items()})
+ABOUT.update({look: (OTHER, f"New background: {_backgrounds.ABOUT[n][0].lower()}{_backgrounds.ABOUT[n][1:]}")
+              for look, n in BACKGROUND_LOOKS.items()})
 
 
 def describe(name: str, recipe: dict | None = None) -> str:

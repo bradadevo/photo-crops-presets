@@ -22,6 +22,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from photo_presets import enlarge
+
 CONFIG = Path.home() / ".config" / "photo-crops-presets" / "delivery.json"
 FONT = "/System/Library/Fonts/Avenir Next.ttc"  # index 0 is Bold, 5 Medium
 
@@ -50,12 +52,13 @@ SIZES = {s.key: s for s in [
     Size("ig_portrait", "Instagram post 4:5 (1080 x 1350)", 1080, 1350, True, True),
     Size("ig_square", "Instagram square (1080 x 1080)", 1080, 1080, True, True),
     Size("ig_story", "Instagram story / reel cover 9:16 (1080 x 1920)", 1080, 1920, True, True),
+    Size("wide", "Wide 16:9 for YouTube, X, Facebook (1920 x 1080)", 1920, 1080, True, False),
     Size("print_4x6", "Print 4 x 6 in (1200 x 1800, 300 ppi)", 1200, 1800, False),
     Size("print_5x7", "Print 5 x 7 in (1500 x 2100, 300 ppi)", 1500, 2100, False),
     Size("print_8x10", "Print 8 x 10 in (2400 x 3000, 300 ppi)", 2400, 3000, False),
     Size("print_11x14", "Print 11 x 14 in (3300 x 4200, 300 ppi)", 3300, 4200, False),
 ]}
-SHORT = {"ig_portrait": "ig-4x5", "ig_square": "ig-square", "ig_story": "ig-story", "print_4x6": "4x6",
+SHORT = {"ig_portrait": "ig-4x5", "ig_square": "ig-square", "ig_story": "ig-story", "wide": "wide-16x9", "print_4x6": "4x6",
          "print_5x7": "5x7", "print_8x10": "8x10", "print_11x14": "11x14"}
 
 
@@ -82,7 +85,7 @@ def crop_box(w: int, h: int, aspect: float, focus: tuple[float, float],
 
 
 def sized(arr: np.ndarray, size: Size, focus: tuple[float, float],
-          keep: tuple[float, float, float, float] | None = None) -> tuple[np.ndarray, float]:
+          keep: tuple[float, float, float, float] | None = None, report: list | None = None) -> tuple[np.ndarray, float]:
     """The picture (floats 0-1) cropped and resized for this size, and how
     much it was enlarged (1 or less = no enlarging)."""
     h, w = arr.shape[:2]
@@ -90,7 +93,7 @@ def sized(arr: np.ndarray, size: Size, focus: tuple[float, float],
     x0, y0, x1, y1 = crop_box(w, h, tw / th, focus, keep)
     part = arr[y0:y1, x0:x1]
     grow = tw / (x1 - x0)
-    out = cv2.resize(part, (tw, th), interpolation=cv2.INTER_AREA if grow < 1 else cv2.INTER_LANCZOS4)
+    out = enlarge.fit(part, (tw, th), report)  # (a real enlargement: the AI detail enlarger)
     if size.web and grow < 1:
         blur = cv2.GaussianBlur(out, (0, 0), 0.8)
         out = out + (out - blur) * 0.35

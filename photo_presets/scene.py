@@ -18,8 +18,11 @@ Segment Anything, free, run on this Mac) and added to or taken out of the
 cut-out. A photo's fixes stay with it, for every look and the full-size export.
 """
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import threading
 
 import cv2
 import numpy as np
@@ -38,7 +41,9 @@ MATTE_MODEL = "birefnet-general"
 WHOLE_FRAME_PIXELS = 4_000_000
 MATTE_EDGE = 3072  # high enough to keep the hair pass's detail (see refine_heads)
 HEAD_EDGE = 1024  # each head is traced again on its own, at this size
-HEAD_REACH = 1.8  # the head crop, in face radii around it
+HEAD_REACH = 1.8
+MODEL_LOCK = threading.Lock()  # one full cut-out at a time in the whole app: each needs several GB at once
+HEADS = 2  # heads traced again, the biggest first  # the head crop, in face radii around it
 # Pieces of the traced outline count as the players when this much of them is
 # inside YOLO's outlines of the players in the play
 ATTACHED = 0.5
@@ -49,11 +54,30 @@ SAM_PAD = 0.2  # the closer look reaches this share of the object's size around 
 
 @dataclass(frozen=True)
 class Fix:
-    """A click on the photo: x, y (shares of its width and height); add (True)
-    or take out (False) what is there."""
+    """One fix to the cut-out, in order:
+    "click": the object at x, y (shares of the photo's width and height): add (True) or take it out;
+    "brush": painted in (add) or out along points, a brush of radius r (a share of the photo's width);
+    "edge":  the refine-edge brush along points: there, the edge follows the photo's own (hair, fingers);
+    "tune":  the whole edge: x = softness (0-1), y = shift (-1 in ... +1 out)."""
     x: float
     y: float
     add: bool = True
+    kind: str = "click"
+    points: tuple = ()
+    r: float = 0.0
+
+    def to_json(self):
+        if self.kind == "click":
+            return [self.x, self.y, self.add]
+        return {"kind": self.kind, "x": self.x, "y": self.y, "add": self.add, "r": self.r,
+                "points": [[round(px, 4), round(py, 4)] for px, py in self.points]}
+
+    @staticmethod
+    def from_json(v) -> "Fix":
+        if isinstance(v, (list, tuple)):
+            return Fix(float(v[0]), float(v[1]), bool(v[2]))
+        return Fix(float(v.get("x", 0)), float(v.get("y", 0)), bool(v.get("add", True)), str(v.get("kind", "click")),
+                   tuple((float(px), float(py)) for px, py in v.get("points", [])), float(v.get("r", 0)))
 
 
 @dataclass
@@ -73,6 +97,7 @@ class Scene:
     # (a child holding the main player's hand is drawn with them, so needs their real face too)
     other_faces: list[tuple[float, float, float]] = field(default_factory=list)
     other_hands: list[tuple[float, float, float]] = field(default_factory=list)
+    team: bool = False  # a team photo: the players are one group
 
     def take_in(self, matte: np.ndarray) -> None:
         """Everyone else whose head is inside the cut-out becomes a player in the
@@ -119,7 +144,7 @@ class Scene:
             sb = (a0, b0, a1, b1)
         return Scene(keep(self.faces), keep(self.balls), feet, min(1.0, self.subject_height * h / ch),
                      cut(self.people_mask), cut(self.subject_mask), cut(self.matte), keep(self.hands), sb,
-                     keep(self.other_faces), keep(self.other_hands))
+                     keep(self.other_faces), keep(self.other_hands), self.team)
 
 
 def resized(mask: np.ndarray | None, h: int, w: int) -> np.ndarray | None:
@@ -142,19 +167,41 @@ class Prepared:
     fine: np.ndarray | None = None  # the image in 16 bits (uint16), from RAW and 16-bit TIFF photos
     fixes: list[Fix] = field(default_factory=list)
     frame: tuple[float, float, float, float] | None = None  # framed for a look: its box in the photo (shares)
+    box: tuple[float, float, float, float] | None = None  # cropped first ("crop", "wide", "face"): its box in the photo (shares)
     _auto: tuple | None = field(default=None, repr=False)  # the cut-out and players' outline before fixes
+    matte_key: str | None = field(default=None, repr=False)  # its cut-out's name on disk, once made or found
+    players_from: "Prepared | None" = field(default=None, repr=False)  # the same players, already found (see same_players)
     _pieces: dict = field(default_factory=dict, repr=False)  # each click's traced object
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def ensure_matte(self) -> np.ndarray | None:
+        with self._lock:  # (asked for twice at once, the players are found once: the second waits)
+            return self._ensure_matte()
+
+    def _ensure_matte(self) -> np.ndarray | None:
+        if self.scene.matte is None and self._auto is None and self.players_from is not None:
+            src = self.players_from  # (the photo before its light and color were changed: the very same players)
+            src.ensure_matte()
+            _copy_scene(src.scene, self.scene)
+            self._auto = (src.scene.matte, src.scene.subject_mask)
+            self.matte_key = src.matte_key
         if self.scene.matte is None:
             if self._auto is None:
                 matte = None
                 if self.scene.subject_mask is not None:
-                    matte = cutout(self.image, self.scene.subject_mask)
+                    key = _matte_key(self.image, self.scene.subject_mask, self.scene.team, self.scene.balls)
+                    matte = _kept_matte(key)  # made before (this photo, these players): no minute's wait
+                    if matte is None:
+                        with MODEL_LOCK:  # (one at a time; made in the background meanwhile: found on disk)
+                            matte = _kept_matte(key)
+                            if matte is None:
+                                matte = _made_matte(self.image, self.scene)
+                                if matte is not None:
+                                    _keep_matte(key, matte)
+                        _let_go_later()
                     if matte is not None:
                         self.scene.take_in(matte)
-                        matte = refine_heads(self.image, matte, self.scene.faces)
-                    matte = with_balls(matte, self.scene.balls) if matte is not None else None
+                    self.matte_key = key
                 self._auto = (matte, self.scene.subject_mask)
             self.scene.matte, self.scene.subject_mask = self._fixed()
         return self.scene.matte
@@ -181,7 +228,23 @@ class Prepared:
         matte = auto.copy() if auto is not None else np.zeros((h, w), np.float32)
         ih, iw = (subject.shape if subject is not None else (self.image.height, self.image.width))
         outline = (subject > 127) if subject is not None else np.zeros((ih, iw), bool)
+        soft = shift = 0.0
         for f in self.fixes:
+            if f.kind == "tune":
+                soft, shift = float(np.clip(f.x, 0, 1)), float(np.clip(f.y, -1, 1))
+                continue
+            if f.kind in ("brush", "edge"):
+                stroke = brush_mask(f.points, f.r, (h, w))
+                if f.kind == "edge":
+                    matte = refine_edge(matte, self._guide(h, w), stroke, max(2.0, f.r * w * 0.35))
+                elif f.add:
+                    matte = np.maximum(matte, stroke)
+                else:
+                    matte = matte * (1 - stroke)
+                part = cv2.resize(stroke, (iw, ih), interpolation=cv2.INTER_LINEAR) > 0.5
+                if f.kind == "brush":
+                    outline = (outline | part) if f.add else (outline & ~part)
+                continue
             key = (f.x, f.y, h, w)
             if key not in self._pieces:
                 self._pieces[key] = segment(self.image, f.x, f.y, (h, w))
@@ -193,19 +256,33 @@ class Prepared:
             else:
                 matte = matte * (1 - piece)
                 outline &= ~part
+        matte = tune_edge(matte, soft, shift)
         return matte.astype(np.float32), (outline.astype(np.uint8) * 255 if outline.any() else None)
 
+    def _guide(self, h: int, w: int) -> np.ndarray:
+        """The photo at the cut-out's size (floats), for the refine-edge brush."""
+        key = ("guide", h, w)
+        if key not in self._pieces:
+            self._pieces[key] = cv2.resize(np.asarray(self.image.convert("RGB")), (w, h), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+        return self._pieces[key]
 
-def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, float, float]]) -> np.ndarray:
+
+def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, float, float]],
+                 hug: np.ndarray | None = None) -> np.ndarray:
     """Each head traced again on its own, close up, so curly hair and afros keep
     their detail against the background (the gaps between curls open up). The
     new edge is used only around the head, and may not grow past the first
-    cut-out, so no background object joins the player."""
+    cut-out, so no background object joins the player. hug: a second, tighter outline of the people
+    (0-1, any size): the hair is trimmed to it too (no halo of background around it), on a head it
+    covers soundly; it only ever takes away."""
     from rembg import remove
     W, H = img.size
     mh, mw = matte.shape
     out = matte.copy()
-    for fx, fy, fr in faces:
+    if hug is not None and hug.shape != (mh, mw):
+        hug = cv2.resize(hug.astype(np.float32), (mw, mh), interpolation=cv2.INTER_LINEAR)
+    # the two biggest faces (the main players): each tracing is a full run of the model
+    for fx, fy, fr in sorted(faces, key=lambda f: -f[2])[:HEADS]:
         r = fr * W
         if r < 6:
             continue
@@ -216,7 +293,7 @@ def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, f
             continue
         crop = img.crop((x0, y0, x1, y1))
         crop.thumbnail((HEAD_EDGE, HEAD_EDGE))
-        fine = np.asarray(remove(crop, session=_session(), only_mask=True), np.float32) / 255
+        fine = np.asarray(remove(crop, session=_heads_session(), only_mask=True), np.float32) / 255
         X0, Y0 = int(x0 / W * mw), int(y0 / H * mh)
         X1, Y1 = max(X0 + 1, int(x1 / W * mw)), max(Y0 + 1, int(y1 / H * mh))
         fine = cv2.resize(fine, (X1 - X0, Y1 - Y0), interpolation=cv2.INTER_LINEAR)
@@ -231,12 +308,23 @@ def refine_heads(img: Image.Image, matte: np.ndarray, faces: list[tuple[float, f
         grow = max(3, int((X1 - X0) * 0.02)) | 1
         allowed = cv2.dilate((old > 0.05).astype(np.uint8), np.ones((grow, grow), np.uint8)).astype(np.float32)
         fine = fine * piece * allowed
+        if hug is not None:  # (trimmed to the tighter outline, where it has this head soundly)
+            h = hug[Y0:Y1, X0:X1]
+            core = cv2.erode((lab == here).astype(np.uint8), np.ones((grow, grow), np.uint8)) > 0
+            if core.any() and (h[core] > 0.5).mean() >= 0.85:
+                tight = max(3, int((X1 - X0) * 0.006)) | 1
+                fine = fine * np.clip(cv2.GaussianBlur(cv2.dilate(h, np.ones((tight, tight), np.uint8)), (0, 0), tight / 3) * 1.15, 0, 1)
         # used around the head, blending back to the first cut-out toward the crop's edges and below the chin
         yy, xx = np.mgrid[0:Y1 - Y0, 0:X1 - X0].astype(np.float32)
         d = np.sqrt(((xx - (X1 - X0) / 2) / ((X1 - X0) / 2)) ** 2 + ((yy - (Y1 - Y0) / 2) / ((Y1 - Y0) / 2)) ** 2)
         zone = np.clip((1.0 - d) / 0.3, 0, 1)
         chin = int((fy * H + r * 0.9 - y0) / (y1 - y0) * (Y1 - Y0))
         zone[max(0, chin):] *= np.clip(1 - (np.arange(max(0, chin), Y1 - Y0) - chin) / max(1, (Y1 - Y0) * 0.1), 0, 1)[:, None]
+        # only around this head itself: another player's leg or arm in the same square is not this
+        # head's piece, and keeps the first cut-out (it used to be wiped out, then blurred by the look)
+        reach = max(5, int((X1 - X0) * 0.08)) | 1
+        own = cv2.dilate((lab == here).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (reach, reach)))
+        zone = zone * cv2.GaussianBlur(own.astype(np.float32), (0, 0), reach / 3)
         out[Y0:Y1, X0:X1] = old * (1 - zone) + fine * zone
     return out
 
@@ -282,6 +370,102 @@ def _sam_mask(img: Image.Image, x: float, y: float) -> np.ndarray | None:
     return m
 
 
+def brush_mask(points, r: float, size: tuple[int, int]) -> np.ndarray:
+    """A brush stroke (points: shares of the photo; r: its radius, a share of the photo's width) as a
+    0-1 mask at size (h, w), with a slightly soft edge like a real brush."""
+    h, w = size
+    m = np.zeros((h, w), np.uint8)
+    rad = max(1, int(round(r * w)))
+    pts = [(int(round(x * w)), int(round(y * h))) for x, y in points] or []
+    for a, b in zip(pts, pts[1:] or pts):
+        cv2.line(m, a, b, 255, rad * 2, cv2.LINE_AA)
+    for p in pts:
+        cv2.circle(m, p, rad, 255, -1, cv2.LINE_AA)
+    out = m.astype(np.float32) / 255
+    return cv2.GaussianBlur(out, (0, 0), max(0.6, rad * 0.12))
+
+
+def _box(a: np.ndarray, r: int) -> np.ndarray:
+    return cv2.boxFilter(a, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REFLECT)
+
+
+def guided(I: np.ndarray, p: np.ndarray, r: int, eps: float) -> np.ndarray:
+    """The color guided filter (He et al.): p's edges made to follow the edges in the color image I.
+    It is what carries a cut-out's edge into single strands of hair."""
+    mI = [_box(I[..., c], r) for c in range(3)]
+    mp = _box(p, r)
+    cov = [_box(I[..., c] * p, r) - mI[c] * mp for c in range(3)]
+    var = np.empty(p.shape + (3, 3), np.float32)
+    for i in range(3):
+        for j in range(i, 3):
+            v = _box(I[..., i] * I[..., j], r) - mI[i] * mI[j]
+            var[..., i, j] = var[..., j, i] = v
+    var += np.eye(3, dtype=np.float32) * eps
+    a = np.linalg.solve(var, np.stack(cov, -1)[..., None])[..., 0]
+    b = mp - sum(a[..., c] * mI[c] for c in range(3))
+    ma = [_box(a[..., c], r) for c in range(3)]
+    return sum(ma[c] * I[..., c] for c in range(3)) + _box(b, r)
+
+
+def refine_edge(matte: np.ndarray, guide: np.ndarray, stroke: np.ndarray, rad: float = 6) -> np.ndarray:
+    """The refine-edge brush: where it was painted, the cut-out's edge is worked out again from the photo
+    itself (hair, fingers, a net). Each pixel there is weighed between the player's colors and the
+    background's colors close to it (learned from what is surely one or the other), then smoothed along
+    the photo's own edges, so single strands of hair come in and the grass between them stays out."""
+    ys, xs = np.nonzero(stroke > 0.02)
+    if not len(ys):
+        return matte
+    h, w = matte.shape
+    near = max(6, int(rad * 4))  # how far to look for the player's and the background's colors
+    pad = near + int(rad) + 8
+    y0, y1, x0, x1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1), max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
+    m, I, s = matte[y0:y1, x0:x1].astype(np.float32), guide[y0:y1, x0:x1], stroke[y0:y1, x0:x1]
+    unknown = s > 0.02
+    fg = ((m > 0.95) & ~unknown).astype(np.float32)
+    bg = ((m < 0.05) & ~unknown).astype(np.float32)
+    if fg.sum() < 4 or bg.sum() < 4:  # (both kinds next to the brush, or nothing to learn from)
+        fg, bg = (m > 0.95).astype(np.float32), (m < 0.05).astype(np.float32)
+    if fg.sum() < 4 or bg.sum() < 4:
+        return matte
+
+    def local_mean(weights):
+        k = near
+        n = _box(weights, k)
+        out = np.stack([_box(I[..., c] * weights, k) for c in range(3)], -1) / np.maximum(n, 1e-6)[..., None]
+        far = n < 1e-3  # nothing of that kind close: its average over the whole brush area
+        if far.any():
+            out[far] = (I * weights[..., None]).sum((0, 1)) / max(weights.sum(), 1e-6)
+        return out
+
+    F, B = local_mean(fg), local_mean(bg)
+    d = F - B
+    alpha = ((I - B) * d).sum(-1) / np.maximum((d * d).sum(-1), 1e-3)
+    alpha = np.clip(alpha, 0, 1)
+    alpha = np.clip(guided(I, alpha.astype(np.float32), max(1, int(rad * 0.5)), 1e-3), 0, 1)
+    alpha = np.clip((alpha - 0.1) / 0.8, 0, 1)  # (no grey haze left in the background)
+    keep = cv2.erode((m > 0.97).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    alpha[keep] = 1.0
+    out = matte.copy()
+    out[y0:y1, x0:x1] = m * (1 - s) + alpha * s
+    return out
+
+
+def tune_edge(matte: np.ndarray, soft: float, shift: float) -> np.ndarray:
+    """The whole edge softened (feathered) and moved in or out, like Select and Mask's sliders."""
+    if not soft and not shift:
+        return matte
+    h, w = matte.shape
+    unit = max(h, w) / 1000
+    out = matte
+    if shift:
+        k = max(1, int(round(abs(shift) * 6 * unit)))
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1))
+        out = cv2.dilate(out, ker) if shift > 0 else cv2.erode(out, ker)
+    if soft:
+        out = cv2.GaussianBlur(out, (0, 0), max(0.3, soft * 4 * unit))
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
 def segment(img: Image.Image, x: float, y: float, size: tuple[int, int]) -> np.ndarray:
     """The object at x, y (shares of the image) as a soft mask (0-1) of size
     (h, w): found on the whole photo, then traced again closer around it, so
@@ -322,11 +506,34 @@ def detector() -> Detector:
     return _detector
 
 
+_head_session = None
+
+
+def _heads_session():
+    """BiRefNet Lite for tracing heads again (hair): as fine on a head, three times quicker, and
+    it needs far less memory (the full model can stall for minutes when the Mac is short of it)."""
+    global _head_session
+    if _head_session is None:
+        import onnxruntime as ort
+        from rembg import new_session
+        opts = ort.SessionOptions()
+        opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False  # (the same picture, 4 GB less at its peak: 15 GB down to 11, and quicker)
+        _head_session = new_session("birefnet-general-lite", sess_opts=opts)
+    return _head_session
+
+
 def _session():
     global _matte_session
     if _matte_session is None:
+        import onnxruntime as ort
         from rembg import new_session
-        _matte_session = new_session(MATTE_MODEL)
+        opts = ort.SessionOptions()
+        # memory handed back after each run: the model needs several GB at once, and holding on
+        # to it pushes the Mac into its swap, where one run can stall for minutes
+        opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False
+        _matte_session = new_session(MATTE_MODEL, sess_opts=opts)
     return _matte_session
 
 
@@ -358,6 +565,225 @@ def cutout(img: Image.Image, subject_mask: np.ndarray) -> np.ndarray | None:
     return full
 
 
+_small_session = None
+SMALL_MODEL = "u2net_human_seg"  # a people cut-out made for small pictures (320 px): 0.3 s and under 2 GB
+
+
+def small_cutout(img: Image.Image, scene: "Scene") -> np.ndarray | None:
+    """The players' cut-out for a small preview (the whole-event grid): the same steps as the full one
+    (only pieces touching the players in the play, the ball, a team as one group) with a model made for
+    small pictures, on 2 processor cores. Edges are only right at small sizes: never used for Make."""
+    from rembg import remove
+    global _small_session
+    if scene.subject_mask is None:
+        return None
+    if _small_session is None:
+        import onnxruntime as ort
+        from rembg import new_session
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads, opts.inter_op_num_threads = 2, 1  # (the other cores stay free for you)
+        opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False
+        _small_session = new_session(SMALL_MODEL, sess_opts=opts)
+    w, h = img.size
+    yolo = resized(scene.subject_mask, h, w) > 0.5
+    if not yolo.any():
+        return None
+    alpha = np.asarray(remove(img, session=_small_session, only_mask=True), np.float32) / 255
+    count, labels = cv2.connectedComponents((alpha > 0.05).astype(np.uint8))
+    attached = np.unique(labels[yolo & (alpha > ATTACHED)])
+    keep = np.zeros(count, bool)
+    keep[attached[attached > 0]] = True
+    alpha = np.where(keep[labels], alpha, 0).astype(np.float32)
+    alpha = with_balls(alpha, scene.balls)
+    if scene.team:
+        alpha = fill_group(alpha, img, scene.subject_mask)
+    return alpha
+
+
+def release_small_cutout() -> None:
+    """Hands the small cut-out model's memory back (the event's previews are all made)."""
+    global _small_session
+    _small_session = None
+
+
+MATTE_VERSION = 7  # (raised when the cut-out is made differently: the kept ones are made again)
+MATTES_KEPT = 400  # cut-outs kept on disk, the oldest let go
+
+
+def _mattes_dir() -> Path:
+    import os
+    state = os.environ.get("ALLPROPHOTO_STATE")
+    base = Path(state) if state else Path("~/.cache/photo-crops-presets").expanduser()
+    return base / "mattes"
+
+
+def _matte_key(image: Image.Image, subject: np.ndarray, team: bool, balls=()) -> str:
+    """The same picture with the same players: a small copy of it, its size, the players' outline and
+    the balls taken in with them (a ball left out later is a different cut-out)."""
+    import hashlib
+    small = np.asarray(image.convert("RGB").resize((96, 96)), np.uint8)
+    outline = np.packbits(cv2.resize(subject.astype(np.uint8), (128, 128), interpolation=cv2.INTER_NEAREST) > 0)
+    h = hashlib.sha1()
+    ball = tuple(tuple(round(v, 3) for v in b) for b in balls)
+    for part in (small.tobytes(), outline.tobytes(), repr((image.size, team, MATTE_VERSION) + ((ball,) if ball else ())).encode()):
+        h.update(part)
+    return h.hexdigest()[:20]
+
+
+def _kept_matte(key: str) -> np.ndarray | None:
+    p = _mattes_dir() / f"{key}.png"
+    try:
+        if p.exists():
+            p.touch()
+            return np.asarray(Image.open(p).convert("L"), np.float32) / 255
+    except OSError:
+        pass
+    return None
+
+
+def _keep_matte(key: str, matte: np.ndarray) -> None:
+    try:
+        d = _mattes_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = d / f"{key}.part.png"
+        Image.fromarray((np.clip(matte, 0, 1) * 255 + 0.5).astype(np.uint8), "L").save(tmp, optimize=False)
+        tmp.replace(d / f"{key}.png")
+        kept = sorted(d.glob("*.png"), key=lambda q: q.stat().st_mtime)
+        for old in kept[:-MATTES_KEPT]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+IDLE_RELEASE = 60.0  # s after the last cut-out: its models let go (about 10 GB back to the Mac)
+_release_timer: threading.Timer | None = None
+
+
+def _let_go_later() -> None:
+    """The cut-out models are kept while cut-outs follow each other (an event being cut out), and let
+    go a minute after the last: they hold about 10 GB between runs. Loading them again costs ~1.5 s,
+    and the cut-out is the same picture."""
+    global _release_timer
+    if _release_timer is not None:
+        _release_timer.cancel()
+    _release_timer = threading.Timer(IDLE_RELEASE, release_cutout)
+    _release_timer.daemon = True
+    _release_timer.start()
+
+
+def release_cutout() -> None:
+    """Lets go of the full cut-out's models (loaded again when next needed)."""
+    global _matte_session, _head_session
+    if not MODEL_LOCK.acquire(blocking=False):  # (one is running: let go after it)
+        _let_go_later()
+        return
+    try:
+        _matte_session = _head_session = None
+        import gc
+        gc.collect()
+    finally:
+        MODEL_LOCK.release()
+
+
+def _copy_scene(src: "Scene", dst: "Scene") -> None:
+    import copy
+    for f in dataclasses.fields(src):
+        setattr(dst, f.name, copy.copy(getattr(src, f.name)))
+
+
+def same_players(edited: Path, image: Image.Image, exif: bytes | None, fine: np.ndarray | None,
+                 original: Prepared) -> Prepared:
+    """A photo with only its light and color changed (nothing moved: no crop, turn or removal), ready
+    for looks with the original's players: found once, cut out once (not 20 s again for each edit)."""
+    p = Prepared(edited, image, Scene(), exif, fine, players_from=original)
+    _copy_scene(original.scene, p.scene)
+    p.scene.matte = None  # (taken from the original when a look needs it, fixes and all)
+    return p
+
+
+def _made_matte(image: Image.Image, scene: "Scene") -> np.ndarray | None:
+    """The players' full cut-out made: the model, each head again for the hair (trimmed to Apple's
+    outline of the people where the Mac has it: no halo of background around the hair), the ball, a
+    team as one group."""
+    from photo_presets import apple_person
+    hug = apple_person.outline(image) if scene.faces or scene.other_faces else None  # (first: ~1 GB, let go before the model)
+    matte = cutout(image, scene.subject_mask)
+    if matte is None:
+        return None
+    scene.take_in(matte)  # (the faces found inside the players, for the hair pass)
+    matte = refine_heads(image, matte, scene.faces, hug=hug)
+    matte = with_balls(matte, scene.balls)
+    if scene.team:
+        matte = fill_group(matte, image, scene.subject_mask)
+    return matte
+
+
+def fill_group(alpha: np.ndarray, image: Image.Image | None = None, people: np.ndarray | None = None) -> np.ndarray:
+    """A team photo's cut-out as one group: a child half hidden behind the others, or a dark kit
+    the cut-out missed, inside the group is taken in, so no look puts smoke or blur over them.
+    The grass between the players is not: what looks like the ground and background just around
+    the team stays background (a look that greys or darkens the background reaches it too)."""
+    h, w = alpha.shape
+    solid = (alpha > 0.4).astype(np.uint8)
+    k = max(5, int(0.05 * h)) | 1
+    closed = cv2.morphologyEx(solid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    # what is outside the group: reachable from the picture's edge
+    outside = np.zeros((h + 2, w + 2), np.uint8)
+    flood = closed.copy()
+    for x in range(0, w, max(1, w // 64)):
+        for y in (0, h - 1):
+            if flood[y, x] == 0:
+                cv2.floodFill(flood, outside, (x, y), 2)
+    for y in range(0, h, max(1, h // 64)):
+        for x in (0, w - 1):
+            if flood[y, x] == 0:
+                cv2.floodFill(flood, outside, (x, y), 2)
+    group = (flood == 1) | (flood == 0)  # the group and everything it encloses
+    # only what lies deep inside the group: its outline (between heads, between feet) stays the players' own
+    depth = cv2.distanceTransform(group.astype(np.uint8), cv2.DIST_L2, 5)
+    add = (group & (solid == 0) & (depth > k * 0.6)).astype(np.uint8)
+    add = cv2.dilate(add, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k // 3 | 1, k // 3 | 1)))  # up to the players
+    add = (add > 0) & group
+    if image is not None and add.any():
+        ground = _like_background(image, group, add, k)
+        if people is not None:  # inside a player the detector found, it is the player, whatever the color
+            person = cv2.resize(people.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            ground &= ~cv2.erode(person.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        add &= ~ground
+        add = cv2.morphologyEx(add.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)) > 0
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(add.astype(np.uint8), connectivity=8)
+        big = np.zeros(count, bool)
+        big[1:] = stats[1:, cv2.CC_STAT_AREA] >= 0.002 * h * w  # a missed child, not a few blades of grass
+        add = big[labels]
+    soft = cv2.GaussianBlur(add.astype(np.float32), (0, 0), 1.5)
+    return np.maximum(alpha, soft).astype(np.float32)
+
+
+def _like_background(image: Image.Image, group: np.ndarray, add: np.ndarray, k: int) -> np.ndarray:
+    """Which of the gaps' pixels look like what is just around the group (the grass, the field)."""
+    h, w = group.shape
+    lab = cv2.cvtColor(np.asarray(image.convert("RGB").resize((w, h))), cv2.COLOR_RGB2LAB).astype(np.float32)
+    ring = cv2.dilate(group.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1))) > 0
+    ring &= ~group
+    ys = np.nonzero(group.any(1))[0]
+    if len(ys):  # the ground around the lower half of the group (not the trees or sky above the team)
+        ring[: int((ys[0] + ys[-1]) / 2)] = False
+    samples = lab[ring]
+    if len(samples) < 200:
+        return np.zeros_like(add)
+    rng = np.random.default_rng(0)
+    samples = samples[rng.choice(len(samples), min(6000, len(samples)), replace=False)]
+    _, _, centers = cv2.kmeans(samples, 8, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0), 2,
+                               cv2.KMEANS_PP_CENTERS)
+    px = lab[add]
+    weight = np.array([0.45, 1.0, 1.0], np.float32)  # the color counts most, the light less (shade on grass)
+    d = np.sqrt((((px[:, None, :] - centers[None]) * weight) ** 2).sum(-1)).min(1)
+    out = np.zeros_like(add)
+    out[add] = d < 14
+    return out
+
+
 def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
     masks = [p.mask for p in people if p.mask is not None]
     if not masks:
@@ -369,6 +795,8 @@ def _union(people: list[Person], shape: tuple[int, int]) -> np.ndarray | None:
 
 
 BALL_IN_PLAY = 0.08  # a ball's size as a share of the nearest player's height, at least
+BALL_DEPTH = 0.7  # players this share of the tallest player in the play's height or more are at their distance
+BALL_SHARP = 0.6  # a ball softer than this (next to the players' sharpness) is out of focus: behind, not in the play
 BALL_REACH = 1.5  # how far a ball in the play can be from the nearest player, in their heights
 
 
@@ -380,6 +808,10 @@ def ball_in_play(ball: Box, in_play: list[Person]) -> bool:
     are left out of the cut-out, the framing and the effects placed at the ball."""
     if not in_play:
         return True
+    # only the players at the main players' distance count: a ball beside a player far behind them is
+    # the right size for that player, but it is 50 feet back, not in this play
+    tallest = max(p.height for p in in_play)
+    in_play = [p for p in in_play if p.height >= BALL_DEPTH * tallest]
     bx, by = (ball[0] + ball[2]) / 2, (ball[1] + ball[3]) / 2
     def gap(p):
         return (max(p.box[0] - bx, 0, bx - p.box[2]) ** 2 + max(p.box[1] - by, 0, by - p.box[3]) ** 2) ** 0.5
@@ -387,6 +819,42 @@ def ball_in_play(ball: Box, in_play: list[Person]) -> bool:
     near = min(in_play, key=gap)
     size = max(ball[2] - ball[0], ball[3] - ball[1])
     return size >= BALL_IN_PLAY * near.height and gap(near) <= BALL_REACH * near.height
+
+
+def _detail(gray: np.ndarray, box) -> float:
+    """How sharp a part of the photo is: its finest edges (the 90th percentile of the Laplacian)
+    against its contrast, so a dark or flat ball isn't taken for a soft one."""
+    h, w = gray.shape
+    x0, y0, x1, y1 = (int(round(v)) for v in box)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return 0.0
+    crop = gray[y0:y1, x0:x1].astype(np.float32)
+    lap = np.abs(cv2.Laplacian(crop, cv2.CV_32F, ksize=3))
+    lo, hi = np.percentile(crop, [5, 95])
+    return float(np.percentile(lap, 90) / max(hi - lo, 8.0))
+
+
+def ball_touching(ball: Box, in_play: list[Person]) -> bool:
+    """A ball at a player's foot or in their hands (a kicked ball can be blurred by its speed)."""
+    bx, by = (ball[0] + ball[2]) / 2, (ball[1] + ball[3]) / 2
+    for p in in_play:
+        gap = (max(p.box[0] - bx, 0, bx - p.box[2]) ** 2 + max(p.box[1] - by, 0, by - p.box[3]) ** 2) ** 0.5
+        if gap <= 0.05 * p.height and by >= p.box[1] + 0.6 * (p.box[3] - p.box[1]):
+            return True
+    return False
+
+
+def ball_sharpness(img: Image.Image, ball: Box, in_play: list[Person]) -> float:
+    """How sharp the ball is next to the players in the play (1: as sharp; a ball far behind them,
+    out of focus, is well under half)."""
+    if not in_play:
+        return 1.0
+    gray = np.asarray(img.convert("L"))
+    p = max(in_play, key=lambda q: q.height)
+    x0, y0, x1, y1 = p.box
+    body = (x0, y0, x1, y0 + (y1 - y0) * 0.55)  # (head and kit: where the focus is)
+    return _detail(gray, ball) / max(_detail(gray, body), 1e-3)
 
 
 def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing.Plan) -> Scene:
@@ -409,23 +877,73 @@ def find(img: Image.Image, people: list[Person], balls: list[Box], plan: framing
     other_faces = [head(p) for p in others]
     other_hands = [(x / w, y / h, p.height * 0.065 / w) for p in others for x, y in p.hands]
     ball_list = [((b[0] + b[2]) / 2 / w, (b[1] + b[3]) / 2 / h, (b[2] - b[0]) / 2 / w)
-                 for b in balls if ball_in_play(b, in_play)]
+                 for b in balls if ball_in_play(b, in_play) and (ball_touching(b, in_play)
+                                                                  or ball_sharpness(img, b, in_play) >= BALL_SHARP)]
     hands = [(x / w, y / h, p.height * 0.065 / w) for p in in_play for x, y in p.hands if p.height > 0.08 * h]
     subject = plan.subject
     feet = ((subject.box[0] + subject.box[2]) / 2 / w, subject.box[3] / h) if subject else None
     height = (subject.height / h) if subject else 0.5
     sb = (subject.box[0] / w, subject.box[1] / h, subject.box[2] / w, subject.box[3] / h) if subject else None
     return Scene(faces, ball_list, feet, height, _union(people, img.size), _union(in_play, img.size), hands=hands,
-                 subject_box=sb, other_faces=other_faces, other_hands=other_hands)
+                 subject_box=sb, other_faces=other_faces, other_hands=other_hands, team=plan.team_photo)
+
+
+def frame_boxes(path: Path, colors: dict[str, str] | None = None, goalie_first: bool = True,
+                shape: str = "best") -> dict[str, tuple[float, float, float, float] | None]:
+    """Where each crop-first choice would cut this photo (shares of it): "wide"
+    (pro crop, no zoom), "crop" (zoomed in on the action) and "face"; None when
+    it would keep the whole photo or finds no one. Shown on the photo before a
+    look is made."""
+    colors = colors or {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}
+    img = images.preview_image(path, 2400)
+    people, balls = detector().find(img, focus.focus_point(path, img.size), colors)
+    plan = framing.choose(people, balls, img.size, goalie_first)
+    W, H = img.size
+
+    def shares(box):
+        if not box or (box[2] - box[0]) * (box[3] - box[1]) >= 0.92 * W * H:  # (nearly) the whole photo
+            return None
+        return (max(0.0, box[0] / W), max(0.0, box[1] / H), min(1.0, box[2] / W), min(1.0, box[3] / H))
+    face = None
+    if plan.face_person:
+        face = framing.face_box(plan.face_person, img.size, "sharp", framing.crop_box(plan, img.size, shape))
+    return {"wide": shares(framing.wide_box(plan, img.size)), "crop": shares(framing.crop_box(plan, img.size, shape)),
+            "face": shares(face)}
+
+
+SMALL_EDGE = 1024  # px: a photo prepared for a small preview is looked at this size
+
+
+def prepare_small(path: Path, edge: int = SMALL_EDGE) -> Prepared:
+    """A photo prepared for a small preview (the whole-event grid): loaded, made small at once (the
+    camera-size picture isn't kept), its players found and cut out at that size. Quick and light: about
+    half a second and a few MB kept, so a whole event fits on any Mac."""
+    photo = images.load(path)
+    img = photo.image.copy()
+    del photo
+    img.thumbnail((edge, edge))
+    colors = {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}  # (as prepare)
+    people, balls = detector().find(img, focus.focus_point(path, img.size), colors)
+    scene = find(img, people, balls, framing.choose(people, balls, img.size, True))
+    p = Prepared(path, img, scene, None, None)
+    matte = small_cutout(img, scene)
+    if matte is not None:
+        scene.take_in(matte)
+    p._auto = (matte, scene.subject_mask)
+    scene.matte = matte
+    return p
 
 
 def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None,
-            goalie_first: bool = True, shape: str = "best") -> Prepared:
+            goalie_first: bool = True, shape: str = "best", retouch=None) -> Prepared:
     """Loads a photo (RAW in the camera's look), finds its scene and, if
     asked, crops it the photo-crops way: "crop" (pro crop, zoomed in on the
-    action), "wide" (pro crop without zooming) or "face"."""
+    action), "wide" (pro crop without zooming) or "face". retouch: a function
+    cleaning the loaded photo first (distractions removed, see retouch.py)."""
     colors = colors or {TEAM: "#1f2a44", GOALIE: "#86d0d8", OPPONENT: "#f0f0f0"}
     photo = images.load(path)
+    if retouch is not None:
+        photo = retouch(photo)
     img = photo.image
     people, balls = detector().find(img, focus.focus_point(path, img.size), colors)
     plan = framing.choose(people, balls, img.size, goalie_first)
@@ -447,5 +965,7 @@ def prepare(path: Path, crop: str = "none", colors: dict[str, str] | None = None
             fine = np.zeros((cropped.height, cropped.width, 3), np.uint16)
             part = photo.fine[max(t, 0):t + cropped.height, max(l, 0):l + cropped.width]
             fine[max(-t, 0):max(-t, 0) + part.shape[0], max(-l, 0):max(-l, 0) + part.shape[1]] = part
-        return Prepared(path, cropped, scene.in_crop(box, img.size), photo.exif, fine)
+        W, H = img.size
+        return Prepared(path, cropped, scene.in_crop(box, img.size), photo.exif, fine,
+                        box=(box[0] / W, box[1] / H, box[2] / W, box[3] / H))
     return Prepared(path, img, scene, photo.exif, photo.fine)

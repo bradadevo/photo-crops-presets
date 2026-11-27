@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VS Digital Pro</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23000'/%3E%3Crect x='5' y='5' width='54' height='54' fill='none' stroke='%230077C0' stroke-width='5'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='Arial Black,Arial,sans-serif' font-weight='900' font-size='30' fill='%230077C0'%3EVS%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="app" class="app">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span class="word">VS Digital <b>Pro</b></span></div>
+    <nav class="modes" role="tablist" aria-label="Mode">
+      <button role="tab" data-mode="edit" class="on" title="Make, compare and edit looks">Looks</button>
+      <button role="tab" data-mode="reel" title="Make an Instagram reel from your looks">Reel</button>
+      <button role="tab" data-mode="cull" title="Cull an event: the app's first pass marks every photo keep or reject, then you go through it">Culling</button>
+      <button role="tab" data-mode="check" title="How a clip or photo was shot, what's holding it back, a fix for the file and what to change next time">Assessor</button>
+    </nav>
+    <div class="top-right">
+      <div id="run-pill" class="run-pill" hidden></div>
+      <button id="update-btn" class="btn update" hidden title="A newer version of VS Digital Pro is installed: restart to use it (your looks come back)"><i data-i="redo"></i><span>Restart to update</span></button>
+      <div class="menu-wrap">
+        <button id="tools-btn" class="btn ghost" aria-haspopup="menu" title="Preset editor, Lightroom presets, assets, shortcuts">Tools <i data-i="chev"></i></button>
+        <div id="tools-menu" class="menu" role="menu" hidden>
+          <a role="menuitem" href="/classic/" target="_blank" rel="noopener">Preset editor<small>Build and change looks</small></a>
+          <a role="menuitem" href="/classic/" target="_blank" rel="noopener">Lightroom presets &amp; assets<small>LUTs, textures, overlays</small></a>
+          <button role="menuitem" id="cull-btn">Culling<small>Keep the best of an event, delete the rest</small></button>
+          <button role="menuitem" id="check-btn">Assessor<small>How a clip or photo was shot, and fixes</small></button>
+          <button role="menuitem" id="help-btn">Keyboard shortcuts<small>Press ?</small></button>
+        </div>
+      </div>
+      <button id="export-btn" class="btn primary"><i data-i="export"></i><span>Export</span></button>
+    </div>
+  </header>
+
+  <aside class="rail" aria-label="Photos">
+    <div class="rail-head">
+      <h2>Photos <span id="photo-count" class="count"></span></h2>
+      <button id="guide-btn" class="icon-btn" title="How this page works"><i data-i="info"></i></button>
+      <button id="find-btn" class="icon-btn" title="Find a player: click them once, and every photo with them is found, the best first"><i data-i="person"></i></button>
+      <div class="menu-wrap">
+        <button id="add-btn" class="icon-btn" aria-label="Add photos" title="Add photos or a whole folder" aria-haspopup="menu"><i data-i="plus"></i></button>
+        <div id="add-menu" class="menu" role="menu" hidden>
+          <button role="menuitem" data-add="files">Add photos…<small>JPG, HEIC or RAW</small></button>
+          <button role="menuitem" data-add="folder">Add a folder…<small>A whole event</small></button>
+        </div>
+      </div>
+    </div>
+    <div id="prep-bar" class="prep-bar" hidden role="status" aria-live="polite"></div>
+    <div id="player-panel" class="player-panel" hidden></div>
+    <div id="chosen-bar" class="chosen-bar" hidden></div>
+    <div id="photo-list" class="photo-list"></div>
+    <div id="rail-empty" class="rail-empty">
+      <p>No photos yet. Drop them anywhere or paste with <kbd>⌘V</kbd>.</p>
+      <button class="btn" data-add="files">Add photos…</button>
+      <button class="btn ghost" data-add="folder">Add a folder…</button>
+    </div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <section id="viewer" class="viewer" aria-label="Picture"></section>
+    <section id="strip-wrap" class="strip-wrap" hidden>
+      <div class="strip-head">
+        <span id="strip-count" class="strip-count"></span>
+        <div class="strip-tools">
+          <select id="show" class="show" aria-label="Show" title="Show every look, only your picks, or by stars"></select>
+          <button id="keep-all" class="chip-btn" title="Pick every finished look">Pick all</button>
+          <button id="keep-none" class="chip-btn" title="Un-pick them all">Clear picks</button>
+          <button id="drop-unpicked" class="chip-btn" title="Remove every look you did not pick (undo is one click)">Remove unpicked</button>
+          <button id="drop-picked" class="chip-btn" title="Remove the looks you picked: for when you pick the ones to throw away (undo is one click)" hidden>Remove picked</button>
+          <button id="clear-looks" class="chip-btn" title="Take every look out of this session (your photos and exports stay)">Remove all</button>
+          <div class="seg small" role="group" aria-label="View">
+            <button id="view-single" class="on" title="One at a time"><i data-i="single"></i></button>
+            <button id="view-grid" title="Contact sheet: every look big (G)"><i data-i="grid"></i></button>
+          </div>
+        </div>
+      </div>
+      <div id="strip" class="strip" role="listbox" aria-label="Looks made"></div>
+    </section>
+    <section id="reel" class="reel" hidden></section>
+  </main>
+
+  <section id="check" class="check" aria-label="Assessor" hidden></section>
+  <section id="cull" class="cull" aria-label="Culling" hidden></section>
+
+  <aside class="inspector" id="inspector" aria-label="Looks and adjustments">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="looks" class="on" title="Looks to pick, shown on your photo">Looks</button>
+      <button role="tab" data-tab="edit">Edit</button>
+    </div>
+    <div id="pane-looks" class="pane looks-pane">
+      <div class="looks-head">
+        <label class="search"><i data-i="search"></i><input id="look-search" type="search" placeholder="Search looks" autocomplete="off"></label>
+        <div id="look-filters" class="filters" role="group" aria-label="Look groups"></div>
+        <div id="ahead-scope" class="ahead-scope" hidden><span>Point at a look to see it on</span>
+          <div class="seg small"><button data-v="photo">This photo</button><button data-v="event">All photos</button></div></div>
+        <div id="ahead-status" class="ahead-status empty"></div>
+      </div>
+      <div id="look-grid" class="look-grid"></div>
+      <div class="make" id="make"></div>
+    </div>
+    <div id="pane-edit" class="pane adjust-pane" hidden></div>
+  </aside>
+</div>
+
+<div id="drop" class="drop" hidden><div><i data-i="plus"></i><b>Drop to add photos</b></div></div>
+<div id="modal-root"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+<script src="/static/edit.js"></script>
+<script src="/static/custom.js"></script>
+<script src="/static/background.js"></script>
+<script src="/static/find.js"></script>
+<script src="/static/check.js"></script>
+<script src="/static/cull.js"></script>
+</body>
+</html>

@@ -1,9 +1,9 @@
-"""allprophoto-batch: looks on the command line, saved straight to full size.
+"""vsdigitalpro-batch: looks on the command line, saved straight to full size.
 
-    uv run allprophoto-batch ~/Movies/"Game day" --random 6
-    uv run allprophoto-batch ~/Movies/"Game day" --preset "Grit & Glory" --crop crop
-    uv run allprophoto-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
-    uv run allprophoto-batch ~/Movies/"Game day" --all-presets
+    uv run vsdigitalpro-batch ~/Movies/"Game day" --random 6
+    uv run vsdigitalpro-batch ~/Movies/"Game day" --preset "Grit & Glory" --crop crop
+    uv run vsdigitalpro-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
+    uv run vsdigitalpro-batch ~/Movies/"Game day" --all-presets
 """
 
 import argparse
@@ -16,7 +16,7 @@ from photo_presets.engine import CROPS, Engine
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="allprophoto-batch", description="Creative looks for sports photos")
+    p = argparse.ArgumentParser(prog="vsdigitalpro-batch", description="Creative looks for sports photos")
     p.add_argument("photos", nargs="*", help="photos and/or folders")
     how = p.add_mutually_exclusive_group(required=True)
     how.add_argument("--random", type=int, metavar="N", help="N random looks per photo")
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     e = Engine()
     results = (e.explore(paths, a.random, a.crop, a.seed, progress) if a.random
                else e.presets(paths, names, a.crop, progress=progress))
-    saved, notes = e.export(results, Path(a.out).expanduser(), progress, credit=deliver.Credit.load())
+    saved, notes = e.export(results, Path(a.out).expanduser(), progress, credit=deliver.Credit.load(), recipes=True)
     for note in notes:
         print(note)
     print(f"Saved {len(saved)} photo(s) to {Path(a.out).expanduser()}")

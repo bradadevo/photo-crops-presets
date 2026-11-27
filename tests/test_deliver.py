@@ -94,3 +94,47 @@ def test_a_match_comes_before_the_look(tmp_path):
     lib = Library(Sources([], [], [], [], [], []))
     out, _ = pipeline.render(img, {"steps": [], "match": {"stops": 1.0, "gains": [1, 1, 1]}}, lib, Scene())
     assert abs(np.asarray(out)[0, 0, 0] - 120) <= 1
+
+
+def test_a_real_enlargement_uses_the_detail_enlarger_and_falls_back_to_plain(monkeypatch):
+    from photo_presets import enlarge
+    small = np.random.default_rng(0).random((100, 80, 3)).astype(np.float32)
+    calls = []
+
+    def fake(img):
+        calls.append(img.shape)
+        return np.repeat(np.repeat(img, 4, 0), 4, 1)
+
+    monkeypatch.setattr(enlarge, "USE_AI", True)
+    monkeypatch.setattr(enlarge, "ai_4x", fake)
+    out = enlarge.fit(small, (240, 300))
+    assert out.shape == (300, 240, 3) and calls == [(100, 80, 3)]
+    assert 0 <= out.min() and out.max() <= 1
+    enlarge.fit(small, (84, 105))  # a small enlargement (1.05x): plain
+    enlarge.fit(small, (40, 50))  # shrinking: plain
+    assert len(calls) == 1
+
+    def broken(img):
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(enlarge, "ai_4x", broken)
+    assert enlarge.fit(small, (240, 300)).shape == (300, 240, 3)  # plain enlarging still works
+    out, grow = deliver.sized(small, deliver.SIZES["ig_portrait"], (0.5, 0.5))
+    assert out.shape[:2] == (1350, 1080) and grow > 1
+
+
+def test_an_export_says_when_the_ai_enlarger_was_used(monkeypatch):
+    from photo_presets import enlarge
+    small = np.random.default_rng(1).random((100, 80, 3)).astype(np.float32)
+    monkeypatch.setattr(enlarge, "USE_AI", True)
+    monkeypatch.setattr(enlarge, "ai_4x", lambda img: np.repeat(np.repeat(img, 4, 0), 4, 1))
+    rep = []
+    deliver.sized(small, deliver.SIZES["ig_portrait"], (0.5, 0.5), report=rep)
+    assert len(rep) == 1 and rep[0]["ai"] and rep[0]["grow"] > 10
+    enlarge.fit(small, (84, 105), rep)  # 1.05x: not worth noting
+    enlarge.fit(small, (88, 110), rep)  # 1.1x: plain, with why
+    assert len(rep) == 2 and not rep[1]["ai"] and "slightly" in rep[1]["why"]
+    items = [dict(r, photo="DSC1.jpg", size="Instagram post 4:5") for r in rep]
+    line = enlarge.summary(items)
+    assert line.startswith("AI detail enlarger sharpened 1 file") and "DSC1.jpg" in line and "plain way" in line
+    assert enlarge.summary([]) == ""

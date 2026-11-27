@@ -86,14 +86,14 @@ def write_cube(table: np.ndarray, dest: Path, title: str) -> Path:
     n = table.shape[0]
     dest.parent.mkdir(parents=True, exist_ok=True)
     rows = "\n".join(f"{r:.6f} {g:.6f} {b:.6f}" for r, g, b in table.reshape(-1, 3))
-    dest.write_text(f'TITLE "{title}"\n# Made by AllProPhoto from a Lightroom color chart\n'
+    dest.write_text(f'TITLE "{title}"\n# Made by VS Digital Pro from a Lightroom color chart\n'
                     f"LUT_3D_SIZE {n}\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n{rows}\n")
     return dest
 
 
 def lut_name(path: Path) -> str:
     """A LUT name from the exported file's name ("Moody Film-chart.tif" -> "Moody Film")."""
-    stem = re.sub(r"(?i)[ _-]*(allprophoto[ _-]*)?(color[ _-]*)?chart([ _-]*\d+)?$", "", path.stem)
+    stem = re.sub(r"(?i)[ _-]*((vs[ _-]*digital[ _-]*pro|allprophoto)[ _-]*)?(color[ _-]*)?chart([ _-]*\d+)?$", "", path.stem)
     stem = re.sub(r"[_]+", " ", stem).strip(" -")
     return stem or path.stem
 

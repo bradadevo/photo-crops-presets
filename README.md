@@ -1,9 +1,9 @@
-# AllProPhoto
+# VS Digital Pro
 
 Everything in [photo-crops](https://github.com/bradadevo/photo-crops)
 (professional crops, face close-ups, screenshots rebuilt from the camera
-files), plus **AllProPhoto**: a creative looks engine for sports photos
-with a Gradio app.
+files), plus **VS Digital Pro**: a creative looks engine for sports photos
+with its own Mac app.
 
 - **Random exploration**: drop in photos and get a gallery of different,
   outside-the-box looks, each mixing one of your LUTs (or a neon split-tone,
@@ -27,152 +27,538 @@ and everything runs free on your Mac: no AI service, no cost.
 This repo started as a copy of photo-crops and is self-contained; the two
 change separately.
 
+**New to the AI side?** [AI.md](AI.md) explains, in plain language, every AI
+model the app uses: what it does, why it was chosen, where it runs and what
+it costs (almost everything is free and on your Mac). **How the software is
+built** is under [Architecture](#architecture) below.
+
 ## Setup
+
+**Needs:** an Apple Silicon Mac, M2 or newer, with **16 GB of memory or more**
+(8 GB Macs are not supported for now: cutting out a new photo's players needs
+about 13 GB at its peak). macOS 14 or later gives the cleaner hair in the
+cut-out (Apple's person outline, below); on older macOS the cut-out is made
+as before. The app checks this once when it starts and never fails later.
 
 ```bash
 uv sync
 ```
 
 The first run downloads two free models (about 250 MB, once) to
-`~/.cache/photo-crops`, and the player cut-out model BiRefNet (about 970 MB,
-once) to `~/.rembg` the first time a look separates player and background
-(already there if you use ai-versions). The illustration looks download
+`~/.cache/photo-crops`, and the player cut-out models to `~/.rembg` (once):
+BiRefNet (about 930 MB) and its lighter version for the hair (about 210 MB)
+when the first photo is added, and a small people cut-out for the event
+previews (u2net_human_seg, about 170 MB) the first time you point at a look
+with all photos showing (already there if you use ai-versions). The illustration looks download
 their drawing models (about 5 GB, once) to `~/.cache/huggingface` the first
-time one is used. Reels and video overlays need ffmpeg
+time one is used. The detail enlarger for tight crops (Real-ESRGAN, 67 MB)
+downloads once to `~/.cache/photo-crops` the first time an export enlarges a
+crop. Reels and video overlays need ffmpeg
 (`brew install ffmpeg`).
 
-## The AllProPhoto app
+## The VS Digital Pro app
 
 ```bash
-uv run allprophoto
+uv run vsdigitalpro-install-app     # once: puts VS Digital Pro.app in ~/Applications
 ```
 
-It opens in your browser on this Mac. (`uv run photo-presets` still works too.)
+Then open **VS Digital Pro** like any Mac app (Finder, Spotlight or the Dock: drag
+it there to keep it). It opens in its own window, no Terminal or browser
+needed. Run the install again after updating Python or the project's
+packages. Without the app: `uv run vsdigitalpro` opens the same thing in your
+browser (`--window` for the app window).
 
-**Make looks** walks you through six numbered steps (left: set up, right:
-results). It suits both ways of working:
+It is dark and photo-first, like Lightroom: **your photos** on the left, the
+**picture** big in the middle with the **looks made** in a strip under it, and
+the **looks** to choose from on the right. It suits both ways of working:
 
-- **One photo**: tick as many looks as you like, compare them, fine-tune the
-  best one, export it.
-- **A batch (a whole game)**: try looks on one good photo first, then press
-  **Use the selected look on all N photos**; fine-tune once and use the
-  settings on every photo with that look; export them all and make a reel.
+- **One photo**: pick as many looks as you like, compare them, star the best,
+  export.
+- **A whole game**: try looks on one good photo first, then **Use this look on
+  all N photos**; fine-tune once and use the settings on every photo with that
+  look; export them all and make a reel.
 
-1. **Add photos** (any mix, including RAW and HEIC): paste a copied image with
-   **⌘V** (a screenshot, or a photo copied from Photos, a browser or Finder;
-   each paste adds to the list), drag photos in, click to browse, or type a
-   folder or press **Browse…**. On Preset manager, ⌘V puts the image in the
-   sample photo box. It says how many photos you added, and with more than one
-   suggests trying looks on one photo first.
-2. **Choose looks**: **Use presets** lists every preset in groups (Bold and
-   dramatic, Clean editorial, Studio smoke and lights, Watercolor, Anime, Oil
-   painting, Comic book, Pencil and ink, My presets), each with a
-   one-line description and about how long it takes per photo (⏱). Tick
-   any, or **Select all**; every photo goes through each one, and it shows how
-   many looks that makes and about how long the run takes. The times were
-   measured on this Mac and keep learning from your own runs (in
-   `~/.config/photo-crops-presets/timings.json`). **Explore random looks** invents new looks instead (how many per
-   photo, and an optional seed to repeat a run).
-3. **Make looks on** (with more than one photo): **Try looks on one photo
-   first** (pick which) or **All photos**. **Crop first**, then **Make looks**:
-   - **Whole photo**: as shot.
-   - **Pro crop: no zoom (keeps the scene)**: the photo's own shape, at
-     least 90% of its width and height, moved so the players sit on a
-     rule-of-thirds point (their upper body toward the upper third), never
-     cutting them; a photo already well composed stays whole.
-   - **Pro crop: zoomed in on the action**: the photo-crops pro crop, framed
-     tightly around the players in the play (often a third of the photo).
-   - **Face close-up**: head and shoulders.
+**1. Add photos** (any mix, RAW and HEIC included): drop photos or whole
+folders anywhere on the window, paste with **⌘V**, or press **+** → **Add
+photos…** / **Add a folder…** (the Mac's own dialogs; your photos stay where
+they are). A shot saved as both JPEG and RAW is used once (the camera's JPEG),
+and a photo added twice is added once. Your photos are still there next time
+you open the app (dropped and pasted ones are kept in
+`~/.cache/photo-crops-presets/added`). Click a photo to work on it.
 
-   While the looks are made, a small **Making looks** card floats in the
-   corner of the screen (no scrolling needed): a tile for every look, waiting,
-   being made with its %, or done with its picture and how long it took; how
-   many are done and about how long is left. The results open in step 4 when
-   all are done. With many photos, results are grouped look by look.
-4. **Compare, fine-tune and export**: every result is a picture with a ✓ in
-   its corner. Tick ✓ the good ones (leave the bad ones out) and press
-   **Export selected**, or press ⬇ on one picture to export just that one.
-   **Select all**, **Select this look** (every photo in the look you are
-   viewing) and **Clear** help with big batches. **Export as**: **Files in my
-   export folder**, or **One zip file** (saved in the export folder and shown
-   in Finder). Exports are full size, made with the sizes, file type and your
-   name in step 5, with a progress card in the corner.
-   Click any result to see it against the original
+**Find a player** (the person button above your photos): click your player
+once on a photo, and every photo with them is found: by their face (a free
+face-recognition model run on this Mac: OpenCV's YuNet and SFace, about 40 MB,
+downloaded once to `~/.cache/photo-crops`), their jersey number when it shows
+(the Mac's own text reading) and their kit (a player of the other team is
+never taken for them). Kids' faces at a distance look alike, so close calls
+are asked, **Is this your player?** with ✓ and ✗, and each answer sharpens the
+rest. **Theirs** shows only their photos, best first; **Best** one per moment
+(of a burst a moment apart, the sharpest, biggest, facing the camera, near the
+ball); **Choose the best N** chooses them, so the looks are made on just those
+(**Photos: Chosen N**). Each photo is looked at once (remembered in
+`~/.cache/photo-crops/players`). Any photo can be chosen by hand too: the ✓ on
+it, or ⌘-click.
 
-   on the before/after slider, with its description. After a one-photo trial,
-   **Use the selected look on all N photos** makes it (with its fine-tuning) on
-   every photo. **Fine-tune the selected look** changes it instantly, without
-   making the look again:
-   - **Look strength** (0-100 %), **Warmth**
-   - **Player brightness** and **Background brightness** (stops), using the
-     player's cut-out; it says what the look itself already does to them
-   - **Auto fill light on the player**: lifts a player darker than the scene
-     around them (backlit or in shade), up to +0.75 stops, photo by photo. It
-     compares the player with their own background, so it corrects the light,
-     not anyone's skin tone or kit.
-   - **Show and fix the player cut-out**: shows in blue what the app treats
-     as the player (at first only the main players of the play; others count
-     as background). **Click to fix it**: with **Add what I click**, click a
-     teammate, the ball or a flag to make it part of the player; with **Take
-     out what I click**, click a pole or a sign to put it back in the
-     background. Each click is traced with SAM 2.1 (Meta's free Segment
-     Anything model, run on this Mac; about 1 s, 160 MB downloaded once to
-     `~/.cache/photo-crops`), first on the whole photo and then closer around
-     the object for sharp edges. **Undo last click**, **Back to automatic**,
-     and **Remake this photo's looks** (to see the fix in effects such as
-     Color Pop or the neon looks; the brightness sliders use it at once).
-     Fixes stay with the photo for all its looks and the full-size export,
-     and are listed in the export's `.json` (`cutout_fixes`).
-   - **Reset**, and **Use these settings on every photo with this look**
+**The players are cut out as soon as photos are added.** Every photo's
+players are cut out from the background once, in the background, one photo
+at a time (about 20 s a photo on an M2; the photo you open goes first, and it
+steps aside while you move a slider). They're kept on disk, so a restart does
+none again. The top of the Photos panel says so in plain view: **Getting
+photos ready**, with a progress bar, how many are ready and about how long is
+left. Each photo shows its own state: **Waiting** (dimmed), **Getting ready**
+(a moving line under it) or, when it's done, it lights up with **✓ Ready**.
+When every photo is ready the panel says **All 38 photos ready** for a few
+seconds, then goes quiet. Looks that change only the players or only the
+background wait for that photo's cut-out and say so (**Finding the players in
+this photo…**); every other look is ready at once. An edited copy that only
+changes light or color reuses the original's players.
 
-   Fine-tuning is part of the look's recipe (`"adjust"`), so it is kept when
-   you export, make a reel, or save the look as a preset.
+**2. Pick looks**: the looks are a compact list that scales to hundreds:
+**Favorites** (the star on a row) and **Recently used** on top, then each
+group (Bold, Editorial, Studio, Watercolor, Anime, Oil painting, Comic book,
+Pencil and ink, Mine). Each row has a small picture of **your own photo in
+that look**. Search, or filter by group.
 
-   **Match the game** (with more than one photo): **Match all photos to the
-   selected one** evens out exposure and white balance across the set, so a
-   gallery looks like one shoot instead of changing light. Each photo is
-   measured before any look (its middle brightness, and the color of its
-   near-neutral tones: white kits, lines, haze; a green field or a blue sky
-   does not count) and gently corrected toward the selected photo (three
-   quarters of the difference, at most 0.75 stops and 8% per color), then its
-   looks are made again. The correction is in each result's recipe as
-   `"match"` (left out when you save a preset). **Undo matching** puts every
-   photo back as shot.
-5. **Save a preset, export settings**: name a look and **Save preset** to
-   keep it. The export settings used by step 4: the export folder (default `~/Pictures/Photo Presets`), each
-   with its recipe beside it as `.json`. **Open folder** shows them in Finder.
-   **Sizes** (tick any): **Full size**, **Instagram post 4:5** (1080 x
-   1350), **Instagram square** (1080 x 1080), **Instagram story / reel cover
-   9:16** (1080 x 1920), and prints at 300 ppi: **4 x 6**, **5 x 7**, **8 x 10**,
-   **11 x 14** (turned to match the photo). Each size is cropped to its shape
-   around the players (kept whole whenever the shape allows; a cut-out fix
-   that adds a teammate keeps them in too), then resized; Instagram sizes get
-   a light output sharpening. A print size bigger than the photo's own pixels
-   is enlarged, and the export says so. Files are named with the size, e.g.
-   `DSC03424_vivid-pro_ig-4x5.jpg`.
-   **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
-   prints, further editing in Lightroom or Photoshop; about 6 times bigger),
-   or **Both**.
-   **Your name, copyright and watermark**: your name, a copyright notice
-   (empty: `© <year taken> <your name>`) and contact (email, website or
-   handle) go into every file: EXIF Artist and Copyright, and XMP (creator,
-   rights, IPTC creator contact), where Lightroom, Photo Mechanic, Photos and
-   print labs look. They are remembered (in
-   `~/.config/photo-crops-presets/delivery.json`). **Add a watermark** for
-   client proofs or posts: **Corner** (small text, bottom right) or **Across**
-   (large and repeated), with its text (empty: your copyright notice) and
-   strength.
+**Every look is made ahead.** Each non-AI look is made for the photo you're on
+in the background (the look under the pointer first, then its neighbours),
+with the same engine and size as Make, and kept. Rest the pointer on a row, or
+step with **↑ ↓**, and the big picture shows that look at once (about 30 ms):
+the real look, not a color-only stand-in, so smoke, lights, fog and new
+backgrounds show too. **Return** picks it, **Esc** puts the photo back. A look
+not made yet says so in words and is made next; the photo is never blurred.
+The line under the looks says how many are ready. Editing never waits for
+this work. With **All photos** chosen, pointing at a look shows it on **every
+photo of the event** at once, so you can see whether it holds up across day,
+night and indoor shots (these small previews use a lighter people cut-out;
+Make and the big picture always use the full one). Looks made ahead are kept
+on disk (the most recent ones, in `~/.cache/photo-crops-presets/ahead`), so
+after a restart nothing is made twice.
 
-6. **Make an Instagram reel**: a vertical MP4 (1080 x 1920, 30 fps) under a
-   minute, ready to post, made from the looks above or from a folder of photos
-   (such as your exports). Every photo is on screen for 2 seconds (shortened so
-   the reel fits; never under 1.5 s), slowly pushes in and dissolves into the
-   next. With a song, the cuts land on its beat (the song can start later to
-   skip a slow intro) and it fades out at the end. Add an optional opening
-   title (lower third) and closing text (such as your handle). Landscape
-   photos show about half their width, centered on the players, on a blurred
-   copy of themselves; portrait photos fill the screen. Reels are saved in
-   `Reels` inside your export folder.
+The AI illustration looks take about 20 s each, so they are never made ahead:
+they show their most recent picture instead (kept in
+`~/.cache/photo-crops-presets/examples`). Each card says about how long it takes (**instant**, or seconds;
+learned from your own runs, in `~/.config/photo-crops-presets/timings.json`).
+Tap cards to pick them (numbered in order), then choose:
+- **Photos**: **This photo**, or **All N**.
+- **Framing**: **Whole** (as shot); **Pro** (no zoom: the photo's own shape, at
+  least 90% of it, moved so the players sit on a rule-of-thirds point, never
+  cutting them); **Tight** (zoomed in on the action); **Face** (head and
+  shoulders).
+
+and press **Make N looks** (it says about how long, the first AI look of a
+session included: about a minute to load the drawing models). The shuffle
+button beside it makes six random looks, to discover new styles.
+
+**3. Watch them come in**: each look gets a tile in the strip at once, with a
+ring showing its %, and turns into its picture when done; you can open, star
+and export finished ones while the rest are still being made. The top bar
+shows how many are done and about how long is left (**Stop** keeps what is
+made). When you are in another app, the tab title shows the progress and a
+Mac notification says when the looks (or an export, or a reel) are ready.
+
+**4. Look, compare, pick the keepers**:
+- **← →** go through the looks; **Space** (or **P**) **picks** one; **1**–**5** rate
+  it in stars (**0** clears). The strip's **Show** menu narrows it to the picks
+  or to 3 stars and up, for big batches. **G** switches to the **contact sheet**
+  (every look big, pick and ⬇ on each).
+- **Compare** (**C**) puts a before/after slider on the picture; hold **B** to
+  see the original.
+- **Zoom** (**Z** or double-click; drag to move) to check faces and focus: the
+  look is made again at 3600 px for it, so it is sharp. A cropped picture is shown sharp without zooming
+  too: the quick preview first, then (a moment after you stop editing) the crop
+  made again from the photo's own pixels, with the AI detail enlarger when it
+  needs it, exactly as it will export. Compare works zoomed
+  in too.
+- **⌘-click** 2 to 6 pictures to see them **side by side**, each with its pick.
+- **Share** (the arrow-out-of-a-box button): **AirDrop** (to your iPhone, full
+  size), **Messages**, **Mail**, **Add to Photos** (it reaches your iPhone
+  through iCloud Photos), or **Copy** (**⌘C**). What is shared is the finished
+  picture, full size, with its edits, text, your name and copyright.
+- **Remove looks**: the bin button or **Delete** removes the one you're on.
+  To remove several, select them: **⌘-click** adds one at a time, **Shift-click**
+  everything between; the bar then says **N selected** with **Remove N** (or
+  press **Delete**). **Remove unpicked** removes every look you didn't pick,
+  **Remove picked** the ones you did (for marking the rejects), and **Remove
+  all** everything. **Undo** is right there every time.
+
+**5. Edit** (the **Edit** tab, or **A**). Everything changes the picture as you
+drag, and **⌘Z** / **⇧⌘Z** undo and redo every step (the arrows at the top of
+the tab too). Tools used on the picture itself:
+- **Crop** (**R**): drag the box or its handles, in **Free**, **Original**,
+  **4:5**, **1:1**, **9:16** or **16:9**; **straighten** with the dial (up to
+  20°; the picture is enlarged so no corner is empty), or **Auto**, which
+  levels it from the field lines, the horizon and the goal posts. **Apply**.
+- **Remove** works in three steps, shown on its bar: **① Pick what goes**,
+  **② Remove**, **③ Check the fill**. In step 3: **Hold to compare** (before and
+  after), **Try another fill** (four fills, each seeing the area differently:
+  AI fill, a wider view, smooth, or blended from around it), and **Copy from a
+  spot**: drag the circle to grass, sky or crowd and the area is filled from
+  there, shown live as you drag, its light matched at the edge (like a healing
+  brush; brush a small spot first to patch it). **Keep** moves on to the next
+  thing; ⌘Z undoes each step. How each removal is filled is saved with it.
+  **Click** a person or a thing (a bag, a cone, the goal cart) and
+  all of it is taken (their edge and their shadow on the grass too), or
+  **Brush** over it (brushing over most of a person takes the whole person).
+  **Background people** selects, in one click, everyone who is not one of the
+  players kept. What will go shows in red before anything is removed; then
+  **Remove it**, from **This look** or **All N looks** of this photo (and the
+  looks made of it later). It never takes the players kept in the look unless
+  you brush right over them. It is filled by LaMa, a free object-removal model
+  run on this Mac (downloaded once, about 200 MB, to `~/.cache/photo-crops`, or
+  reused from ai-versions), with the light matched at the seam, the picture
+  mirrored at its edges for context, and the fine texture (grass blades)
+  borrowed from the ground right around it. It takes seconds: the looks are not
+  made again; each export does it again at full size. **⌘Z** puts it back.
+- **Adjust a part**: click a face, the player, the sky or the grass; the part
+  is traced (with SAM 2.1, as for the cut-out) and shown in blue, and gets its
+  own **Brightness**, **Warmth** and **Saturation**, with a soft edge. Several
+  parts can be adjusted; each is listed in the tab.
+- **White balance**: click something that should be white or gray (a white
+  kit, a line); Warmth and Tint are set so it is.
+- **Text** (**T**): a name, a score or a date, dragged into place (it snaps
+  to the middle), typed in the tab (two lines are fine), in **Clean**,
+  **Bold**, **Spaced** or **Banner** (on a dark bar), its size and color, in
+  any of 19 **fonts** (VS Display and VS Tech from the brand, Avenir,
+  Futura, Impact, DIN, Didot, scripts...) and turned to **any angle** (drag
+  the round handle above it, or type the degrees; it stays on the picture).
+  The page draws it with the same font as the export, so what you place is
+  what you get; every export size has it in the same place.
+- **Logo**: your **brand kit** (a team crest, a sponsor, your own mark).
+  **Add a logo** (or drop it on the kit): a PNG, a JPG on white, or a
+  screenshot; its background is taken away (keyed out of a plain color with a
+  clean edge, or cut out) and it is trimmed. Click a logo to put it on the
+  picture (bottom right), drag it, or pick a corner; its **Size**,
+  **Strength**, and **Auto** (a one-color mark goes white on dark spots and
+  black on light ones; a crest shows as it is), **As it is**, **White** or
+  **Black**. Logos are kept in `~/.config/photo-crops-presets/logos`. The
+  export window's **Add my logo** puts one in a corner of every picture that
+  has none placed, sized to each export size.
+- **Poster**: makes the picture a social post, as a team's designer would.
+  **Game Day** (the player in front of a big title, a line under it), **Spotlight**
+  (team color, their number behind, the picture in a card with the player
+  breaking out over its edge, their name and position), **Final Score** (the
+  score on a clean panel) and **MVP** (a cover title behind the player); as an
+  Instagram **Post** (4:5) or **Story** (9:16), in a team color, with your logo.
+  The player's cut-out gives the depth: they are drawn again in front of the
+  title or the card. Works on any look, and the export is full size.
+- **Cut-out**: fix what counts as the player (below).
+
+Sliders:
+- **Light**: **Exposure**, **Contrast**, **Highlights** (bring back a white kit
+  or the sky), **Shadows** (open up a shaded face).
+- **Color**: **Warmth**, **Tint**, **Saturation**.
+- **The look**: **Look strength**, **Player brightness** and **Background
+  brightness** (stops, using the player's cut-out), **Auto fill light** (lifts
+  a player darker than the scene around them, backlit or in shade, up to +0.75
+  stops; it compares the player with their own background, so it corrects the
+  light, not anyone's skin tone or kit). Double-click a slider to reset it.
+- **Advanced** (folded away, so the panel stays clean): **Clarity and punch**
+  (Vibrance, Clarity, Texture, Dehaze, Whites, Blacks); **Player and
+  background** (the player's clarity, vibrance, warmth and sharpness, Face
+  light, Rim light, Background blur, color and warmth, using the cut-out);
+  **Tone curve** (as in Lightroom, right after the light sliders: your
+  photo's histogram behind the curve; **RGB** changes brightness only, so
+  skin and kit keep their hue, while **Red**, **Green** and **Blue** grade
+  color. Click the line to add a point and drag it, drag a point off or
+  double-click it to take it out, double-click the graph to straighten it.
+  **Whole photo**, **Players** or **Background**: a curve on just the
+  players or just what's behind them, soft edged from the cut-out, as
+  Lightroom and Capture One masks do. Ready-made curves are named by the
+  situation: **Flat, overcast light**, **Punchy action**, **Make the player
+  pop** (players only), **Night game** (background only), **Faded film**,
+  **Cool shadows, warm highlights**; one is marked **Suggested** when the
+  photo is flat or dark, and a second click takes it off);
+  **Color mixer** (hue, saturation and lightness for eight colors, and **Kit
+  color pop**: pick a kit color and make it richer); **Color grading** (a
+  color and amount for shadows, midtones and highlights); **Finishing** (Noise
+  reduction, Sharpen, Vignette). Advanced is folded away, each part folds on its
+  own, and a blue number shows how many settings are in use. Kit color pop:
+  **Pick the kit color**, then click the kit on the picture. Double-click any
+  slider to reset it.
+- **Reset all**, and **Use on all N** (these sliders on every picture with
+  this look; crops, parts and text stay with each picture).
+
+And for the photo:
+- **Fix the player cut-out** (**Cut-out**): the picture shows in blue what the
+  app treats as the player. The ball joins them on its own only when it is in
+  the play: about the right size for a ball at the player's own distance, near
+  them, and about as sharp as they are (a blurred ball in the background, or one
+  at the feet of a player far behind, is left out). With **Add**, click a teammate, the ball or a flag
+  to make it part of the player; with **Take out**, click a pole or a sign.
+  Each click is traced with SAM 2.1 (Meta's free Segment Anything model, run
+  on this Mac; about 1 s, 160 MB downloaded once to `~/.cache/photo-crops`).
+  **Undo**, **Automatic**, and **Remake this photo's looks**. Fixes stay with
+  the photo for all its looks and the full-size export, and are listed in the
+  export's `.json` (`cutout_fixes`).
+- **Use this look on all N photos** (with its fine-tuning).
+- **Match every photo's light to this one**: evens out exposure and white
+  balance across the set, so a gallery looks like one shoot. Each photo is
+  measured before any look (its middle brightness, and the color of its
+  near-neutral tones: white kits, lines, haze; a green field or a blue sky does
+  not count) and gently corrected toward this one (three quarters of the
+  difference, at most 0.75 stops and 8% per color), then its looks are made
+  again. The correction is in each recipe as `"match"`. **Undo matching**
+  puts every photo back as shot.
+- **Save as a preset**: the look with its sliders, under **Mine** (crops,
+  parts, text and removals belong to the picture and are not saved in it).
+
+The sliders are part of the look's recipe (`"adjust"`); crops, parts, text and
+removals are the picture's `"edits"`. All are
+kept when you export, share, zoom or make a reel, and written in each
+export's `.json`.
+
+**6. Export**: **Export N picks** (top right, or **E**) exports the picked
+pictures; with none picked, the one you are looking at. ⬇ on a picture
+exports just that one. The export window:
+- **Save to**: your export folder (default `~/Pictures/Photo Presets`;
+  **Change…**). Each picture is saved with its recipe beside it as `.json`.
+- **As**: **Separate files**, or **One zip file** (named with the date and how
+  many pictures).
+- **Sizes** (any): **Full size**, **Instagram post 4:5** (1080 x 1350),
+  **Instagram square** (1080 x 1080), **Instagram story / reel cover 9:16**
+  (1080 x 1920), and prints at 300 ppi: **4 x 6**, **5 x 7**, **8 x 10**, **11 x
+  14** (turned to match the photo). Each size is cropped to its shape around
+  the players (kept whole whenever the shape allows; a cut-out fix that adds a
+  teammate keeps them in too), then resized; Instagram sizes get a light
+  output sharpening. A size bigger than the crop's own pixels (a tight crop
+  posted to Instagram, a big print) is enlarged with the **AI detail
+  enlarger** (Real-ESRGAN, on this Mac's graphics chip in half precision,
+  about 4-5 s a photo): crisp hair, skin,
+  numbers and kit instead of a soft blow-up, with a little of the plain
+  enlargement mixed back so skin keeps its real texture; it sharpens faces
+  with the rest of the picture but never invents features. Crops over 4 megapixels, or a Mac without the model, use plain
+  enlarging. When the export is done, its note says which files the AI
+  enlarger sharpened and by how much (✦), so you can see when it was used;
+  Culling's finish page says the same for its crops. Files are named with the size, e.g.
+  `DSC03424_vivid-pro_ig-4x5.jpg`.
+- **File type**: **JPEG** (web, Instagram, clients), **16-bit TIFF** (big
+  prints, further editing in Lightroom or Photoshop; about 6 times bigger), or
+  **Both**.
+- **Your name, copyright and watermark**: your name, a copyright notice (empty:
+  `© <year taken> <your name>`) and contact go into every file: EXIF Artist and
+  Copyright, and XMP (creator, rights, IPTC creator contact), where Lightroom,
+  Photo Mechanic, Photos and print labs look. Remembered (in
+  `~/.config/photo-crops-presets/delivery.json`). **Add a watermark** for
+  client proofs or posts: **Corner** (small text, bottom right) or **Across
+  (proofs)** (large and repeated), with its text (empty: your copyright
+  notice) and strength.
+
+The window remembers your choices. A progress note shows the export; when it
+is done, **Show in Finder**.
+
+**7. Reel** (the **Reel** tab): a vertical MP4 (1080 x 1920, 30 fps) under a
+minute, ready to post, from your **Picks** or **All looks**. Drag the
+pictures into the order you want; × leaves one out. Every picture is on screen
+for 2 seconds (shortened so the reel fits; never under 1.5 s), slowly pushes in
+and dissolves into the next. With a song, the cuts land on its beat (it can
+start later to skip a slow intro) and it fades out at the end. Add an optional
+opening title (lower third) and closing text (such as your handle). Landscape
+photos show about half their width, centered on the players, on a blurred copy
+of themselves; portrait photos fill the screen. The reel plays in the phone on
+the right, and is saved in `Reels` inside your export folder.
+
+**Help as you go**: rest the pointer on any button, slider or choice for a
+short explanation (on a look's card: its full description, how long it takes
+and whether it is drawn by AI). Resting on **Pro**, **Tight** or **Face**
+draws where that framing would cut your photo, on the photo itself. Nothing
+is ever silently greyed out: a button you cannot use yet says why, and what
+to do, when you click or point at it (Make with no look picked, Export with
+nothing made, Undo with nothing to undo...). **Edit** works on any photo:
+with no look made, the photo itself opens for editing (as the look
+**Original**).
+
+**Every word on a poster can be changed or taken off**: click a word on the
+picture (GAME DAY, the line under it, a number) and its box opens in the
+panel with the words selected, ready to type over. The **×** beside a box
+takes those words off the poster (type in the box to put them back).
+
+**Resizable panels**: drag the edge between the photos panel (left) or the
+side panel (right) and the photo to make it wider or narrower; the photo fits
+the space left, the photos, looks, tools and poster layouts flow into more
+columns, and the widths are remembered. Double-click an edge for the normal
+width.
+
+**Export**: separate files go in a new folder of their own ("VS Digital Pro
+<date> (<n> pictures)") inside the folder you choose, like the zip; each file
+is dated when it was exported (the date the photo was taken stays inside it,
+where Photos reads it). A small .json beside each picture (how it was made)
+is saved only with **Also save how each was made** ticked (under "Your name,
+copyright, watermark and more"); the command line always saves it.
+
+**Posters in any shape**: pick **Post** (Instagram 4:5), **Square** (1:1),
+**Story** (Instagram or TikTok story or reel, 9:16) or **Wide** (YouTube, X,
+Facebook, 16:9); the picture you edit is that shape, as it will be exported.
+Every word and banner fits the shape (on a tall story they are smaller, to its
+width), and **Words and banners size** makes them all smaller or bigger.
+Exporting a poster in other sizes lays it out again for each size's shape
+(nothing is cropped off), and export has a **Wide 16:9** size too.
+
+**Assessor tab** (next to Looks, Reel and Culling, or Tools → Assessor): how a video or
+photo was shot, what is holding it back, how to fix the file and what to change
+next time. No AI: the camera's own settings in the file, measurements of the
+picture, and plain rules.
+- **Add** clips and photos with **+** (they stay where they are) or drop them on
+  the window. Videos take about a third of their length to check; photos a
+  second or two. Results are kept, so a file is checked once. A dropped file is
+  copied into the app (two with one name are both kept); taking that one out of
+  the list sends the app's copy to the Trash when the app next starts (your
+  original is never touched). The list shows the same verdict as **In short**.
+- **In short** at the top of each file: a verdict (ready to use, good with a
+  quick fix, or needs attention) and its few most useful recommendations in
+  order: fix now, change next time, one habit. **Recommendations** (under the
+  list) sums up the ticked files, or every checked one: how many are ready to
+  use, the changes that come up most (with how many files), the fixes that help
+  most and which files to look at first; the Word report starts with the same
+  summary.
+- **What's holding it back**, and for videos **when it happens**: a timeline of
+  soft pans, shaky stretches, brightness jumps and too-dark or too-bright
+  stretches; click one to see that frame, **Play this moment** to watch it.
+  Photos: **Problem areas** shows pure white in red, pure black in blue and
+  circles the sharpest detail.
+- **Fix this file**: brightness, recover bright areas (photos; far more from
+  RAW), neutral color, even out brightness and steady the camera (videos),
+  reduce grain, sharpen. Each is suggested when it is needed, says what it can't
+  do, and shows live before/after (drag the line). **Make a fixed copy** saves a
+  new file in a `Clip Analysis/Fixed` folder next to the original (never over
+  it, nor over another fixed copy: a JPEG and its RAW fixed at once get
+  `DSC01234 fixed.jpg` and `DSC01234 fixed 2.jpg`); steadying checks its own
+  result and says plainly if it didn't help. Double-click a slider to go back to
+  its suggested value.
+- **Next time you shoot**: the settings to change and why, and habits.
+- **Compare**: tick two or more files. A table, the measurements that matter
+  first, the best and weakest on each marked, **Only what differs**, plus plain
+  notes on what differs (a JPEG against its own RAW is called the same photo:
+  the RAW measures softer only because the camera sharpens its JPEG).
+- **Export**: a Word report (opens in Google Drive too) and/or a spreadsheet,
+  in a `Clip Analysis` folder next to the first file (a second report in the
+  same minute gets its own name).
+The same checks run from Terminal in the clip-analyzer project.
+
+**Edit anything on a poster, at any time** (Poster tool):
+- every word: click it to type, drag it to move it, its corner to resize it,
+  Delete to take it off (**Words back to their places** undoes the moving);
+- the logo: drag it, its corner resizes it, Delete takes it off;
+- **Add to this poster** on every layout: text, a number, a score banner, a
+  panel, a line, a logo and **stripes** (ready sets such as red · white ·
+  blue, navy · gold or your team color, any 2 to 6 colors of your own, across
+  or up and down), each dragged and resized freely;
+- drag a logo from your kit, or drop a logo file (SVG, PDF, PNG…), onto the
+  picture where you want it; a photo dropped on a poster asks once whether it
+  is the poster's new photo or a graphic on it;
+- **In this poster** (top of the Poster panel): **Change photo…** puts another
+  photo in it, **Change look…** another look on its photo, its words and
+  pieces kept (a new picture; the first is kept too).
+⌘Z / ⇧⌘Z undo and redo every change, typing included (a run of typing is one
+step), also with the cursor in a box, and keep you in the tool you are in. The
+undo list survives quitting and reopening the app; what was being typed when
+the window closed is still saved. **Use on all** is one step to undo; deleting
+a saved poster or a logo from your kit shows **Undo**.
+The tool bar sits below the picture, so all of it can be reached.
+
+**A poster for the whole team**: make a poster on one player's picture
+(Spotlight, Name Stack, Goal, a custom one…), then press **Make this poster
+for the team** and pick the other players' photos. Each gets the same design
+and look; each player's number is read off their shirt when it can be seen,
+and the names are left for you. **This poster for the team** (top of the
+Poster panel) lists them all: type each name and number (Return goes to the
+next), click a picture to open it and drag its photo to place that player.
+Making a saved poster preset on several photos lists them the same way.
+
+**Moving things on a poster**: in the Poster tool, drag the photo to move it in
+the poster (or in Spotlight's card), pinch or use **Photo zoom** to zoom, and
+**Photo back to its place** undoes it. Drag the logo anywhere on any layout,
+its corner to resize it. On a poster, Crop opens the Poster tool (what you see
+is what is exported).
+
+**Custom posters**: **Custom ✦** (or **Customize this layout**) turns the
+layout you are on into your own: every word, panel and band becomes a piece.
+**Add** a title, text, number badge, score banner, color band, panel, line or
+logo. Drag a piece on the picture to move it (it snaps to the middle), drag
+its corner to make it bigger or smaller, arrow keys nudge it, Delete removes
+it. In the panel: its words, style (Heavy, Bold, Clean, Spaced, Outline,
+Banner), size and color, **Behind the players** (they stand in front of it),
+forward and back, duplicate. A dark fade at the top and bottom helps words
+read. It is drawn like every layout, so what you see is what is exported (in
+any shape), and it can be saved with **Save poster**.
+
+**Any word, any color**: the round dot beside each poster word opens its
+colors (white, black, gold, red, blue, navy, green, orange, purple, sky, or
+any color with the rainbow dot); **A** puts back the layout's own color.
+Champions' gold lines follow its title's color. Spotlight's number is a solid
+badge on the card's corner by default (**Number: Big, behind** for the large
+number behind the card).
+
+**The edit panel puts what you are working on first**: with Poster, Text,
+Logo or Adjust a part open, its options sit right under the tools, and
+Light, Color and The look fold away below (click one to open it).
+
+**Logos in any format**: SVG, PDF and Illustrator (.ai, saved with PDF
+compatibility) are drawn sharp at full size with their clear background kept;
+PNG, JPG (on white), HEIC and screenshots work too. Add one with **Add a
+logo**, or drop the file anywhere on the window (an SVG, PDF or .ai file
+always goes to your logos). EPS cannot be read: save it as SVG, PDF or PNG.
+**White** and **Black** make a two-tone crest one color, its light parts
+see-through (its letters show the picture), not a blank shape.
+
+**Click what you built to edit it**: a text, a logo or a poster on the
+picture opens its tool with it chosen (a text is ready to type in).
+
+Posters come in 26 layouts plus Custom. The bold ones: Game Day, Spotlight,
+Final Score, MVP, Name Stack (the name three times behind the player), Goal
+(GOAL behind the scorer, their name and the minute), Team Color, Matchday,
+Champions, Jersey Number, Cover Story, Diagonal Split, Player Card, Cinematic,
+and the ★ designs Stadium Banner, Smoke Burst, Featured Split, Storm Night and
+Collector's Edition. **Clean overlays** (your photo as it is, the words on a
+quiet fill): Fill Band, Lower Third, Knockout (the words cut out of a solid
+panel), Side Label (the name standing up by the edge), Corner Tag, Outline
+Stack and Frosted Panel.
+
+**Words on several lines**: Return starts a new line (up to three) in any
+poster word box, custom text piece or photo text; every layout stacks them.
+
+**Right-click** (or Control-click) a word or piece for Bring to front, Bring
+forward, Send backward, Send to back, turning, back to its place, and taking it
+off. On a ready-made layout, layering makes the layout your own first
+(Customize). Click the photo, or press Esc, to deselect; Esc again closes the
+tool.
+
+**Every word, any font, any angle**: on every layout, each word (titles,
+names, numbers, the ribbon and the badge too) takes its own color, font and
+angle: the **Aa** button beside it opens its style, and the round handle
+above a selected word turns it. Words are drawn whole before they are turned,
+so a word stood up by an edge never loses letters. Custom poster pieces turn
+the same way. Moves are kept when you switch layouts.
+
+**Save a poster, put any picture in it**: in the Poster panel, name it and
+press **Save poster** (its layout, words, color, text and logo are kept in
+`~/.config/photo-crops-presets/posters.json`). On any other picture, open
+Poster and click it under **Your posters**. Saving a preset with **Keep the
+poster in it** ticked does the same together with the look: pick the preset
+under **Mine** and Make, and every photo comes out in that design.
+
+**Looks on top of your edits**: edit the photo first (for a night shot, lower
+the player's light), then press **Add a look on top of this edit**, or in the
+Looks panel set **From: My edit**, and pick a look such as Stadium Night. The
+look starts from your edited photo (its light, color, crop and removals; its
+text, logos and poster are left for the finished picture), saved once at full
+size in 16 bits in `~/.cache/photo-crops-presets/edited`. **From: Original
+photo** makes looks from the photo as shot.
+
+**Nothing is lost when you quit**: your photos, the looks made, their edits,
+picks and stars, cut-out fixes and removals are saved as you go (looks at
+preview size in `~/.cache/photo-crops-presets/session-looks`) and are all
+there when the app opens again. **Remove all** (and removing a look) clears
+them. When a newer version of VS Digital Pro is installed, a green **Restart to
+update** button appears at the top: the app closes and opens again in a few
+seconds, with everything as it was. (The app keeps using the version it
+started with until then, so it never mixes old and new.)
+
+Press **?** for every keyboard shortcut.
+
+**Tools** (top right) opens the preset editor, Lightroom presets and assets in
+your browser: they are the classic app's pages (below), working on the same
+looks. The classic app on its own: `uv run vsdigitalpro-classic`.
 
 **Quality and color** (for paid and print work):
 - RAW (and 16-bit TIFF) photos keep a 16-bit copy, and full-size exports make
@@ -189,6 +575,52 @@ results). It suits both ways of working:
 
 Every picture keeps the photo's real date and camera details (date taken, camera, lens, exposure), Sony RAW files included, and saved files are dated when the photo was taken. Results are made at 1600 px for speed; export renders each again from the
 full-size photo.
+
+### Culling (keep the best of an event, delete the rest)
+
+The **Culling** tab (also Tools → Culling) works on your folders where they are, and on whole
+tournaments (1,500+ photos stay quick: thumbnails come from the camera's own previews in about a
+minute, and only what is on screen is drawn).
+
+1. **Pass 1, the app.** Add an event's folder (or **Import from the camera card**: new photos only,
+   into a dated folder, culled while they copy). Nothing on the card is changed. A photo already
+   copied (the same bytes) is skipped; a different photo with a name already used (a second camera,
+   or a camera's numbers starting again) gets a new name together with its RAW (`DSC00001-2.JPG`),
+   never written over. On this Mac and free, the app looks at every photo:
+   is the main player sharp (judged against the rest of the shoot, so a dull day doesn't mark
+   everything soft), are the eyes open (Apple's face quality on each player's face), did the camera's
+   focus point land on a player, is the ball in the play, the light, and which frames are one burst.
+   It marks each one **keep** or **reject**, with the reason in plain words and how sure it is. Choose
+   how many to keep (the best ones, a number or a share), how picky, and best frame per burst.
+2. **Your pass.** Starts with the photos pass 1 was least sure about. `P` keep, `X` reject, `1`–`5`
+   stars, `←` `→` next, `Space` one big photo, `Z` 100% (on the face), `C` compare a burst or your
+   selection side by side, `G` gallery, `⌘Z` undo (`?` lists every key). **Pass 1 unsure** shows every
+   close call, none hidden in a burst stack. Marks are saved in order, and a note says so if the app
+   isn't answering. Your marks always win over pass 1's (dashed marks are pass 1's, solid ones
+   yours), and teach it your taste for the next event.
+3. **Finish** (one page, top to bottom):
+   1. **Clear out the rejects**: look at them first, or delete them (JPEG and RAW together go to the
+      Trash, with undo). The box names the folder they leave and says whether they are your ORIGINAL
+      photos or copies (and why); the app re-checks each is still a reject at that moment, and a JPEG
+      is never split from its RAW.
+   2. **What to do with the keepers**: **Crop them for posting**, **Copy them as they are** (a Picks
+      folder) or **Use them in VS Digital Pro** (Looks, Reel). For cropping, on the same page: where
+      they'll be posted (Instagram post 4:5, Story or Reel 9:16, YouTube 16:9; more choices: same size
+      as the camera photo, or AI choosing each crop), how they should look (Natural, Punchy, Softer, No
+      edits, AI touch-up: one picture of each), **Check your crops** (every keeper with its crop drawn
+      on it and a plain label: cropped on the action, your crop, widened to stay sharp, whole photo
+      and why, no players found; click one to change it, × to leave it out), the sharpness choice when
+      a crop is zoomed in too far, the folder, and one **Make** button with its progress and an
+      **Open the folder** when done. Files end in the look's name (`DSC01234_natural.jpg`); two
+      keepers with one file name (two camera folders) each get their own (`DSC01234-2_natural.jpg`).
+      The folder box is only a name: the new folder always goes next to the event's photos.
+
+You can also move a crop from the big photo (`R` shows it: drag to move it, scroll to resize; its
+pixels show on it, amber when it would be enlarged). Gemini is used only when you ask (rating keepers
+for the AI's own crops, the AI touch-up), and the cost shows first.
+The timeline across the top is the whole event: tall bars are the big moments.
+
+### Tools: preset editor, Lightroom presets, assets
 
 **Preset manager**: load a preset to start from, adjust it, preview it on a
 photo (the preview stays beside the settings), then save it with a name and a
@@ -240,11 +672,11 @@ precision (floats), so LUT looks keep 16-bit photos smooth.
 ### Command line
 
 ```bash
-uv run allprophoto-batch --list
-uv run allprophoto-batch ~/Movies/"Game day" --random 6 --crop crop
-uv run allprophoto-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
-uv run allprophoto-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
-uv run allprophoto-batch ~/Movies/"Game day" --all-presets
+uv run vsdigitalpro-batch --list
+uv run vsdigitalpro-batch ~/Movies/"Game day" --random 6 --crop crop
+uv run vsdigitalpro-batch ~/Movies/"Game day" --preset "Grit & Glory" --out ~/Pictures/Grit
+uv run vsdigitalpro-batch ~/Movies/"Game day" --preset "Color Pop" --preset "Dark Mono"
+uv run vsdigitalpro-batch ~/Movies/"Game day" --all-presets
 ```
 
 ## Starter presets
@@ -282,12 +714,38 @@ uv run allprophoto-batch ~/Movies/"Game day" --all-presets
 | Smoke Studio | A red studio backdrop, white smoke billowing at the player's sides and rolling across the floor in front of their feet, stage lights above |
 | Color Smoke | A dark night background with team-colored smoke bombs (blue left, gold right) behind the player |
 | Stadium Smoke | A dark night stadium, gray smoke at the player's sides and over the floor, and two banks of floodlights glowing through the haze |
+
+Both smoke looks first take the field clean (on this Mac, with LaMa): the other players, the goals (posts, net and wheels), bags and cones come off, so nothing is left half standing in the dark. **Lens blur** on a field photo works like a real lens: the grass where the player stands stays as sharp as their feet and softens with distance; the far side of the field and everything behind it gets the full blur.
 | Neon Pop Art | The player as a neon pop-art painting (indigo, cyan, pink, orange and yellow-green paint, painted lines, a glowing outline) with paint splatter and swooping strokes, on a dark sepia background |
 | Neon Pop Art Sharp | Neon Pop Art with crisp, screen-print edges: hard-edged paint shapes, thin ink and bright etched lines, a thin outline, whip lines flying outward, and a near-black background |
 | Neon Pop Art Sharp Black | Neon Pop Art Sharp on a true black background instead of sepia brown |
 | Neon Splash | The player as glowing neon line art (a dark body, crisp neon lines, a neon rim) on black, with a hard-edged rainbow paint explosion behind them |
 | Neon Streaks | Neon line art on black like Neon Splash, but the background is mostly fine paint streaks ending in drops and tiny specks, with only a little solid paint |
 | Player Vignette | Darkens away from the player's own outline, wherever they are in the frame |
+
+**Field sets** (the Field group: the player on a field at night, dusk or golden hour, for
+soccer and football). Each keeps the photo's own grass under the player's feet, with its real
+shadows, relit as a pool of light that falls off into the dark. Everyone else and anything lying on
+the field (a goal's wheels, bags) is taken off it first with LaMa. Field lines are drawn on that
+grass in the photo's own perspective, worked out from where the field ends and how tall the player
+is in the frame; on a tight long-lens shot they move in so they stay in the picture. Everything
+behind the field becomes sky and a dark, out-of-focus stadium shape (press box, stands, a wall or
+a tree line). There are no floodlights or poles. The empty field is made once a photo (the first
+field look takes LaMa's few seconds, the rest show in well under a second).
+
+| Preset | What it does |
+|---|---|
+| Kneel Line | Blue-hour sky over a dark press box, a white line running out from under the player |
+| Goal Line Night | Night: a goal line across the turf just behind the player, the stands lost in the dark |
+| Center Circle | Soccer's halfway line and center circle around the player, stands at dusk |
+| Box Corner | The corner of the penalty box behind the player, a press box against a sunset |
+| Hash Marks | Football: a yard line under the player with the hash marks, a press box at night |
+| End Zone | Football: the goal line in front, the end line behind, steel-gray night |
+| Corner Arc | Soccer's corner arc around the player, the touchline meeting the goal line, trees at twilight |
+| Sideline Haze | Night with haze in the air: the stands fade into it, a line running out from the player |
+| Golden Field | Golden hour: a warm sky low behind a tree line, the pitch in late sun |
+| Blackout | Pure black around the player: only the turf at their feet and one line are lit |
+| Midfield Night | Night: the halfway line across under the player's feet, the center spot, stands above |
 
 The black-and-white looks lean on blue in their mix (like a red filter on
 film) so sunlit grass stays gray instead of going white.
@@ -370,7 +828,23 @@ frame (the most visible effect).
 
 A look is a recipe: a list of steps, run in order, then its quick
 adjustments (`"adjust"`: `strength` 0-1, `subject` and `background` stops,
-`warmth` -1 to 1, `auto_fill` true/false), applied over the finished look.
+`warmth` -1 to 1, `auto_fill` true/false, and the Light and Color sliders),
+applied over the finished look. The Advanced adjustments are `"adjust"` keys
+too: `vibrance`, `clarity`, `texture`, `dehaze`, `whites`, `blacks`;
+`p_clarity`, `p_vibrance`, `p_warmth`, `p_sharpen`, `face_light`, `rim_light`,
+`bg_blur`, `bg_saturation`, `bg_warmth`; `mix_<color>_h`/`_s`/`_l` for red,
+orange, yellow, green, aqua, blue, purple and magenta; `kit_color` (#rrggbb)
+and `kit_pop`; `grade_sh_hue`/`grade_sh`, `grade_mid_hue`/`grade_mid`,
+`grade_hi_hue`/`grade_hi`; `noise`, `sharpen`, `vignette`. Most run -1 to 1
+(0: off).
+
+**Pro color grades**: ten of VS Digital Pro's own, made here as real 3D LUTs
+(`photo_presets/grades.py` writes them to `photo_presets/luts_builtin/`), so
+the same grade works in Final Cut, Lightroom and Photoshop: VS Prime Time,
+Golden Hour, Night Match, Blockbuster, Bleach Bypass, Film Stock, Heritage
+Chrome, Ice Cold, Lush Pitch and Matte Editorial. Each is a short list of
+film-style moves (tone curve, highlight roll-off, color by hue, split toning,
+matte blacks), always kind to skin.
 
 ```json
 {"protect_faces": true,
@@ -435,8 +909,14 @@ outlines decide which traced pieces are the players in the play, so
 background people, poles and signs stay in the background; the ball in the
 play joins the players (only a ball near them and about as big as a ball at
 their distance: one far behind them, in another game, is left out). Steps on the `subject` layer change only the players, steps on
-the `background` layer only what is behind them. The cut-out is made only
-when a look needs it.
+the `background` layer only what is behind them. Each head is then traced
+again close up (BiRefNet's lighter version), so hair keeps its detail, and on
+macOS 14 or later that hair is trimmed to Apple's own outline of the person
+(macOS Vision): no halo of background around the hair. The trim only ever
+takes away, and a head Apple's outline doesn't fit well stays as before. The
+cut-out is made in the background as soon as a photo is added (one at a
+time), kept on disk, and the models are let go a minute after the last one
+(about 10 GB back to the Mac).
 
 **Depth (Z-sandwiching)**: fog, stadium smoke, rain and impact overlays go on
 the background layer by default, so they sit behind the players but in front
@@ -501,27 +981,120 @@ uv run photo-crops ~/Movies/"Game day"
 Pro crops, face close-ups and rebuilt screenshots, exactly as in the
 [photo-crops README](https://github.com/bradadevo/photo-crops#readme).
 
+## Architecture
+
+How the parts fit, in plain terms.
+
+```text
+ You ──► the page (studio/web: plain HTML, CSS, JavaScript)
+            │  clicks, sliders, drags become small requests
+            ▼
+         the local server (studio/server.py, only on this Mac)
+            │  keeps the session: your photos, the looks made, edits, picks
+            ▼
+         the engine (engine.py)
+            ├─ scene.py      what is in the photo: players, faces, ball, the cut-out   ◄─ AI models
+            ├─ pipeline.py   runs a look's recipe, step by step (effects.py, luts.py…)
+            ├─ edits.py      after the look: crop, parts, text, removals (retouch.py)  ◄─ AI models
+            ├─ poster.py     posters and custom posters (custom_poster.py, fonts.py)
+            └─ deliver.py    export sizes, AI enlarging (enlarge.py), credit, watermark ◄─ AI model
+```
+
+- **The page** is the whole app you see. It draws previews quickly (about
+  1600 px) and shows edits live, using the same fonts and maths as the
+  export, so what you see is what you get.
+- **The server** runs on your Mac only (nothing goes to the internet). It
+  saves the session as you go, so quitting loses nothing, and runs slow work
+  (looks, AI drawings, exports) in the background with progress. One worker
+  does the work in order of urgency: your edits first, then Make and
+  exports, then the looks made ahead. Beside it, the players of every photo
+  are cut out ahead (one at a time, so memory stays at the editing peak), and
+  every non-AI look is made ahead for the open photo and for the event, so
+  pointing at a look only shows a picture already made.
+- **A look is a recipe**: plain JSON, a list of steps plus slider values. The
+  same recipe makes the preview, the zoom (3600 px) and the full-size export,
+  which is how they match. Recipes are saved as presets and written next to
+  exports.
+- **Understanding the photo comes first** (`scene.py`): where the players,
+  faces, feet and ball are, and a precise cut-out of the players. Every
+  "player only" or "background only" setting, face protection and overlay
+  placement depends on it. It is made once per photo and reused.
+- **Edits come after the look** (crop, text, logos, posters, removals), so a
+  look can be swapped without losing them; "Add a look on top of this edit"
+  goes the other way.
+- **Export** renders again from the full-size (16-bit when RAW) photo, in
+  floating point to the end, then crops each size around the players, enlarges
+  with AI when needed, and writes your credit into the file.
+- **Culling** (`cull/`), **Assessor** (`clipcheck/`) and **Find a player**
+  (`players.py`) are separate parts sharing the same photo understanding.
+- **Where things live**: settings, presets, logos and posters in
+  `~/.config/photo-crops-presets`; caches (looks made, edited photos, assets) in
+  `~/.cache/photo-crops-presets`; AI models in `~/.cache/photo-crops`,
+  `~/.rembg` and `~/.cache/huggingface`. Your original photos are never
+  changed.
+
 ## Development
 
 ```bash
 uv run pytest
 ```
 
-The tests never load the large models.
+The tests never load the large models (and never touch your real settings:
+they use a folder of their own).
+
+The browser tests click the real app through in Chrome, on a separate test
+copy with real event photos (cold, then quit and reopen, then warm), with
+every speed and memory bar written in as a pass or fail line (about 10
+minutes for 40 photos):
+
+```bash
+uv run --with playwright --with psutil --with requests python tests/ui/run.py --photos "<folder>" --count 38 --out <results folder>
+```
+
+The bars and every measured number are in
+[docs/plans/instant-looks.md](docs/plans/instant-looks.md).
+
+The Culling tab has two more, on a scratch folder of photo copies (never your own folders):
+`tests/ui/delete_click.py <out folder>` checks the **Delete rejects** box (the folder, ORIGINAL or
+copy, undo), with a Trash of its own; `tests/ui/cull_walk.py <event copy> <out folder>` walks the
+whole tab at 1440 × 900 and 1280 × 800 and writes its timings. The findings and fixes are in
+[CULLING_AUDIT.md](CULLING_AUDIT.md). The Assessor tab has `tests/ui/check_walk.py <folder of copies> <out folder>`
+(fixed copies, dropped files and reports never written over, one verdict, both window sizes);
+its findings are in [ASSESSOR_AUDIT.md](ASSESSOR_AUDIT.md).
 
 ```text
-photo_crops/          photo-crops (see its README)
+photo_crops/          photo-crops (see its README): pose and outline models (YOLO), crops
 photo_presets/
-  app.py              The Gradio app
-  cli.py              allprophoto-batch
+  studio/             The VS Digital Pro app
+    server.py         Its local server: the session (photos, looks made, kept), the worker, the page's API
+    web/              The page: index.html, app.css, app.js, edit.js, custom.js, background.js (no build step); fonts/
+    cull.py           The Culling tab
+    check.py          The Assessor tab (named check in the code)
+    macapp.py         vsdigitalpro-install-app: VS Digital Pro.app in ~/Applications
+    share.py          AirDrop, Messages and Mail, the Mac's own share windows
   engine.py           Random and preset modes, previews, full-size export
-  pipeline.py         Running recipes, the step registry, plugins, keeping faces clean
+  scene.py            Faces, ball, feet, outlines and the player cut-out (BiRefNet, SAM 2.1); crop first
+  apple_person.py     Apple's person outline (macOS Vision) that trims the cut-out's hair
+  pipeline.py         Running recipes, the step registry, plugins, keeping faces clean, the adjustments
   effects.py          The built-in steps
   blend.py            Blend modes
   luts.py             .cube LUTs (from match-cull)
+  grades.py           VS Digital Pro's own pro color grades, written as LUTs to luts_builtin/
   procedural.py       Generated textures
+  backgrounds.py      Backgrounds made on this Mac (night stadium, smoke, storm, studio)
+  fields.py           Field sets: the photo's own grass relit, field lines in its perspective, a stadium behind
   assets.py           Finding, fetching and caching LUTs, textures and overlays
-  scene.py            Faces, ball, feet, outlines and the player cut-out; crop first
+  curves.py           Tone curves: smooth point curves, RGB as brightness only, ready-made ones by situation
+  edits.py            Edits after the look: crop and straighten, parts, text, white balance, leveling
+  retouch.py          Removing distractions with LaMa
+  poster.py           The poster layouts
+  custom_poster.py    Custom posters built from pieces
+  fonts.py            The fonts any word can use, and drawing words at any angle
+  brand.py            Your brand kit: logos
+  enlarge.py          The AI detail enlarger for tight crops (Real-ESRGAN)
+  deliver.py          Export sizes, file types, name, copyright and watermark
+  players.py          Find a player across a game (face, number, kit)
+  match.py            Match the game (exposure and white balance across photos)
   presetform.py       The preset manager's form (tabs, explanations), to and from recipes
   explore.py          Random looks
   presets.py          Saved and starter presets, their groups and descriptions
@@ -530,11 +1103,13 @@ photo_presets/
   technique.py        Artist techniques (oil, pencil, charcoal, ink, cel, comic)
   art.py              Illustration backgrounds
   watercolor.py       The watercolor steps
-  match.py            Match the game (exposure and white balance across photos)
-  deliver.py          Export sizes, file types, name, copyright and watermark
+  textguard.py        No invented numbers or letters in AI drawings; the photo's real text kept
   lightroom.py        Lightroom presets to LUTs (HALD charts)
   reel.py             Instagram reels: timing, beat sync, framing, titles, MP4
   timing.py           How long each look takes (measured, then learned from your runs)
-  textguard.py        No invented numbers or letters in AI drawings; the photo's real text kept
+  app.py              The classic Gradio app (Tools: preset editor, Lightroom presets, assets)
+  cli.py              vsdigitalpro-batch
+  cull/               Culling: measuring every photo, ranking, your taste, crops, export, optional Gemini
+  clipcheck/          Assessor: how a video or photo was shot, fixes, reports
 tests/
 ```

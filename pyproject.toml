@@ -8,6 +8,7 @@ dependencies = [
     "accelerate>=1.15.0",
     "diffusers>=0.43.0",
     "exifread>=3.5.1",
+    "google-genai>=3.6.1",
     "gradio>=6.31.0",
     "librosa>=1.0.0",
     "numpy",
@@ -15,8 +16,12 @@ dependencies = [
     "pillow",
     "pillow-heif>=1.8.1",
     "pyobjc-framework-vision>=11",
+    "pypdfium2>=5.15.2",
+    "python-docx>=1.2.0",
+    "pywebview>=6.2.1",
     "rawpy",
     "rembg[cpu]>=2.0.87",
+    "resvg-py>=0.5.0",
     "spandrel>=0.4.2",
     "tifffile>=2026.10.15",
     "transformers>=5.23.0",
@@ -26,7 +31,13 @@ dependencies = [
 [project.scripts]
 photo-crops = "photo_crops.cli:main"
 photo-crops-ui = "photo_crops.ui:main"
-allprophoto = "photo_presets.app:main"
+vsdigitalpro = "photo_presets.studio.server:main"
+vsdigitalpro-classic = "photo_presets.app:main"
+vsdigitalpro-install-app = "photo_presets.studio.macapp:main"
+vsdigitalpro-batch = "photo_presets.cli:main"
+# the old names still work
+allprophoto = "photo_presets.studio.server:main"
+allprophoto-install-app = "photo_presets.studio.macapp:main"
 allprophoto-batch = "photo_presets.cli:main"
 # the earlier names still work
 photo-presets = "photo_presets.app:main"

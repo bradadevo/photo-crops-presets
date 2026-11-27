@@ -84,6 +84,7 @@ def test_the_hair_pass_refines_only_the_head_and_never_grows(monkeypatch):
         return Image.fromarray(m)
     monkeypatch.setitem(sys.modules, "rembg", types.SimpleNamespace(remove=fake_remove))
     monkeypatch.setattr(scene, "_session", lambda: None)
+    monkeypatch.setattr(scene, "_heads_session", lambda: None)
     out = scene.refine_heads(img, first, [(0.5, 0.25, 0.05)])
     assert out[350, 200] == 1 and out[300, 160] == 1  # the body untouched
     assert out.max() <= 1 and (out <= np.maximum(first, 0) + 1e-6)[first == 0][: 10].all()

@@ -389,7 +389,7 @@ def test_vignette_around_the_player_follows_the_outline(empty_library):
     assert out[100, 70].mean() > out[100, 130].mean()   # it falls off with distance from the player
 
 
-def test_stadium_lights_shine_at_the_sides_behind_the_player(empty_library):
+def test_stadium_lights_shine_high_at_the_sides_behind_the_player(empty_library):
     img = Image.new("RGB", (400, 300), (10, 10, 10))
     matte = np.zeros((300, 400), np.float32)
     matte[60:290, 180:220] = 1
@@ -397,10 +397,12 @@ def test_stadium_lights_shine_at_the_sides_behind_the_player(empty_library):
     out = np.asarray(pipeline.render(img, {"protect_faces": False, "steps": [
         {"op": "stadium_lights", "height": 0.7, "amount": 1.0, "layer": "background"}]},
         empty_library, scene)[0], np.int16)
-    y = int(0.95 * 300 - 0.7 * 0.75 * 300)
+    rows = out[..., 0].max(axis=1)
+    y = int(np.argmax(rows))
+    assert y < 0.3 * 300                                # high up, not at the player's shoulders
     assert out[y - 10:y + 10, 20:70].max() > 200 and out[y - 10:y + 10, 330:380].max() > 200  # both banks
     assert (out[60:290, 180:220] == 10).all()           # the player is untouched
-    assert out[5, 200].mean() < 60                      # the sky between stays dark
+    assert out[2, 200].mean() < 90                      # the sky between stays dark
 
 
 def test_pop_art_paints_the_player_in_neon_and_tones_the_background(empty_library):
@@ -477,3 +479,65 @@ def test_neon_drips_run_down_from_the_player_and_never_over_a_face(empty_library
                                         empty_library, scene)[0], np.int16)
     face = (slice(60, 100), slice(130, 170))
     assert np.abs(out[face] - before[face]).mean() < 3  # nothing runs over the face
+
+
+def _field_photo(h=120, w=160):
+    """Grass up to two fifths from the top, a pale car-colored strip just above it, gray sky over that,
+    and one player standing on the grass."""
+    a = np.zeros((h, w, 3), np.float32)
+    a[:] = (0.7, 0.72, 0.75)                      # sky
+    a[int(h * 0.3):int(h * 0.4)] = (0.85, 0.85, 0.85)  # parked cars along the far side
+    rng = np.random.default_rng(1)
+    a[int(h * 0.4):] = (0.25, 0.5, 0.2) + rng.normal(0, 0.02, (h - int(h * 0.4), w, 3))  # grass
+    matte = np.zeros((h, w), np.float32)
+    matte[int(h * 0.45):int(h * 0.85), 70:84] = 1.0  # the player, feet at 85%
+    a[matte > 0] = (0.2, 0.2, 0.7)
+    return np.clip(a, 0, 1), matte
+
+
+def test_night_sky_hides_what_stands_behind_the_field_and_keeps_the_field(empty_library):
+    from photo_presets import effects
+    a, matte = _field_photo()
+    h, w = matte.shape
+    scene = Scene(feet=(77 / w, 0.85), subject_height=0.4)
+    ctx = pipeline.Context(empty_library, scene, 0, alpha=matte, original=a)
+    hz = effects._horizon(ctx, h, w)
+    assert hz is not None and abs(float(np.median(hz)) - 0.4 * h) < 0.05 * h
+    out = effects.night_sky(a, {"amount": 1.0, "keep": 0.15}, ctx)
+    cars = out[int(h * 0.31):int(h * 0.37)].mean()
+    assert cars < 0.35, "the cars along the far side are gone into the night"
+    assert np.allclose(out[int(h * 0.7):, :40], a[int(h * 0.7):, :40], atol=0.02), "the near field stays"
+
+
+def test_floodlights_stand_high_above_the_field_and_players_cast_a_shadow(empty_library):
+    from photo_presets import effects
+    a, matte = _field_photo()
+    h, w = matte.shape
+    scene = Scene(feet=(77 / w, 0.85), subject_height=0.4)
+    ctx = pipeline.Context(empty_library, scene, 0, alpha=matte, original=a)
+    lit = effects.stadium_lights(np.zeros_like(a), {"height": 0.7, "amount": 1.0, "color": "#ffffff"}, ctx)
+    brightest_row = int(np.argmax(lit[..., 0].max(axis=1)))
+    assert brightest_row < 0.25 * h, "the lamps are up in the sky, not at the players' shoulders"
+    shadow = effects._ground_shadow(matte, h, w)
+    assert shadow is not None
+    assert shadow[int(h * 0.86), 77] > 0.3, "a shadow right under the feet"
+    assert shadow[int(h * 0.5), 60] < 0.05, "none beside the body"
+
+
+def test_pro_grades_are_real_luts_kind_to_skin_and_the_pitch():
+    """VS Digital Pro's own grades: real .cube LUTs that load, in their own group, never turning skin
+    orange or the pitch yellow."""
+    import numpy as np
+    from photo_presets import grades, luts, presets
+    from photo_presets.assets import BUILTIN_LUTS
+    for name, g in grades.GRADES.items():
+        lut = luts.parse_cube(str(BUILTIN_LUTS / f"{name}.cube"))
+        assert lut is not None
+        skin = np.array([[0.80, 0.58, 0.46]])
+        out = grades.grade(skin, g)[0]
+        assert abs((out[0] - out[2]) - (skin[0, 0] - skin[0, 2])) < 0.16, name  # skin keeps its warmth, not more
+        grass = np.array([[0.55, 0.65, 0.25]])
+        o = grades.grade(grass, g)[0]
+        assert o[1] >= o[0], name  # the grass stays green, not yellow
+    groups = presets.grouped()
+    assert len(groups[presets.GRADES]) == 10

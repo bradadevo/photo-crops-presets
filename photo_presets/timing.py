@@ -11,13 +11,14 @@ illustration look of a session, loading the drawing models.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-CONFIG = Path("~/.config/photo-crops-presets").expanduser()
+CONFIG = Path(os.environ.get("ALLPROPHOTO_STATE") or Path("~/.config/photo-crops-presets").expanduser())
 LEARNED = CONFIG / "timings.json"
 
 PHOTO_READY = 4.0  # seconds to get a photo ready (read it, find the players), once per photo
-CUT_OUT = 18.0  # seconds to cut out its players, once per photo, for the looks that need it
+CUT_OUT = 28.0  # seconds to cut out its players, once per photo (learned: see cut_out())
 MODEL_LOAD = 60.0  # seconds to load the AI drawing models, once per session
 QUICK, CUTOUT, DRAWN = 2.0, 4.0, 20.0  # guesses for a look with no time yet
 
@@ -44,7 +45,6 @@ MEASURED: dict[str, float] = {
     "Smoke Studio": 0.5,
     "Color Smoke": 0.5,
     "Stadium Smoke": 0.5,
-    "Neon Pop Art": 0.6,
     "Neon Pop Art Sharp": 0.8,
     "Neon Pop Art Sharp Black": 0.9,
     "Neon Splash": 0.5,
@@ -111,6 +111,11 @@ def learn(name: str, took: float) -> None:
         pass
 
 
+def cut_out() -> float:
+    """About how long cutting out a photo's players takes on this Mac (learned from real runs)."""
+    return _learned().get("__cut_out__") or CUT_OUT
+
+
 def models_loaded() -> bool:
     from . import comic
     return bool(comic._pipes)
@@ -122,7 +127,7 @@ def run_seconds(looks: list[tuple[str, dict]], photos: int, ready: int = 0) -> f
     from . import pipeline
     total = sum(seconds(n, r) for n, r in looks) + PHOTO_READY * max(0, photos - ready)
     if any(pipeline.needs_cutout(r) for _, r in looks):
-        total += CUT_OUT * max(0, photos - ready)
+        total += cut_out() * max(0, photos - ready)
     if any(uses_ai(r) for _, r in looks) and not models_loaded():
         total += MODEL_LOAD
     return total

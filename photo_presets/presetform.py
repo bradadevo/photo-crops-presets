@@ -40,7 +40,10 @@ DEFAULTS = {
     "t2": NONE, "t2_blend": "soft_light", "t2_opacity": 0.3,
     "fog_on": False, "fog_density": 0.5, "fog_height": 0.65, "fog_color": "#d9dee6",
     "sm_on": False, "sm_color": "#f4f1ee", "sm_two": False, "sm_color2": "#d9a520", "sm_place": "sides",
-    "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0,
+    "sm_amount": 0.85, "sm_size": 1.0, "sm_front": 0.0, "sm_ground": 0.7,
+    "ns_on": False, "ns_keep": 0.15, "cf_on": False,
+    "nb_on": False, "nb_bg": "Studio Grey", "nb_color": "#1f2a44", "nb_blur": 0.0,
+    "fs_on": False, "fs_look": "Kneel Line",
     "lights_on": False, "lights_count": 2, "lights_amount": 0.8,
     "st_on": False, "st_height": 0.7, "st_amount": 0.9, "st_color": "#fff3dc",
     "rain_on": False, "rain_amount": 0.5, "rain_angle": 12.0,
@@ -81,6 +84,8 @@ FIELDS = list(DEFAULTS)
 def to_recipe(v: dict) -> dict:
     """The form as a recipe, steps in a fixed order."""
     s = []
+    if v["cf_on"]:  # first: the other players and the goals off the field, before anything darkens it
+        s.append({"op": "clean_field"})
     if v["clean_on"]:
         s.append({"op": "clean", "strength": "light"})
     kind = v["color_kind"]
@@ -173,9 +178,16 @@ def to_recipe(v: dict) -> dict:
             s.append({"op": "texture", "asset": v[n], "blend": v[f"{n}_blend"], "opacity": v[f"{n}_opacity"]})
     if v["fog_on"]:
         s.append({"op": "fog", "density": v["fog_density"], "height": v["fog_height"], "color": v["fog_color"]})
+    if v["fs_on"]:  # a field set (fields.py)
+        s.append({"op": "field_set", "look": v["fs_look"]})
+    if v["nb_on"]:  # a new background (the Background tool's, as a look)
+        s.append({"op": "new_background", "bg": v["nb_bg"], "color": v["nb_color"], "blur": v["nb_blur"]})
+    if v["ns_on"]:
+        s.append({"op": "night_sky", "amount": 1.0, "keep": v["ns_keep"]})
     if v["sm_on"]:
         s.append({"op": "smoke_cloud", "color": v["sm_color"], "color2": v["sm_color2"] if v["sm_two"] else "",
-                  "place": v["sm_place"], "amount": v["sm_amount"], "size": v["sm_size"], "front": v["sm_front"]})
+                  "place": v["sm_place"], "amount": v["sm_amount"], "size": v["sm_size"], "front": v["sm_front"],
+                  "ground": v["sm_ground"]})
     if v["lights_on"]:
         s.append({"op": "stage_lights", "count": int(v["lights_count"]), "amount": v["lights_amount"],
                   "layer": "background"})
@@ -286,7 +298,16 @@ def from_recipe(recipe: dict) -> dict:
         elif op == "smoke_cloud":
             v.update(sm_on=True, sm_color=g("color", v["sm_color"]), sm_two=bool(g("color2")),
                      sm_color2=g("color2") or v["sm_color2"], sm_place=g("place", "sides"),
-                     sm_amount=g("amount", 0.85), sm_size=g("size", 1.0), sm_front=g("front", 0.0))
+                     sm_amount=g("amount", 0.85), sm_size=g("size", 1.0), sm_front=g("front", 0.0),
+                     sm_ground=g("ground", 0.7))
+        elif op == "clean_field":
+            v["cf_on"] = True
+        elif op == "night_sky":
+            v.update(ns_on=True, ns_keep=g("keep", 0.15))
+        elif op == "field_set":
+            v.update(fs_on=True, fs_look=g("look", "Kneel Line"))
+        elif op == "new_background":
+            v.update(nb_on=True, nb_bg=g("bg", "Studio Grey"), nb_color=g("color", "#1f2a44"), nb_blur=g("blur", 0.0))
         elif op == "stage_lights":
             v.update(lights_on=True, lights_count=g("count", 2), lights_amount=g("amount", 0.8))
         elif op == "stadium_lights":
@@ -520,10 +541,31 @@ def components(ids: dict) -> dict:
                     slider("sm_amount", 0, 1, "Thickness")
                     slider("sm_size", 0.4, 2, "Size", info="Relative to the player's height.")
                     slider("sm_front", 0, 1, "Over the feet", info="How much floor smoke rolls in front of the feet.")
-            check("st_on", "Stadium floodlights", "Two banks of stadium lights near the left and right edges.")
+                    slider("sm_ground", 0, 1, "Shadow under feet", info="Grounds the players and goal posts so they don't float.")
+            check("fs_on", "Field set", "Puts the player on a field at night, dusk or golden hour: their own grass "
+                  "relit under their feet, soccer and football lines, and a dark stadium behind.")
+            with when("fs_on"):
+                from photo_presets import fields
+                drop("fs_look", list(fields.LOOKS), "Set")
+            check("nb_on", "New background", "Puts the player in front of one of the backgrounds made here "
+                  "(the same ones as the Background tool), sharp unless you add blur.")
+            with when("nb_on"):
+                from photo_presets import backgrounds
+                with gr.Row():
+                    drop("nb_bg", backgrounds.NAMES, "Background")
+                    color("nb_color", "Its color", info="The team color, for the backgrounds that use one.")
+                    slider("nb_blur", 0, 1, "Blur", info="0 = sharp. More = out of focus, like a fast lens.")
+            check("cf_on", "Clean field", "Takes the other players, the goals, bags and cones off the field "
+                  "(on this Mac), so a dark or new background has nothing left half standing in it.")
+            check("ns_on", "Night sky", "Swaps everything behind the far edge of the field (cars, houses, daytime sky) "
+                  "for a dark night sky with lit haze.")
+            with when("ns_on"):
+                slider("ns_keep", 0, 0.6, "Old background showing through", info="Tree tops as faint dark shapes; "
+                       "never where cars park.")
+            check("st_on", "Stadium floodlights", "Two banks of stadium lights high on poles near the left and right edges.")
             with when("st_on"):
                 with gr.Row():
-                    slider("st_height", 0.3, 1.2, "Height", info="Share of the player's height above their feet.")
+                    slider("st_height", 0.3, 1.2, "Height", info="How high in the sky above the far side of the field.")
                     slider("st_amount", 0, 1, "Brightness")
                     color("st_color", "Light color")
             check("lights_on", "Studio lights along the top", "Bright lamps above the player.")

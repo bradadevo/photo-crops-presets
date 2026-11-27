@@ -40,7 +40,7 @@ def test_problems_are_explained(tmp_path):
 
 def test_names_come_from_the_file():
     assert lightroom.lut_name(Path("Golden_Hour chart.tif")) == "Golden Hour"
-    assert lightroom.lut_name(Path("Moody Film-AllProPhoto color chart.tif")) == "Moody Film"
+    assert lightroom.lut_name(Path("Moody Film-VS Digital Pro color chart.tif")) == "Moody Film"
 
 
 def test_float_luts_match_pillow_and_keep_precision():
