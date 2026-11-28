@@ -36,6 +36,7 @@ def wait_done(timeout=300):
 try:
     t0 = time.time()
     app.post("/api/check/add", {"paths": [str(src)]})
+    app.post("/api/check/assess", {"ids": []})  # (adding never starts it: Assess does)
     fs = wait_done()
     print(f"   checked {len(fs)} files in {time.time() - t0:.0f} s", flush=True)
     check("every file checked", all(f["state"] == "done" for f in fs), [(f["name"], f["state"], f.get("error")) for f in fs])

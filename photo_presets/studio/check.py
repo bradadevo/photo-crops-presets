@@ -56,8 +56,8 @@ class Files:
             except (OSError, ValueError):
                 saved = []
             for e in saved:
-                if Path(e["path"]).exists():
-                    self._put(e["path"], e.get("id"), e.get("fixes"), e.get("fixed"), e.get("subject"))
+                if Path(e["path"]).exists():  # (assessed files come back from their saved results; nothing new starts)
+                    self._put(e["path"], e.get("id"), e.get("fixes"), e.get("fixed"), e.get("subject"), was=e.get("assessed"))
             threading.Thread(target=self._work, daemon=True).start()
         try:
             clear_leftovers()
@@ -67,19 +67,49 @@ class Files:
     def save(self):
         with self.lock:
             data = [{"id": i, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", []),
-                     **({"subject": e["subject"]} if e.get("subject") else {})} for i, e in self.items.items()]
+                     **({"subject": e["subject"]} if e.get("subject") else {}),
+                     **({"assessed": True} if e["state"] != "new" or e.get("was") else {})} for i, e in self.items.items()]
         HOME.mkdir(parents=True, exist_ok=True)
         tmp = LIST_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=1))
         tmp.replace(LIST_FILE)
 
-    def _put(self, path: str, fid: int | None = None, saved_fixes=None, fixed=None, subject=None) -> int:
+    def _put(self, path: str, fid: int | None = None, saved_fixes=None, fixed=None, subject=None,
+             assess: bool = False, was: bool = False) -> int:
+        """A file in the list. Adding never starts the assessment: only Assess does (or saved results, read back)."""
         fid = fid or self.next
         self.next = max(self.next, fid + 1)
-        self.items[fid] = {"id": fid, "path": path, "kind": analyze.kind_of(path), "state": "wait", "added": time.time(),
-                           "fixes": saved_fixes, "fixed": fixed or [], "job": None, "subject": subject}
-        self.queue.put(fid)
+        go = assess or _cached(path)
+        self.items[fid] = {"id": fid, "path": path, "kind": analyze.kind_of(path), "state": "wait" if go else "new",
+                           "added": time.time(), "fixes": saved_fixes, "fixed": fixed or [], "job": None,
+                           "subject": subject, "was": bool(was) and not go}
+        if go:
+            self.queue.put(fid)
         return fid
+
+    def assess(self, ids: list[int]) -> list[int]:
+        """Start assessing these files (the ones not assessed yet, or that failed or were stopped)."""
+        self.load()
+        started = []
+        with self.lock:
+            for fid in ids:
+                e = self.items.get(fid)
+                if e and e["state"] in ("new", "failed"):
+                    e.update(state="wait", error=None, was=False)
+                    self.queue.put(fid)
+                    started.append(fid)
+        self.save()
+        return started
+
+    def stop(self, ids: list[int] | None = None) -> list[int]:
+        """Take waiting files back to "not assessed". The one being assessed right now finishes."""
+        self.load()
+        with self.lock:
+            stopped = [i for i, e in self.items.items() if e["state"] == "wait" and (not ids or i in ids)]
+            for i in stopped:
+                self.items[i]["state"] = "new"
+        self.save()
+        return stopped
 
     def add(self, paths: list[str]) -> list[int]:
         self.load()
@@ -100,7 +130,7 @@ class Files:
         while True:
             fid = self.queue.get()
             e = self.items.get(fid)
-            if not e or e["state"] == "done":
+            if not e or e["state"] != "wait":  # (stopped, removed or done meanwhile)
                 continue
             e["state"], e["started"] = "now", time.time()
             try:
@@ -116,6 +146,45 @@ F = Files()
 def _key(path: str) -> str:
     st = Path(path).stat()
     return hashlib.sha1(f"{path}|{st.st_size}|{st.st_mtime}|{VERSION}".encode()).hexdigest()[:20]
+
+
+def _cached(path: str) -> bool:
+    """Assessed before, with results saved for this very file and this version of the Assessor."""
+    try:
+        return (CACHE / f"{_key(path)}.pkl").exists()
+    except OSError:
+        return False
+
+
+def quick_facts(e: dict) -> list[str]:
+    """What can be read at once without assessing: the camera and settings (photos), or the clip's size and
+    length and the camera (videos). Kept, so it is read once."""
+    if "facts" in e:
+        return e["facts"]
+    facts = []
+    try:
+        if e["kind"] == "photo":
+            c = still.read_exif(e["path"])
+            facts = [" ".join(x for x in [c.get("make"), c.get("camera")] if x), c.get("lens", ""),
+                     f"f/{c['aperture']:g}" if c.get("aperture") else "", still.shutter_text(c["shutter"]) if c.get("shutter") else "",
+                     f"ISO {c['iso']}" if c.get("iso") else "", f"{c['focal_length']} mm" if c.get("focal_length") else ""]
+        else:
+            info = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", e["path"]],
+                                             capture_output=True, text=True, timeout=20).stdout or "{}")
+            v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), {})
+            tags = {k.lower(): val for k, val in (info.get("format", {}).get("tags") or {}).items()}
+            num, _, den = (v.get("avg_frame_rate") or "0/1").partition("/")
+            fps = float(num) / float(den or 1) if float(den or 1) else 0
+            dur = float(info.get("format", {}).get("duration") or 0)
+            e["duration"] = dur
+            facts = [" ".join(x for x in [tags.get("com.apple.quicktime.make") or tags.get("make"),
+                                          tags.get("com.apple.quicktime.model") or tags.get("model")] if x),
+                     f"{v.get('width')}×{v.get('height')}" if v.get("width") else "", f"{fps:.3g} fps" if fps else "",
+                     f"{dur:.1f} s" if dur else ""]
+    except Exception:
+        pass
+    e["facts"] = [f for f in facts if f]
+    return e["facts"]
 
 
 def measure(path: str) -> dict:
@@ -235,6 +304,8 @@ def _rec_input(e: dict) -> dict:
 def _row(e: dict) -> dict:
     out = {"id": e["id"], "name": Path(e["path"]).name, "path": e["path"], "kind": e["kind"], "state": e["state"],
            "error": e.get("error")}
+    if e["state"] == "new":
+        out.update(left=_estimate(e), was=e.get("was", False))
     if e["state"] in ("wait", "now"):
         est = _estimate(e)
         out["left"] = max(1, est - (time.time() - e.get("started", time.time()))) if e["state"] == "now" else est
@@ -265,6 +336,8 @@ def detail(fid: int):
     e = F.get(fid)
     out = _row(e)
     if e["state"] != "done":
+        if e["state"] in ("new", "wait", "now"):
+            out["facts"] = quick_facts(e)
         return out
     r = e["result"]
     settings = _settings(e)
@@ -328,7 +401,8 @@ def remove(fid: int):
     F.save()
     if _dropped(e["path"]):  # the app's own copy of a dropped file: to the Trash when the app next starts (Undo works till then)
         _leftovers(add=e["path"])
-    return {"entry": {"id": fid, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", []), "subject": e.get("subject")},
+    return {"entry": {"id": fid, "path": e["path"], "fixes": e.get("fixes"), "fixed": e.get("fixed", []), "subject": e.get("subject"),
+                      "assessed": e["state"] != "new" or e.get("was", False)},
             "dropped": _dropped(e["path"])}
 
 
@@ -369,7 +443,7 @@ async def restore(req: Request):
     _leftovers(drop=entry["path"])
     with F.lock:
         fid = F._put(entry["path"], entry.get("id") if entry.get("id") not in F.items else None,
-                     entry.get("fixes"), entry.get("fixed"), entry.get("subject"))
+                     entry.get("fixes"), entry.get("fixed"), entry.get("subject"), was=entry.get("assessed", False))
     F.save()
     return {"id": fid}
 
@@ -711,6 +785,23 @@ async def export(req: Request):
     if what in ("csv", "both"):
         out.append(str(report.write_csv(results, folder / f"{name}.csv")))
     return {"files": out, "folder": str(folder)}
+
+
+@router.post("/api/check/assess")
+async def assess(req: Request):
+    """{ids}: assess these files (every file not assessed yet when none are given)."""
+    ids = (await req.json()).get("ids") or []
+    F.load()
+    if not ids:
+        with F.lock:
+            ids = [i for i, e in sorted(F.items.items(), key=lambda x: x[1]["added"]) if e["state"] == "new"]
+    return {"started": F.assess(ids)}
+
+
+@router.post("/api/check/stop")
+async def stop(req: Request):
+    """{ids}: don't assess these after all (all waiting files when none are given)."""
+    return {"stopped": F.stop((await req.json()).get("ids") or None)}
 
 
 @router.post("/api/check/add")

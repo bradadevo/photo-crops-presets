@@ -126,8 +126,23 @@ async function ckAdded(ids) {
   $("#check").classList.remove("comparing");
   await ckLoad(ids[0]);
   ckPoll();
-  const left = ck.files.filter((f) => ids.includes(f.id)).reduce((a, f) => a + (f.left || 0), 0);
-  toast(`Checking ${plural(ids.length, "file")}`, { small: left > 8 ? `About ${say(left)}` : "" });
+  const fresh = ck.files.filter((f) => ids.includes(f.id) && f.state === "new");
+  if (fresh.length) toast(`Added ${plural(fresh.length, "file")}`, { small: "Nothing is assessed until you click Assess" });
+}
+// Assessing starts only when asked: these files (or every file not assessed yet), and Stop takes waiting ones back
+async function ckAssess(ids) {
+  const r = await api("/api/check/assess", { ids: ids || [] }).catch(() => null);
+  if (!r?.started?.length) return;
+  await ckRefresh(); renderCkFiles(); if (ck.sel) await ckLoad(ck.sel); ckPoll();
+  const left = ck.files.filter((f) => r.started.includes(f.id)).reduce((a, f) => a + (f.left || 0), 0);
+  toast(`Assessing ${plural(r.started.length, "file")}`, { small: left > 8 ? `About ${say(left)}` : "" });
+}
+async function ckStop(ids) {
+  const r = await api("/api/check/stop", { ids: ids || [] }).catch(() => null);
+  await ckRefresh(); renderCkFiles(); if (ck.sel) await ckLoad(ck.sel);
+  const now = ck.files.some((f) => f.state === "now");
+  toast(r?.stopped?.length ? `Stopped ${plural(r.stopped.length, "file")}` : "Nothing waiting to stop",
+        { small: now ? "The file being assessed right now finishes first" : "" });
 }
 
 // The start page: what it's for and the steps ----------------------------------------------------
@@ -172,7 +187,8 @@ function ckShowGuide(main, back) {
 
 // The list of files --------------------------------------------------------------------------------
 function ckStatus(f) {
-  if (f.state === "wait") return `<span class="faint">Waiting · about ${say(f.left || 5)}</span>`;
+  if (f.state === "new") return `<span class="faint">${f.was ? "Assessor updated · assess again" : `Not assessed · <span class="nowrap">${say(f.left || 5)}</span>`}</span>`;
+  if (f.state === "wait") return `<span class="faint">Waiting · ${say(f.left || 5)}</span>`;
   if (f.state === "now") return `<span class="spin sm"></span> Checking · ${say(f.left || 3)} left`;
   if (f.state === "failed") return `<span class="bad-t">Couldn't read it</span>`;
   if (f.job?.state === "now") return `<span class="spin sm"></span> Making the fixed copy · ${Math.round(f.job.pct * 100)}%`;
@@ -185,7 +201,7 @@ function renderCkFiles() {
   $("#ck-count").textContent = ck.files.length || "";
   list.innerHTML = ck.files.length ? ck.files.map((f) => `<div class="ck-row${f.id === ck.sel && ck.view === "file" ? " on" : ""}" data-ck="${f.id}" title="${esc(f.path)}">
       <label class="ck-tick" title="Tick files to compare or export them together"><input type="checkbox" data-ck-pick="${f.id}" ${ck.picked.has(f.id) ? "checked" : ""}></label>
-      <div class="ck-thumb">${f.state === "done" || f.state === "failed" ? `<img src="/img/check/${f.id}/thumb.jpg" alt="" loading="lazy" onerror="this.remove()">` : ""}<span class="kind">${icon(KIND_ICON[f.kind] || "image")}</span></div>
+      <div class="ck-thumb">${f.state !== "failed" ? `<img src="/img/check/${f.id}/thumb.jpg" alt="" loading="lazy" onerror="this.remove()">` : ""}<span class="kind">${icon(KIND_ICON[f.kind] || "image")}</span></div>
       <div class="ck-txt"><b>${esc(f.name)}</b><small>${ckStatus(f)}</small></div>
       <button class="ck-x" data-ck-x="${f.id}" title="Take it out of this list (Delete key). The file itself stays where it is" aria-label="Take ${esc(f.name)} out of the list">${icon("x")}</button></div>`).join("")
     : `<div class="ck-empty"><p><b>Nothing added yet</b></p><p>Start with step 1: add a clip or photo.</p>
@@ -211,6 +227,12 @@ function renderCkFoot() {
   const done = ck.files.filter((f) => f.state === "done");
   const picked = [...ck.picked].filter((id) => ckFile(id)?.state === "done");
   const forExport = picked.length ? picked : done.map((f) => f.id);
+  const fresh = ck.files.filter((f) => f.state === "new" || f.state === "failed");
+  const tickedFresh = fresh.filter((f) => ck.picked.has(f.id));
+  const toAssess = tickedFresh.length ? tickedFresh : fresh.filter((f) => f.state === "new");
+  const busy = ck.files.some((f) => f.state === "wait");
+  const assessBtn = (toAssess.length ? `<button class="btn primary" id="ck-assess" title="Assess ${tickedFresh.length ? "the ticked files" : "every file not assessed yet"} · ${say(toAssess.reduce((a, f) => a + (f.left || 0), 0))}">${icon("check")} ${tickedFresh.length ? `Assess (${tickedFresh.length})` : `Assess all (${toAssess.length})`}</button>` : "")
+    + (busy ? `<button class="btn" id="ck-stop" title="Don't assess the files still waiting (the one being assessed now finishes)">Stop</button>` : "");
   foot.innerHTML = ck.files.length ? `
     <button class="btn${ck.view === "summary" ? " primary" : ""}" id="ck-summary" ${off(!done.length, "Nothing checked yet: the summary appears once a file has been checked.")} title="What to fix now and change next time, across ${picked.length >= 2 ? "the ticked files" : "every checked file"}">${icon("list")} Recommendations</button>
     <button class="btn${ck.view === "compare" ? " primary" : ""}" id="ck-compare" ${off(picked.length < 2, "Tick two or more checked files (the boxes on the left), then compare them side by side.")}>${icon("compare")} Compare${picked.length ? ` (${picked.length})` : ""}</button>
@@ -219,10 +241,13 @@ function renderCkFoot() {
         <button role="menuitem" data-fmt="both">Word report + spreadsheet<small>Opens in Word or Google Drive</small></button>
         <button role="menuitem" data-fmt="docx">Word report only</button>
         <button role="menuitem" data-fmt="csv">Spreadsheet only (CSV)<small>One row per file</small></button></div></div>
+    ${assessBtn}
     ${ck.picked.size ? `<button class="btn" id="ck-remove-ticked" title="Take the ticked files out of this list (Delete key). The files themselves stay where they are">${icon("x")} Remove (${ck.picked.size})</button>` : ""}
     <small class="faint">${picked.length ? `${plural(picked.length, "file")} ticked` : "Tick files to compare, export or remove some"}</small>` : "";
   paintIcons(foot);
   $("#ck-remove-ticked")?.addEventListener("click", () => ckRemove([...ck.picked]));
+  $("#ck-assess")?.addEventListener("click", () => ckAssess(toAssess.map((f) => f.id)));
+  $("#ck-stop")?.addEventListener("click", () => ckStop());
   $("#ck-compare")?.addEventListener("click", () => {
     if (picked.length < 2) return;
     ck.view = ck.view === "compare" ? "file" : "compare"; ck.guide = false;
@@ -301,9 +326,30 @@ function renderCkMain() {
   $("#check").classList.toggle("guiding", !d || ck.guide);
   if (!d || ck.guide) { ckShowGuide(main, !!d && ck.guide); return; }
   if (d.state !== "done") {
-    main.innerHTML = `<div class="ck-hello">${d.state === "failed" ? `${icon("info")}<h1>${esc(d.name)}</h1><p>Couldn't read this file: ${esc(d.error || "")}</p>`
-      : `<div class="spin" style="width:28px;height:28px"></div><h1>${esc(d.name)}</h1><p>Checking it · about ${say(d.left || 5)}</p><p class="faint">Videos take about a third of their length; photos a second or two.</p>`}</div>`;
-    paintIcons(main); return;
+    if (d.state === "failed") {
+      main.innerHTML = `<div class="ck-hello">${icon("info")}<h1>${esc(d.name)}</h1><p>Couldn't read this file: ${esc(d.error || "")}</p>
+        <div class="ck-go"><button class="btn" id="ck-assess-one">Try again</button></div></div>`;
+    } else {
+      const others = ck.files.filter((f) => f.state === "new" && f.id !== d.id);
+      const all = others.reduce((a, f) => a + (f.left || 0), d.state === "new" ? d.left || 0 : 0);
+      const what = d.kind === "video" ? "clip" : "photo";
+      main.innerHTML = `<div class="ck-pending">
+        <div class="ck-pending-pic"><img src="/img/check/${d.id}/view.jpg?t=${d.kind === "video" ? 1 : 0}" alt="" onerror="this.remove()"></div>
+        <h1>${esc(d.name)}</h1>
+        ${d.facts?.length ? `<p class="ck-facts">${d.facts.map(esc).join(" · ")}</p>` : ""}
+        ${d.state === "new" ? `<p>${d.was ? "Assessed before the Assessor was improved: assess it again to see the new findings." : `Not assessed yet. Assessing reads the whole ${what}: ${d.kind === "video" ? "sharpness, focus on your subject, shake, exposure and noise, moment by moment" : "sharpness, focus, exposure and noise"}.`}</p>
+          <div class="ck-go"><button class="btn primary" id="ck-assess-one">${icon("check")} Assess this ${what} · ${say(d.left || 5)}</button>
+          ${others.length ? `<button class="btn" id="ck-assess-all">Assess all ${others.length + 1} · ${say(all)}</button>` : ""}</div>
+          <p class="faint">${d.kind === "video" ? "Videos take about a minute and a half per minute of 4K, and the Mac works hard meanwhile." : "A photo takes a second or two."} Your file is only read, never changed.</p>`
+        : `<p>${d.state === "now" ? `<span class="spin sm"></span> Assessing · ${say(d.left || 3)} left` : `Waiting its turn · ${say(d.left || 5)}`}</p>
+          <div class="ck-go">${d.state === "wait" ? `<button class="btn" id="ck-stop-one">Don't assess it</button>` : ""}</div>`}
+      </div>`;
+    }
+    paintIcons(main);
+    $("#ck-assess-one")?.addEventListener("click", () => ckAssess([d.id]));
+    $("#ck-assess-all")?.addEventListener("click", () => ckAssess([]));
+    $("#ck-stop-one")?.addEventListener("click", () => ckStop([d.id]));
+    return;
   }
   const isVid = d.kind === "video";
   const problems = d.findings.filter((x) => !/^(No problems|Focus:|Focus mode|The sharpest detail)/.test(x) && !/fps: smooth motion|holds up well/.test(x));
@@ -523,7 +569,7 @@ function ckPaintJob() {
   const on = d.fixes.filter((f) => f.on && f.value);
   if (job?.state === "now") {
     const left = Math.max(1, job.estimate * (1 - job.pct) * (job.pct > 0.05 ? (Date.now() / 1000 - job.started) / (job.estimate * job.pct) : 1));
-    box.innerHTML = `<div class="ck-prog"><div class="bar"><span style="width:${Math.round(job.pct * 100)}%"></span></div><small>${esc(job.phase || "Making the fixed copy")} · ${Math.round(job.pct * 100)}% · about ${say(left)} left</small></div>`;
+    box.innerHTML = `<div class="ck-prog"><div class="bar"><span style="width:${Math.round(job.pct * 100)}%"></span></div><small>${esc(job.phase || "Making the fixed copy")} · ${Math.round(job.pct * 100)}% · ${say(left)} left</small></div>`;
     return;
   }
   box.innerHTML = `${job?.state === "failed" ? `<p class="bad-t">The fixed copy failed: ${esc(job.error || "")}</p>` : ""}
@@ -534,7 +580,7 @@ function ckPaintJob() {
     if (!on.length) return;
     await api(`/api/check/file/${d.id}/fixes`, { fixes: ckSettings(d) }, { method: "PUT" });
     const r = await api(`/api/check/file/${d.id}/fix`, {});
-    toast("Making the fixed copy", { small: `${r.dest.split("/").slice(-3).join("/")} · about ${say(r.estimate)}` });
+    toast("Making the fixed copy", { small: `${r.dest.split("/").slice(-3).join("/")} · ${say(r.estimate)}` });
     await ckRefresh(); ckPaintJob(); ckPoll();
     ck.watchJob = d.id;
   };

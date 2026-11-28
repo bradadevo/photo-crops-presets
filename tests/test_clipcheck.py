@@ -84,6 +84,10 @@ def test_the_check_tab_checks_a_photo_compares_and_exports(tmp_path, monkeypatch
     app = FastAPI(); app.include_router(check.router)
     c = TestClient(app)
     ids = c.post("/api/check/add", json={"paths": paths}).json()["added"]
+    import time; time.sleep(0.3)
+    assert all(f["state"] == "new" for f in c.get("/api/check/state").json()["files"])  # (adding never starts it)
+    assert c.get(f"/api/check/file/{ids[0]}").json()["state"] == "new"
+    assert c.post("/api/check/assess", json={"ids": []}).json()["started"] == ids
     for _ in range(100):
         if all(f["state"] == "done" for f in c.get("/api/check/state").json()["files"]):
             break
@@ -139,3 +143,43 @@ def test_fixed_copies_made_at_once_never_share_a_name(tmp_path):
     a = fixes.fixed_path(str(tmp_path / "DSC1.JPG"), tmp_path / "fb", ".jpg")
     b = fixes.fixed_path(str(tmp_path / "DSC1.ARW"), tmp_path / "fb", ".jpg")
     assert a != b and a.exists() and b.exists() and b.name == "DSC1 fixed 2.jpg"
+
+
+def test_the_assessor_only_assesses_when_asked_and_remembers_across_restarts(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from photo_presets.studio import check
+    for name, val in [("HOME", tmp_path), ("LIST_FILE", tmp_path / "check.json"), ("CACHE", tmp_path / "cache"),
+                      ("FALLBACK_OUT", tmp_path / "out"), ("_STATE", tmp_path), ("F", check.Files())]:
+        monkeypatch.setattr(check, name, val)
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"shot{i}.jpg"
+        Image.fromarray((np.random.default_rng(i).random((200, 300, 3)) * 80 + 60).astype(np.uint8)).save(p)
+        paths.append(str(p))
+    app = FastAPI(); app.include_router(check.router)
+    c = TestClient(app)
+    ids = c.post("/api/check/add", json={"paths": paths}).json()["added"]
+    files = c.get("/api/check/state").json()["files"]
+    assert [f["state"] for f in files] == ["new"] * 3 and all(f["left"] > 0 for f in files)
+    assert c.get(f"/api/check/file/{ids[0]}").json()["facts"] is not None
+    # Stop: waiting files go back to not assessed
+    import threading, time
+    gate, real = threading.Event(), check.measure
+    monkeypatch.setattr(check, "measure", lambda path: (gate.wait(10), real(path))[1])  # (the first file holds the line)
+    c.post("/api/check/assess", json={"ids": ids})
+    time.sleep(0.3)
+    assert c.post("/api/check/stop", json={}).json()["stopped"] == ids[1:]  # (the one under way finishes)
+    gate.set()
+    for _ in range(100):
+        if c.get(f"/api/check/file/{ids[0]}").json()["state"] == "done":
+            break
+        time.sleep(0.1)
+    time.sleep(0.3)
+    states = {f["id"]: f["state"] for f in c.get("/api/check/state").json()["files"]}
+    assert states == {ids[0]: "done", ids[1]: "new", ids[2]: "new"}
+    # after a restart: the assessed one comes back from its results, the others are still not assessed
+    monkeypatch.setattr(check, "F", check.Files())
+    time.sleep(0.5)
+    states = {f["id"]: f["state"] for f in c.get("/api/check/state").json()["files"]}
+    assert states[ids[1]] == states[ids[2]] == "new" and states[ids[0]] in ("wait", "now", "done")

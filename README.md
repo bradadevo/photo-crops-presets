@@ -399,8 +399,14 @@ photo was shot, what is holding it back, how to fix the file and what to change
 next time. No AI: the camera's own settings in the file, measurements of the
 picture, and plain rules.
 - **Add** clips and photos with **+** (they stay where they are) or drop them on
-  the window. Videos take about a third of their length to check; photos a
-  second or two. Results are kept, so a file is checked once. A dropped file is
+  the window. Adding only adds: each file shows its picture, what can be read at
+  once (camera, lens and settings for a photo; size, frame rate and length for a
+  clip) and how long assessing would take, and nothing is assessed until you
+  click **Assess this clip/photo**, **Assess (n)** for the ticked files or
+  **Assess all**. **Stop** (or **Don't assess it**) takes waiting files back; the
+  one under way finishes. A 4K video takes about a minute and a half per minute
+  of footage; a photo a second or two. Results are kept, so a file is assessed
+  once; after a restart, files you haven't assessed stay that way. A dropped file is
   copied into the app (two with one name are both kept); taking that one out of
   the list sends the app's copy to the Trash when the app next starts (your
   original is never touched). The list shows the same verdict as **In short**.
