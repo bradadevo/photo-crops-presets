@@ -108,6 +108,12 @@ async function ckChoose(kind) {
 }
 async function ckUpload(files) {
   const ok = files.filter((f) => /^(video|image)\//.test(f.type) || /\.(mp4|mov|m4v|mts|mxf|avi|mkv|jpe?g|png|heic|heif|tiff?|webp|arw|dng|cr2|cr3|nef|raf|orf|rw2)$/i.test(f.name));
+  const notes = files.find((f) => /M\d\d\.xml$/i.test(f.name));
+  if (!ok.length && notes) {
+    const clip = notes.name.replace(/M\d\d\.xml$/i, "");
+    toast(`${notes.name} is the camera's notes file`, { small: `Add the clip itself (${clip}.MP4): the same notes are inside it, with the focus and exposure of every frame.` });
+    return;
+  }
   if (!ok.length) { toast("Those aren't clips or photos", { small: "Videos (MP4, MOV…) and photos (JPG, HEIC, RAW)" }); return; }
   const fd = new FormData(); ok.forEach((f) => fd.append("files", f, f.name));
   const t = toast(`Adding ${plural(ok.length, "file")}…`, { sticky: true, spin: true, small: "Big videos take a moment to copy in; Add… keeps them where they are" });

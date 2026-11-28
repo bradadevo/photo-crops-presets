@@ -122,3 +122,13 @@ def test_camera_data_confirms_the_lens_hunting():
 
 def test_no_camera_data_keeps_the_old_wording():
     assert focus.lens_from({}) is None and focus.moved(None, 0, 1) is None
+
+
+def test_a_camera_notes_file_brings_in_its_clip(tmp_path):
+    from photo_presets.clipcheck.analyze import find_files
+    (tmp_path / "C0418.MP4").write_bytes(b"x")
+    (tmp_path / "C0418M01.XML").write_text("<NonRealTimeMeta/>")
+    (tmp_path / "C0999M01.XML").write_text("<NonRealTimeMeta/>")  # (notes without their clip: nothing)
+    assert find_files([str(tmp_path / "C0418M01.XML")]) == [str(tmp_path / "C0418.MP4")]
+    assert find_files([str(tmp_path / "C0999M01.XML")]) == []
+    assert find_files([str(tmp_path)]) == [str(tmp_path / "C0418.MP4")]

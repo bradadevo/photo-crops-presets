@@ -1,5 +1,6 @@
 """Runs the checks on one file and lays the results out as rows for the
 report, the spreadsheet and side-by-side comparisons."""
+import re
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -56,7 +57,17 @@ def find_files(paths: list[str]) -> list[str]:
             found += sorted(str(f) for f in p.iterdir() if f.is_file() and not f.name.startswith(".") and kind_of(str(f)))
         elif p.is_file() and kind_of(str(p)):
             found.append(str(p))
+        elif p.is_file() and (clip := clip_for_notes(p)):
+            found.append(clip)  # (the camera's notes file: the clip beside it has the same notes inside, and more)
     return list(dict.fromkeys(found))
+
+
+def clip_for_notes(p: Path) -> str | None:
+    """The clip a camera notes file belongs to (Sony writes C0418M01.XML beside C0418.MP4), or None."""
+    m = re.fullmatch(r"(.+)M\d\d\.xml", p.name, re.I)
+    if not m:
+        return None
+    return next((str(f) for f in sorted(p.parent.glob(m.group(1) + ".*")) if kind_of(str(f)) == "video"), None)
 
 
 def analyze(path: str, every: int = 2) -> Result | Failed:
