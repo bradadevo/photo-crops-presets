@@ -90,6 +90,7 @@ def probe(path: str, every: int = 2) -> VideoInfo:
     rtmd = next((s["index"] for s in info["streams"] if s.get("codec_tag_string") == "rtmd"), None)
     if rtmd is not None:
         camera.update(sony.summarize(sony.per_frame(path, rtmd, v.frame_count, every)))
+        camera["series_every_s"] = every / fps if fps else None
     v.camera = camera
     return v
 

@@ -289,8 +289,40 @@ def _where(s: Sampled, smp: Sample, box) -> tuple[str, list]:
     return ("behind" if row < feet - 0.25 * tall else "front" if row > feet + 0.05 else "same"), boxes
 
 
-def analyze(s: Sampled, pick: dict | None = None, camera_speed=None) -> dict:
-    """The subject's sharpness over time, the stretches where it was missed and why, and what to change."""
+def lens_from(camera: dict | None) -> dict | None:
+    """The camera's own focus data, if the clip has it: the focus mode and where the lens was focused over time."""
+    camera = camera or {}
+    mode, series, every = camera.get("focus_mode"), camera.get("focus_series"), camera.get("series_every_s")
+    if not mode:
+        return None
+    pos = [(round(i * every, 3), x) for i, x in enumerate(series or []) if x is not None] if every else []
+    return {"mode": mode, "pos": pos}
+
+
+def held(lens: dict | None, t: float) -> tuple[float, float] | None:
+    """The stretch around `t` where the lens didn't move at all (by the camera's data), or None."""
+    pos = (lens or {}).get("pos") or []
+    if len(pos) < 2:
+        return None
+    i = min(range(len(pos)), key=lambda k: abs(pos[k][0] - t))
+    a = b = i
+    while a > 0 and pos[a - 1][1] == pos[i][1]:
+        a -= 1
+    while b < len(pos) - 1 and pos[b + 1][1] == pos[i][1]:
+        b += 1
+    return pos[a][0], pos[b][0]
+
+
+def moved(lens: dict | None, start: float, end: float) -> bool | None:
+    """Did the lens refocus between start and end (None if the clip has no such data)?"""
+    pos = [x for t, x in (lens or {}).get("pos") or [] if start - 0.1 <= t <= end + 0.1]
+    return len(set(pos)) > 1 if len(pos) >= 2 else None
+
+
+def analyze(s: Sampled, pick: dict | None = None, camera_speed=None, lens: dict | None = None) -> dict:
+    """The subject's sharpness over time, the stretches where it was missed and why, and what to change.
+    `lens` (from lens_from) is the camera's own focus data, when the clip has it: it settles whether the
+    focus was locked or the camera chose the wrong thing, and whether a soft stretch was the lens hunting."""
     tr = pick_track(s, pick)
     if tr is None:
         return {"subject": None, "points": [], "runs": [], "finding": "", "advice": [], "habits": []}
@@ -331,10 +363,12 @@ def analyze(s: Sampled, pick: dict | None = None, camera_speed=None) -> dict:
         points.append(Point(smp.t, round(ratio, 2) if ratio else None, state, where, who.box, boxes, named, round(speed, 1)))
     step = (s.samples[1].t - s.samples[0].t) if len(s.samples) > 1 else 0.25
     runs = _runs(points, step, s, camera_speed)
+    for r in runs:
+        r["lens_moved"] = moved(lens, r["start"], r["end"])
     first, last = points[0].t, points[-1].t
     return {"subject": {"from": first, "to": last, "box": points[len(points) // 2].box},
             "points": [p.__dict__ for p in points], "runs": runs, "step": step,
-            **_explain(points, runs, s, step)}
+            **_explain(points, runs, s, step, lens)}
 
 
 def _runs(points: list[Point], step: float, s: Sampled, camera_speed) -> list[dict]:
@@ -402,7 +436,8 @@ def run_text(r: dict) -> tuple[str, str]:
     if r["kind"] == "frame":
         return ("Whole picture soft",
                 "Everything goes soft here, your subject too: the camera swung fast." if r["cause"] == "swing" else
-                "Everything goes soft here, your subject too: the lens lost focus and searched for it (hunting).")
+                "Everything goes soft here, your subject too: the lens lost focus and searched for it (hunting)"
+                + ("; the camera's data shows the lens refocusing here." if r.get("lens_moved") else "."))
     x = _times(r["ratio"]) if r["ratio"] else "much"
     named = f" (the {r['named']} was sharp)" if r["named"] and r["named"] != "another person" else \
         " (someone else was sharp)" if r["named"] else ""
@@ -418,7 +453,7 @@ def run_text(r: dict) -> tuple[str, str]:
     return "Subject out of focus", detail
 
 
-def _explain(points: list[Point], runs: list[dict], s: Sampled, step: float) -> dict:
+def _explain(points: list[Point], runs: list[dict], s: Sampled, step: float, lens: dict | None = None) -> dict:
     there = sum(step for p in points)
     focus_runs = [r for r in runs if r["kind"] == "focus"]
     missed = sum(r["end"] - r["start"] for r in focus_runs)
@@ -451,22 +486,46 @@ def _explain(points: list[Point], runs: list[dict], s: Sampled, step: float) -> 
     finding = (f"Your subject was out of focus for {missed:.1f} of the {there:.1f} s they're in the clip ({when}): "
                f"{where}{follow}.")
     locked = worst["cause"] in ("behind", "front") and (worst["coming"] or worst["going"])
+    mode = (lens or {}).get("mode") or ""
+    manual, auto = mode == "Manual focus", mode.startswith("Autofocus")
+    area = mode[mode.find("(") + 1:mode.find(")")] if "(" in mode else ""
+    still = held(lens, (worst["start"] + worst["end"]) / 2)
+    still = still if still and still[1] - still[0] >= 0.6 * (worst["end"] - worst["start"]) else None
+    if auto and still:  # (the camera says: autofocus on, and the lens didn't move: it chose the wrong thing)
+        named_area = area if not area or area.endswith("area") else f"{area} area"
+        why = (f" The camera was on autofocus{f' ({named_area})' if area else ''}, but by its own data the lens didn't move "
+               f"at all from {clock(still[0])} to {clock(still[1])}: it settled on the background and stayed there "
+               f"instead of following them as they {'came in' if worst['coming'] else 'moved off' if worst['going'] else 'moved'}.")
+    elif manual:
+        why = (" The camera was on manual focus (by its own data), so the focus stayed wherever it was set"
+               + (f" (unchanged from {clock(still[0])} to {clock(still[1])})" if still else "") + ".")
+    else:
+        why = ""
     if sharpest and locked and sharpest[1] <= (worst["start"] + worst["end"]) / 2:
         finding += (f" The focus matched them only at {clock(sharpest[0])}–{clock(sharpest[1])}, while they were still "
                     f"{'far away' if worst['coming'] else 'close'}, and stayed at that distance as they "
-                    f"{'came in' if worst['coming'] else 'moved off'}: it was set once (focus locked early, AF-S or manual) "
-                    "instead of following them.")
+                    f"{'came in' if worst['coming'] else 'moved off'}"
+                    + (f".{why}" if why else ": it was set once (focus locked early, AF-S or manual) instead of following them."))
     elif sharpest:
         finding += (f" They were sharpest at {clock(sharpest[0])}–{clock(sharpest[1])}"
                     + (", but even then the background was sharper: the focus was never quite on them." if never else "."))
-        if locked:
+        if why:
+            finding += why
+        elif locked:
             finding += " The focus stayed at one distance while they moved: it was set once (locked, AF-S or manual) instead of following them."
+    elif why:
+        finding += why
     if causes & {"behind", "front", "elsewhere", "close"}:
-        if locked:
+        if manual:
+            advice_rows.append(("Focus mode", "Continuous AF (AF-C) instead of manual focus",
+                                "Manual focus stays at one distance; someone running toward or away from you leaves it in a second or two."))
+        elif locked and not auto:
             advice_rows.append(("Focus mode", "Continuous AF (AF-C), not AF-S or manual",
                                 "Focus set once stays at that distance; someone running toward or away from you leaves it in a second or two."))
+        wide = "wide" in area.lower()
         advice_rows += [
-            ("Focus area", "Tracking (Flexible Spot or Zone), started on them",
+            ("Focus area", "Tracking (Flexible Spot or Zone), started on them" + (", instead of Wide" if wide else ""),
+             "You were on Wide: the camera chose what to focus on, and it picked the background." if wide and auto else
              "A wide area lets the camera choose, and it often picks the background or the nearest bright edge."),
             ("Subject recognition", "Face/Eye AF on, set to Human",
              "The camera finds their face and holds it as they move, even when they run at you."),

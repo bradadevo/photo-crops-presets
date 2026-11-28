@@ -135,4 +135,5 @@ def summarize(frames: list[dict]) -> dict:
     positions = [f.get("focus_position") for f in frames]
     out["focus_changes"] = sum(1 for a, b in zip(positions, positions[1:]) if a != b)
     out["iso_series"] = [f.get("iso") for f in frames]
+    out["focus_series"] = positions  # (where the lens was focused, frame by frame: still = focus held)
     return out

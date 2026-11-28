@@ -26,7 +26,7 @@ from photo_presets.clipcheck import focus as focuscheck
 from photo_presets.clipcheck.advice import Advice
 
 router = APIRouter()
-VERSION = 4  # bump when the measurements change, so old results are measured again
+VERSION = 5  # bump when the measurements change, so old results are measured again
 _STATE = Path(os.environ["ALLPROPHOTO_STATE"]) if os.environ.get("ALLPROPHOTO_STATE") else None
 HOME = _STATE or Path("~/.config/photo-crops-presets").expanduser()
 LIST_FILE = HOME / "check.json"
@@ -186,7 +186,8 @@ def _focus(e: dict) -> dict | None:
         return kept[1]
     st = e["result"].stats
     t, sp = np.array(st.times or [0.0]), np.array(st.speed or [0.0])
-    a = focuscheck.analyze(s, e.get("subject"), lambda x: float(np.interp(x, t, sp)))
+    a = focuscheck.analyze(s, e.get("subject"), lambda x: float(np.interp(x, t, sp)),
+                           focuscheck.lens_from(e["result"].camera))
     e["_focus"] = (key, a)
     return a
 

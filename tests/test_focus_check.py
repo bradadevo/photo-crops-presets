@@ -85,3 +85,40 @@ def test_everything_soft_at_once_is_not_blamed_on_focus_behind_the_subject():
     kinds = [(r["kind"], r["cause"]) for r in a["runs"]]
     assert kinds == [("frame", "swing")]
     assert focus.run_text(a["runs"][0])[0] == "Whole picture soft"
+
+
+def _lens(mode, positions, every=0.25):
+    return focus.lens_from({"focus_mode": mode, "focus_series": positions, "series_every_s": every})
+
+
+def test_camera_data_autofocus_with_a_still_lens_says_the_camera_chose_the_background():
+    widths = [4.0] * 4 + [3.3] * 2 + [5.5 + i * 0.6 for i in range(30)]
+    s = _clip(widths)
+    lens = _lens("Autofocus (wide area)", [100] * 5 + [900] * 31)  # (moved once early, then held still)
+    a = focus.analyze(s, lens=lens)
+    assert "on autofocus (wide area), but" in a["finding"]
+    assert "didn't move at all from 0:01.2" in a["finding"] and "AF-S or manual" not in a["finding"]
+    assert not any(row[0] == "Focus mode" for row in a["advice"])
+    area = next(row for row in a["advice"] if row[0] == "Focus area")
+    assert "instead of Wide" in area[1] and "picked the background" in area[2]
+
+
+def test_camera_data_manual_focus_is_said_plainly():
+    widths = [4.0] * 4 + [3.3] * 2 + [5.5 + i * 0.6 for i in range(30)]
+    a = focus.analyze(_clip(widths), lens=_lens("Manual focus", [500] * 36))
+    assert "manual focus" in a["finding"] and "AF-S" not in a["finding"]
+    assert any(row[0] == "Focus mode" and "instead of manual" in row[1] for row in a["advice"])
+
+
+def test_camera_data_confirms_the_lens_hunting():
+    s = _clip([3.2] * 8 + [9.0] * 6 + [3.2] * 8)
+    for smp in s.samples[8:14]:
+        smp.best = 8.5
+    lens = _lens("Autofocus (wide area)", [100] * 8 + [300, 500, 200, 400, 350, 100] + [100] * 8)
+    a = focus.analyze(s, camera_speed=lambda t: 0.0, lens=lens)
+    assert [(r["kind"], r["cause"]) for r in a["runs"]] == [("frame", "hunting")]
+    assert "lens refocusing here" in focus.run_text(a["runs"][0])[1]
+
+
+def test_no_camera_data_keeps_the_old_wording():
+    assert focus.lens_from({}) is None and focus.moved(None, 0, 1) is None
